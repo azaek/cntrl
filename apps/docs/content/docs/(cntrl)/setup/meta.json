@@ -1,0 +1,5 @@
+{
+  "title": "Setup",
+  "defaultOpen": true,
+  "pages": ["index", "windows", "mac"]
+}

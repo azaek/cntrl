@@ -1,0 +1,214 @@
+---
+title: useSystemInfo
+description: Static system information via REST API.
+icon: Cpu
+---
+
+Fetch static system information like CPU model, GPU name, and total RAM. This data rarely changes, so it's cached for 5 minutes.
+
+## Usage
+
+```tsx
+import { useSystemInfo, formatBytes } from "@cntrl-pw/sdk";
+
+function SystemSpecs({ bridgeId }: { bridgeId: string }) {
+  const { data, isLoading } = useSystemInfo(bridgeId);
+
+  if (isLoading) return <div>Loading...</div>;
+  if (!data) return null;
+
+  return (
+    <div>
+      <h2>{data.hostname}</h2>
+      <p>
+        OS: {data.os.name} {data.os.version}
+      </p>
+      <p>
+        CPU: {data.cpu.brand} ({data.cpu.physical_cores}C/{data.cpu.cores}T)
+      </p>
+      <p>RAM: {formatBytes(data.memory.total)}</p>
+      {data.gpu && <p>GPU: {data.gpu.brand}</p>}
+    </div>
+  );
+}
+```
+
+## Return Type
+
+The hook returns `SystemInfo` from the Bridge API:
+
+```tsx
+interface SystemInfo {
+  hostname: string;
+  platform: string;
+  os: OsInfo;
+  cpu: CpuInfo;
+  gpu: GpuInfo | null;
+  memory: MemoryInfo;
+  disks: DiskInfo[];
+  network: NetworkInfo | null;
+}
+
+interface OsInfo {
+  name: string; // "Windows"
+  version: string; // "10.0.19045"
+  build: string; // "19045"
+  arch: string; // "x86_64"
+}
+
+interface CpuInfo {
+  manufacturer: string; // "AMD"
+  brand: string; // "AMD Ryzen 9 5900X 12-Core Processor"
+  cores: number; // Logical cores (threads)
+  physical_cores: number; // Physical cores
+  base_speed: number; // Base frequency
+}
+
+interface GpuInfo {
+  manufacturer: string; // "NVIDIA"
+  brand: string; // "NVIDIA GeForce RTX 3080"
+  memory_total: number; // VRAM in bytes
+}
+
+interface MemoryInfo {
+  total: number; // Total RAM in bytes
+  slots: number; // Number of memory slots
+}
+
+interface DiskInfo {
+  fs: string; // "C:"
+  type: string; // "NTFS"
+  size: number; // Total size in bytes
+  mount: string; // Mount point
+}
+
+interface NetworkInfo {
+  name: string; // Interface name
+  mac: string; // MAC address
+  ipv4: string; // IPv4 address
+  ipv6: string; // IPv6 address
+}
+```
+
+## Caching System Info
+
+You can cache system info in the bridge store for offline access:
+
+```tsx
+import { useBridges, useSystemInfo } from "@cntrl-pw/sdk";
+import { useEffect } from "react";
+
+function BridgeInitializer({ bridgeId }: { bridgeId: string }) {
+  const { updateBridge } = useBridges();
+  const { data } = useSystemInfo(bridgeId);
+
+  useEffect(() => {
+    if (data) {
+      updateBridge(bridgeId, {
+        // MAC address is inside network info
+        mac: data.network?.mac,
+        systemInfo: {
+          hostname: data.hostname,
+          os: `${data.os.name} ${data.os.version}`,
+          cpu: {
+            brand: data.cpu.brand,
+            cores: data.cpu.physical_cores,
+            threads: data.cpu.cores,
+          },
+          memory: { total: data.memory.total },
+          gpu: data.gpu
+            ? { name: data.gpu.brand, vram: data.gpu.memory_total }
+            : undefined,
+        },
+      });
+    }
+  }, [data, bridgeId, updateBridge]);
+
+  return null;
+}
+```
+
+Then access cached info even when disconnected:
+
+```tsx
+function BridgeCard({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+
+  return (
+    <div>
+      <h3>{bridge?.name}</h3>
+      {bridge?.systemInfo && <p>{bridge.systemInfo.cpu?.brand}</p>}
+    </div>
+  );
+}
+```
+
+## Example: Full System Specs Card
+
+```tsx
+import { useSystemInfo, formatBytes } from "@cntrl-pw/sdk";
+
+function SystemSpecsCard({ bridgeId }: { bridgeId: string }) {
+  const { data, isLoading, error } = useSystemInfo(bridgeId);
+
+  if (isLoading) return <div>Loading system info...</div>;
+  if (error) return <div>Failed to load system info</div>;
+  if (!data) return null;
+
+  return (
+    <div className="specs-card">
+      <h2>{data.hostname}</h2>
+
+      <section>
+        <h3>Operating System</h3>
+        <p>
+          {data.os.name} {data.os.version} ({data.os.arch})
+        </p>
+      </section>
+
+      <section>
+        <h3>Processor</h3>
+        <p>{data.cpu.brand}</p>
+        <p>
+          {data.cpu.physical_cores} cores / {data.cpu.cores} threads
+        </p>
+      </section>
+
+      <section>
+        <h3>Memory</h3>
+        <p>
+          {formatBytes(data.memory.total)} ({data.memory.slots} slots)
+        </p>
+      </section>
+
+      {data.gpu && (
+        <section>
+          <h3>Graphics</h3>
+          <p>{data.gpu.brand}</p>
+          <p>VRAM: {formatBytes(data.gpu.memory_total)}</p>
+        </section>
+      )}
+
+      {data.network && (
+        <section>
+          <h3>Network</h3>
+          <p>{data.network.name}</p>
+          <p>MAC: {data.network.mac}</p>
+          <p>IPv4: {data.network.ipv4}</p>
+        </section>
+      )}
+
+      <section>
+        <h3>Storage</h3>
+        <ul>
+          {data.disks.map((disk) => (
+            <li key={disk.fs}>
+              {disk.fs} ({disk.type}): {formatBytes(disk.size)}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+```

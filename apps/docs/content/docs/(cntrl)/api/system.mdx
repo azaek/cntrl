@@ -1,0 +1,146 @@
+---
+title: System Info
+description: Get static hardware information about the system.
+icon: MonitorCog
+---
+
+The `/api/system` endpoint returns static system information that rarely changes, such as CPU model, GPU specs, OS version, and network adapter info.
+
+## Endpoints
+
+### Get System Info
+
+Returns static system information that rarely changes, such as CPU model, GPU specs, OS version, and network adapter info.
+
+```http
+GET /api/system
+```
+
+**Response:**
+
+```json
+{
+  "hostname": "MY-GAMING-PC",
+  "platform": "win32",
+  "os": {
+    "name": "Windows 11 Pro",
+    "version": "23H2",
+    "build": "22631.4890",
+    "arch": "amd64"
+  },
+  "cpu": {
+    "manufacturer": "Intel",
+    "brand": "Core™ i9-14900K",
+    "cores": 32,
+    "physical_cores": 24,
+    "base_speed": 3.2
+  },
+  "gpu": {
+    "manufacturer": "NVIDIA",
+    "brand": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "memory_total": 16384
+  },
+  "memory": {
+    "total": 34268311552,
+    "slots": 2
+  },
+  "disks": [
+    {
+      "fs": "C:",
+      "type": "NTFS",
+      "size": 1024000000000,
+      "mount": "C:"
+    }
+  ],
+  "network": {
+    "name": "Ethernet",
+    "mac": "00:1A:2B:3C:4D:5E",
+    "ipv4": "192.168.1.100",
+    "ipv6": "fe80::1"
+  }
+}
+```
+
+## Field Reference
+
+### Root Object
+
+| Field      | Type   | Description                                |
+| :--------- | :----- | :----------------------------------------- |
+| `hostname` | string | Computer name (configurable in config).    |
+| `platform` | string | `"win32"` on Windows, `"darwin"` on macOS. |
+| `os`       | object | Operating system details.                  |
+| `cpu`      | object | CPU specifications.                        |
+| `gpu`      | object | GPU specifications (null if not detected). |
+| `memory`   | object | RAM information.                           |
+| `disks`    | array  | List of disk drives.                       |
+| `network`  | object | Primary network adapter info.              |
+
+### OS Object
+
+| Field     | Type   | Description                                       |
+| :-------- | :----- | :------------------------------------------------ |
+| `name`    | string | OS name (e.g., "Windows 11 Pro", "macOS Sonoma"). |
+| `version` | string | OS version (e.g., "23H2", "14.2").                |
+| `build`   | string | Build number.                                     |
+| `arch`    | string | Architecture (e.g., "amd64", "arm64").            |
+
+### CPU Object
+
+| Field            | Type   | Description                              |
+| :--------------- | :----- | :--------------------------------------- |
+| `manufacturer`   | string | CPU manufacturer (e.g., "Intel", "AMD"). |
+| `brand`          | string | Full CPU name.                           |
+| `cores`          | int    | Total logical cores.                     |
+| `physical_cores` | int    | Physical core count.                     |
+| `base_speed`     | float  | Base clock speed in GHz.                 |
+
+### GPU Object
+
+| Field          | Type   | Description                         |
+| :------------- | :----- | :---------------------------------- |
+| `manufacturer` | string | GPU vendor (e.g., "NVIDIA", "AMD"). |
+| `brand`        | string | Full GPU model name.                |
+| `memory_total` | int    | Video RAM in MB.                    |
+
+### Memory Object
+
+| Field   | Type | Description           |
+| :------ | :--- | :-------------------- |
+| `total` | int  | Total RAM in bytes.   |
+| `slots` | int  | Number of RAM sticks. |
+
+### Disk Object
+
+| Field   | Type   | Description                             |
+| :------ | :----- | :-------------------------------------- |
+| `fs`    | string | Filesystem identifier (e.g., "C:").     |
+| `type`  | string | Filesystem type (e.g., "NTFS", "APFS"). |
+| `size`  | int    | Total size in bytes.                    |
+| `mount` | string | Mount point.                            |
+
+### Network Object
+
+| Field  | Type   | Description                               |
+| :----- | :----- | :---------------------------------------- |
+| `name` | string | Adapter name (e.g., "Ethernet", "Wi-Fi"). |
+| `mac`  | string | MAC address.                              |
+| `ipv4` | string | Primary IPv4 address.                     |
+| `ipv6` | string | Primary IPv6 address.                     |
+
+## Example Usage Scenarios
+
+### 1. Dashboard Header
+
+Display key system specs at the top of your dashboard.
+
+1. Call `GET /api/system` on load.
+2. Show `hostname`, `os.name`, `cpu.brand`, and `memory.total` (formatted as GB).
+
+### 2. Capability Check
+
+Determine if the host is capable of running specific tasks.
+
+1. Check `gpu.model` to see if it's a dedicated GPU.
+2. Check `memory.total` > 16GB.
+3. Show a "High Performance Mode" badge if true.

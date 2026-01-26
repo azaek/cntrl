@@ -1,0 +1,7 @@
+{
+  "title": "React SDK",
+  "description": "The headless library",
+  "icon": "Package",
+  "root": true,
+  "pages": ["index", "getting-started", "bridges", "hooks", "client", "utils"]
+}

@@ -1,0 +1,224 @@
+---
+title: useSystemStats
+description: Real-time system statistics via WebSocket.
+icon: Activity
+---
+
+Subscribe to real-time system stats including CPU, memory, GPU, disks, and network.
+
+## Usage
+
+```tsx
+import { useSystemStats } from "@cntrl-pw/sdk";
+
+function SystemMonitor({ bridgeId }: { bridgeId: string }) {
+  const { data, isLoading } = useSystemStats(bridgeId);
+
+  if (isLoading || !data) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <p>CPU: {data.cpu?.current_load.toFixed(1)}%</p>
+      <p>RAM: {data.memory?.used_percent.toFixed(1)}%</p>
+      {data.gpu && <p>GPU: {data.gpu.current_load.toFixed(1)}%</p>}
+    </div>
+  );
+}
+```
+
+## Options
+
+### Selective Subscriptions
+
+Subscribe to specific stats only to reduce bandwidth:
+
+```tsx
+// Only CPU and memory
+const { data } = useSystemStats(bridgeId, {
+  fields: ["cpu", "memory"],
+});
+
+// Only GPU
+const { data } = useSystemStats(bridgeId, {
+  fields: ["gpu"],
+});
+```
+
+Available fields: `'cpu'` | `'memory'` | `'gpu'` | `'disks'` | `'network'`
+
+### Connection Mode
+
+Control how the hook handles WebSocket connection:
+
+```tsx
+// Auto (default) - connects if disconnected, reconnects on rerenders
+const { data } = useSystemStats(bridgeId);
+const { data } = useSystemStats(bridgeId, { connectionMode: "auto" });
+
+// Passive - don't trigger connection, just observe data if connected
+const { data } = useSystemStats(bridgeId, { connectionMode: "passive" });
+
+// Eager - connect once on mount, won't reconnect if manually disconnected
+const { data } = useSystemStats(bridgeId, { connectionMode: "eager" });
+```
+
+| Mode        | Behavior                                                           |
+| ----------- | ------------------------------------------------------------------ |
+| `"auto"`    | Connects if disconnected. Reconnects on rerenders if disconnected. |
+| `"passive"` | Never triggers connection. Only uses data if already connected.    |
+| `"eager"`   | Connects once on mount. Respects manual disconnects.               |
+
+<Callout title="When to use each mode">
+  - **auto**: Default for most widgets. Ensures data is always available. - **passive**:
+  For secondary displays that shouldn't initiate connections. - **eager**: When you have a
+  manual disconnect button and don't want auto-reconnect.
+</Callout>
+
+## Return Type
+
+The hook returns `StreamPayload` from the Bridge API:
+
+```tsx
+interface StreamPayload {
+  timestamp: number; // Unix timestamp
+  uptime: number; // System uptime in seconds
+  cpu?: CpuUsage;
+  memory?: MemoryUsage;
+  gpu?: GpuUsage;
+  disks?: DiskUsage[];
+  network?: NetworkUsage;
+  media?: MediaStatus;
+}
+
+interface CpuUsage {
+  current_load: number; // 0-100 percentage
+  current_temp: number; // Celsius
+  current_speed: number; // Current frequency
+}
+
+interface MemoryUsage {
+  used: number; // Bytes used
+  free: number; // Bytes free
+  used_percent: number; // 0-100 percentage
+}
+
+interface GpuUsage {
+  current_load: number; // 0-100 percentage
+  current_temp: number; // Celsius
+  current_memory: number; // Memory used
+}
+
+interface DiskUsage {
+  fs: string; // Filesystem (e.g., "C:")
+  used: number; // Bytes used
+  available: number; // Bytes available
+  used_percent: number; // 0-100 percentage
+}
+
+interface NetworkUsage {
+  bytes_sent: number; // Total bytes sent
+  bytes_recv: number; // Total bytes received
+}
+```
+
+## Examples
+
+### CPU Gauge
+
+```tsx
+function CpuGauge({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["cpu"] });
+
+  const load = data?.cpu?.current_load ?? 0;
+
+  return (
+    <div className="gauge">
+      <div className="gauge-fill" style={{ width: `${load}%` }} />
+      <span>{load.toFixed(0)}%</span>
+    </div>
+  );
+}
+```
+
+### Memory Bar
+
+```tsx
+import { formatBytes } from "@cntrl-pw/sdk";
+
+function MemoryBar({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["memory"] });
+
+  if (!data?.memory) return null;
+
+  return (
+    <div>
+      <div className="progress-bar">
+        <div style={{ width: `${data.memory.used_percent}%` }} />
+      </div>
+      <span>
+        {formatBytes(data.memory.used)} used ({data.memory.used_percent.toFixed(0)}%)
+      </span>
+    </div>
+  );
+}
+```
+
+### Network Stats
+
+```tsx
+import { formatBytes } from "@cntrl-pw/sdk";
+
+function NetworkStats({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["network"] });
+
+  if (!data?.network) return null;
+
+  return (
+    <div>
+      <p>Total Sent: {formatBytes(data.network.bytes_sent)}</p>
+      <p>Total Received: {formatBytes(data.network.bytes_recv)}</p>
+    </div>
+  );
+}
+```
+
+### Disk List
+
+```tsx
+import { formatBytes } from "@cntrl-pw/sdk";
+
+function DiskList({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["disks"] });
+
+  if (!data?.disks) return null;
+
+  return (
+    <ul>
+      {data.disks.map((disk) => (
+        <li key={disk.fs}>
+          {disk.fs}: {disk.used_percent.toFixed(0)}% used
+          <br />
+          {formatBytes(disk.used)} / {formatBytes(disk.used + disk.available)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### GPU Monitor
+
+```tsx
+function GpuMonitor({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["gpu"] });
+
+  if (!data?.gpu) return <p>No GPU data</p>;
+
+  return (
+    <div>
+      <p>Load: {data.gpu.current_load.toFixed(0)}%</p>
+      <p>Temperature: {data.gpu.current_temp.toFixed(0)}°C</p>
+    </div>
+  );
+}
+```

@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   HeadContent,
@@ -13,25 +13,15 @@ import { formDevtoolsPlugin } from "@tanstack/react-form-devtools";
 import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
-import { authQueryOptions, type AuthQueryResult } from "@repo/auth/tanstack/queries";
 import appCss from "~/styles.css?url";
 
-import { Toaster } from "@repo/ui/components/sonner";
-import { ThemeProvider } from "@repo/ui/lib/theme-provider";
+import { BridgesProvider } from "@cntrl-pw/sdk";
+import { Toaster } from "@cntrl-pw/ui/components/sonner";
+import { ThemeProvider } from "@cntrl-pw/ui/lib/theme-provider";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
-  user: AuthQueryResult;
 }>()({
-  beforeLoad: ({ context }) => {
-    // we're using react-query for client-side caching to reduce client-to-server calls, see /src/router.tsx
-    // better-auth's cookieCache is also enabled server-side to reduce server-to-db calls, see /src/lib/auth/auth.ts
-    context.queryClient.prefetchQuery(authQueryOptions());
-
-    // typically we don't need the user immediately in landing pages,
-    // so we're only prefetching here and not awaiting.
-    // for protected routes with loader data, see /_auth/route.tsx
-  },
   head: () => ({
     meta: [
       {
@@ -42,11 +32,11 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStarter",
+        title: "Cntrl Bridge",
       },
       {
         name: "description",
-        content: "A monorepo template for 🏝️ TanStack Start with Turborepo.",
+        content: "Configure and manage your Cntrl Bridge devices.",
       },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
@@ -57,7 +47,9 @@ export const Route = createRootRouteWithContext<{
 function RootComponent() {
   return (
     <RootDocument>
-      <Outlet />
+      <BridgesProvider autoConnect={false}>
+        <Outlet />
+      </BridgesProvider>
     </RootDocument>
   );
 }

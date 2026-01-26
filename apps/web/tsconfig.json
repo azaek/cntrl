@@ -1,11 +1,10 @@
 {
-  "extends": "@repo/tsconfig/base.json",
+  "extends": "@cntrl-pw/tsconfig/base.json",
   "compilerOptions": {
     "paths": {
       "~/*": ["./src/*"],
-
       // for shadcn CLI
-      "@repo/ui/*": ["../../packages/ui/*"]
+      "@cntrl-pw/ui/*": ["../../packages/ui/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

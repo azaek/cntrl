@@ -1,0 +1,205 @@
+---
+title: Managing Bridges
+description: Add, remove, and manage Bridge connections.
+icon: Network
+---
+
+The SDK supports connecting to multiple Bridge devices simultaneously. Bridge configurations are persisted to localStorage automatically.
+
+## useBridges Hook
+
+Access all bridges and management functions:
+
+```tsx
+import { useBridges } from "@cntrl-pw/sdk";
+
+function BridgeManager() {
+  const {
+    bridges, // Map<string, BridgeConnection>
+    addBridge, // (bridge) => string (returns ID)
+    removeBridge, // (id) => void
+    updateBridge, // (id, updates) => void
+    connect, // (id) => void
+    disconnect, // (id) => void
+  } = useBridges();
+
+  return (
+    <ul>
+      {Array.from(bridges.values()).map((bridge) => (
+        <li key={bridge.id}>
+          {bridge.name} - {bridge.status}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## useBridge Hook
+
+Access a single bridge by ID:
+
+```tsx
+import { useBridge } from "@cntrl-pw/sdk";
+
+function BridgeCard({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+
+  if (!bridge) return <div>Bridge not found</div>;
+
+  return (
+    <div>
+      <h3>{bridge.name}</h3>
+      <p>Status: {bridge.status}</p>
+      <p>
+        Host: {bridge.config.host}:{bridge.config.port}
+      </p>
+    </div>
+  );
+}
+```
+
+## Adding a Bridge
+
+```tsx
+const { addBridge } = useBridges();
+
+// Minimal config
+const id = addBridge({
+  name: "Gaming PC",
+  config: { host: "192.168.1.100" },
+});
+
+// Full config
+const id = addBridge({
+  name: "Work PC",
+  config: {
+    host: "192.168.1.101",
+    port: 9990, // Default: 9990
+    secure: false, // Default: false (use wss://)
+    apiKey: "secret", // Optional
+  },
+  mac: "00:11:22:33:44:55", // For Wake-on-LAN
+  metadata: {
+    // Custom user data
+    room: "Office",
+    icon: "desktop",
+  },
+});
+```
+
+## Updating a Bridge
+
+```tsx
+const { updateBridge } = useBridges();
+
+// Update name
+updateBridge(bridgeId, { name: "New Name" });
+
+// Update config (triggers reconnect)
+updateBridge(bridgeId, {
+  config: { host: "192.168.1.200", port: 9990 },
+});
+
+// Cache system info after connecting
+updateBridge(bridgeId, {
+  systemInfo: {
+    hostname: "GAMING-PC",
+    cpu: { brand: "AMD Ryzen 9 5900X", cores: 12, threads: 24 },
+    memory: { total: 34359738368 },
+    gpu: { name: "NVIDIA RTX 3080" },
+  },
+});
+
+// Add custom metadata
+updateBridge(bridgeId, {
+  metadata: { room: "Bedroom", tags: ["gaming", "main"] },
+});
+```
+
+## Removing a Bridge
+
+```tsx
+const { removeBridge } = useBridges();
+
+removeBridge(bridgeId);
+// Disconnects WebSocket, removes from store, clears cache
+```
+
+## Manual Connect/Disconnect
+
+```tsx
+const { connect, disconnect } = useBridges();
+
+// Manually disconnect
+disconnect(bridgeId);
+
+// Reconnect later
+connect(bridgeId);
+```
+
+## Connection Status
+
+Each bridge has a `status` property:
+
+| Status         | Description                             |
+| -------------- | --------------------------------------- |
+| `disconnected` | Not connected                           |
+| `connecting`   | WebSocket connecting                    |
+| `connected`    | WebSocket open, receiving data          |
+| `error`        | Connection failed (max retries reached) |
+
+```tsx
+function ConnectionIndicator({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+
+  const colors = {
+    disconnected: "gray",
+    connecting: "yellow",
+    connected: "green",
+    error: "red",
+  };
+
+  return <span style={{ color: colors[bridge?.status ?? "disconnected"] }}>●</span>;
+}
+```
+
+## Bridge Types
+
+```tsx
+interface BridgeConfig {
+  host: string;
+  port: number; // Default: 9990
+  secure: boolean; // Default: false
+  apiKey?: string;
+}
+
+interface StoredBridge {
+  id: string;
+  name: string;
+  config: BridgeConfig;
+  mac?: string;
+  systemInfo?: SystemInfo;
+  metadata?: Record<string, unknown>;
+}
+
+interface BridgeConnection extends StoredBridge {
+  status: "disconnected" | "connecting" | "connected" | "error";
+}
+```
+
+## Direct Store Access
+
+For advanced use cases, access the Zustand store directly:
+
+```tsx
+import { useBridgesStore } from "@cntrl-pw/sdk";
+
+// Get all bridges (outside React)
+const bridges = useBridgesStore.getState().bridges;
+
+// Subscribe to changes
+useBridgesStore.subscribe((state) => {
+  console.log("Bridges updated:", state.bridges);
+});
+```

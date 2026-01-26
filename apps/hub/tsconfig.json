@@ -1,0 +1,12 @@
+{
+  "extends": "@cntrl-pw/tsconfig/base.json",
+  "compilerOptions": {
+    "paths": {
+      "~/*": ["./src/*"],
+      "@cntrl-pw/ui/*": ["../../packages/ui/*"],
+      "@cntrl-pw/sdk/*": ["../../packages/sdk/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

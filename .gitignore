@@ -38,3 +38,5 @@ yarn-error.log*
 *.pem
 
 .tanstack
+# Packages/Apps specific TODOs
+__*.md

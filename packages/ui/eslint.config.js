@@ -1,3 +1,3 @@
-import { tanstackConfig } from "@repo/eslint-config/tanstack";
+import { tanstackConfig } from "@cntrl-pw/eslint-config/tanstack";
 
 export default tanstackConfig;

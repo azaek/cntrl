@@ -12,11 +12,11 @@
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@repo/ui/components",
-    "hooks": "@repo/ui/hooks",
-    "utils": "@repo/ui/lib/utils",
-    "ui": "@repo/ui/components",
-    "lib": "@repo/ui/lib"
+    "components": "@cntrl-pw/ui/components",
+    "hooks": "@cntrl-pw/ui/hooks",
+    "utils": "@cntrl-pw/ui/lib/utils",
+    "ui": "@cntrl-pw/ui/components",
+    "lib": "@cntrl-pw/ui/lib"
   },
   "menuColor": "default",
   "menuAccent": "subtle",

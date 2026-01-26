@@ -1,0 +1,86 @@
+import { z } from "zod";
+
+/**
+ * Bridge device connection configuration
+ */
+export const BridgeConfigSchema = z.object({
+  /** Bridge hostname or IP address */
+  host: z.string(),
+  /** Bridge port (default: 9990) */
+  port: z.number().default(9990),
+  /** Use secure connection (https/wss) */
+  secure: z.boolean().default(false),
+  /** API key for authentication (optional) */
+  apiKey: z.string().optional(),
+});
+
+export type BridgeConfig = z.infer<typeof BridgeConfigSchema>;
+
+/**
+ * Bridge connection status
+ */
+export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
+
+/**
+ * Cached system info from /api/system (simplified for storage)
+ */
+export interface CachedSystemInfo {
+  hostname?: string;
+  os?: string;
+  cpu?: {
+    brand: string;
+    cores: number;
+    threads: number;
+  };
+  memory?: {
+    total: number; // bytes
+  };
+  gpu?: {
+    name: string;
+    vram?: number;
+  };
+}
+
+/**
+ * Full stored bridge data with defined fields
+ */
+export interface StoredBridge {
+  /** Unique identifier (UUID) */
+  id: string;
+  /** Connection configuration */
+  config: BridgeConfig;
+  /** Display name (required) */
+  name: string;
+  /** MAC address for Wake-on-LAN */
+  mac?: string;
+  /** Cached /api/system data */
+  systemInfo?: CachedSystemInfo;
+  /** User's extra custom fields */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Bridge with runtime state (extends stored data)
+ */
+export interface BridgeConnection extends StoredBridge {
+  /** Current connection status */
+  status: ConnectionStatus;
+}
+
+/**
+ * Bridge error types
+ */
+export type BridgeError =
+  | { type: "network"; message: string }
+  | { type: "auth"; message: string }
+  | { type: "feature_disabled"; feature: string }
+  | { type: "unknown"; message: string };
+
+/**
+ * Connection mode for hooks that require WebSocket connection.
+ *
+ * - "auto" (default): Automatically connect if disconnected. Will reconnect on rerenders if disconnected.
+ * - "passive": Don't initiate connection. Only use data if already connected.
+ * - "eager": Connect once on mount. Won't reconnect if manually disconnected.
+ */
+export type ConnectionMode = "auto" | "passive" | "eager";

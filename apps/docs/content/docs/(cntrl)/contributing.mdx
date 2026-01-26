@@ -1,0 +1,70 @@
+---
+title: Contributing
+description: Help us make Cntrl Bridge better.
+icon: Heart
+---
+
+First off, thank you for considering contributing to Cntrl Bridge!
+
+## Philosophy
+
+Before you dive in, please keep in mind the project's core philosophy:
+
+- **Simple**: We want to keep the feature set focused.
+- **Lightweight**: Avoid adding heavy dependencies unless absolutely necessary.
+- **Cross-Platform Native**: We prioritize a clean, native experience on both Windows and macOS.
+
+## Getting Started
+
+To work on Cntrl Bridge locally, you'll need:
+
+- **Rust** (latest stable) - Install from [rustup.rs](https://rustup.rs)
+- **Node.js 18+** - For frontend and documentation
+- **Platform-specific tools:**
+  - **Windows**: Visual Studio Build Tools
+  - **macOS**: Xcode Command Line Tools
+
+### Local Development
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/azaek/cntrl.git
+   cd cntrl/bridge
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+3. Run in development mode:
+
+   ```bash
+   npm run tauri dev
+   ```
+
+4. Build for production:
+   ```bash
+   npm run tauri build
+   ```
+
+This will create platform-specific installers in `src-tauri/target/release/bundle/`
+
+## Documentation
+
+The documentation is built with [Fuma Docs](https://fumadocs.dev). To run it locally:
+
+```bash
+cd docs
+npm run dev
+```
+
+## Pull Requests
+
+- **Small is better**: We prefer small, focused pull requests.
+- **Explain the "Why"**: Include a clear description of the problem your PR solves.
+- **Consistency**: Try to follow the existing code style.
+
+Thank you for being part of the community! 🚀

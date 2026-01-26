@@ -1,0 +1,231 @@
+---
+title: Stats Topic
+description: Real-time system performance metrics via WebSocket
+badge: New
+icon: Activity
+---
+
+The **stats** topic provides real-time system performance data including CPU, memory, GPU, disks, and network metrics.
+
+## Subscribe
+
+### Full Stats
+
+Subscribe to all system metrics:
+
+```json
+{ "op": "subscribe", "data": { "topics": ["stats"] } }
+```
+
+This automatically includes: `cpu`, `memory`, `gpu`, `disks`, `network`.
+
+### Granular Stats
+
+Subscribe to specific metrics only:
+
+```json
+{ "op": "subscribe", "data": { "topics": ["stats.cpu", "stats.memory"] } }
+```
+
+<Callout type="info" title="Backward Compatible">
+  Legacy topic names (`cpu`, `memory`, `gpu`, `disks`, `network`) still work.
+</Callout>
+
+## Available Sub-Topics
+
+| Topic           | Alias     | Description                     |
+| :-------------- | :-------- | :------------------------------ |
+| `stats.cpu`     | `cpu`     | CPU load, temperature, speed    |
+| `stats.memory`  | `memory`  | RAM usage (used, free, percent) |
+| `stats.gpu`     | `gpu`     | GPU load, temperature, VRAM     |
+| `stats.disks`   | `disks`   | Disk space per mount point      |
+| `stats.network` | `network` | Total bytes sent/received       |
+
+## Event: `system_stats`
+
+Broadcasts at the configured interval (default: 1000ms).
+
+```json
+{
+  "type": "system_stats",
+  "data": {
+    "timestamp": 1706140800,
+    "uptime": 86400,
+    "cpu": {
+      "current_load": 23.5,
+      "current_temp": 0.0,
+      "current_speed": 3.6
+    },
+    "memory": {
+      "used": 8589934592,
+      "free": 8589934592,
+      "used_percent": 50.0
+    },
+    "gpu": {
+      "current_load": 15.2,
+      "current_temp": 45.0,
+      "current_memory": 2048
+    },
+    "disks": [
+      {
+        "fs": "C:",
+        "used": 107374182400,
+        "available": 107374182400,
+        "used_percent": 50.0
+      }
+    ],
+    "network": {
+      "bytes_sent": 1073741824,
+      "bytes_recv": 2147483648
+    }
+  }
+}
+```
+
+<Callout type="info" title="Filtered Data">
+  Only fields you subscribed to will be populated. Unsubscribed fields are `null` or
+  omitted.
+</Callout>
+
+## Field Reference
+
+### CPU
+
+| Field           | Type  | Description                           |
+| :-------------- | :---- | :------------------------------------ |
+| `current_load`  | float | CPU usage percentage (0-100)          |
+| `current_temp`  | float | Temperature in Celsius (if available) |
+| `current_speed` | float | Current clock speed in GHz            |
+
+### Memory
+
+| Field          | Type  | Description              |
+| :------------- | :---- | :----------------------- |
+| `used`         | int   | Used memory in bytes     |
+| `free`         | int   | Free memory in bytes     |
+| `used_percent` | float | Usage percentage (0-100) |
+
+### GPU
+
+| Field            | Type  | Description                  |
+| :--------------- | :---- | :--------------------------- |
+| `current_load`   | float | GPU usage percentage (0-100) |
+| `current_temp`   | float | Temperature in Celsius       |
+| `current_memory` | int   | Used VRAM in MB              |
+
+### Disks (Array)
+
+| Field          | Type   | Description                       |
+| :------------- | :----- | :-------------------------------- |
+| `fs`           | string | Mount point (e.g., "C:", "/home") |
+| `used`         | int    | Used space in bytes               |
+| `available`    | int    | Available space in bytes          |
+| `used_percent` | float  | Usage percentage (0-100)          |
+
+### Network
+
+| Field        | Type | Description             |
+| :----------- | :--- | :---------------------- |
+| `bytes_sent` | int  | Total bytes transmitted |
+| `bytes_recv` | int  | Total bytes received    |
+
+## Configuration
+
+In `config.json`:
+
+```json
+{
+  "websocket": {
+    "stats": {
+      "enabled": true,
+      "interval_ms": 1000
+    }
+  }
+}
+```
+
+## Example Use Cases
+
+### 1. System Monitor Dashboard
+
+Build a real-time dashboard showing CPU, memory, and GPU usage.
+
+```javascript
+const ws = new WebSocket("ws://localhost:9990/api/ws");
+
+ws.onopen = () => {
+  ws.send(
+    JSON.stringify({
+      op: "subscribe",
+      data: { topics: ["stats"] },
+    }),
+  );
+};
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  if (type === "system_stats") {
+    updateCpuGauge(data.cpu?.current_load);
+    updateMemoryBar(data.memory?.used_percent);
+    updateGpuGauge(data.gpu?.current_load);
+  }
+};
+```
+
+### 2. Low-Bandwidth Mode
+
+Only subscribe to what you need for a minimal widget:
+
+```javascript
+// Only CPU and memory - no GPU, disks, or network
+ws.send(
+  JSON.stringify({
+    op: "subscribe",
+    data: { topics: ["stats.cpu", "stats.memory"] },
+  }),
+);
+```
+
+### 3. Disk Space Alert
+
+Monitor disk usage and alert when running low:
+
+```javascript
+ws.send(
+  JSON.stringify({
+    op: "subscribe",
+    data: { topics: ["stats.disks"] },
+  }),
+);
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  if (type === "system_stats" && data.disks) {
+    for (const disk of data.disks) {
+      if (disk.used_percent > 90) {
+        alert(`${disk.fs} is ${disk.used_percent.toFixed(1)}% full!`);
+      }
+    }
+  }
+};
+```
+
+### 4. Network Traffic Graph
+
+Track bandwidth over time:
+
+```javascript
+const history = [];
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  if (type === "system_stats" && data.network) {
+    history.push({
+      time: data.timestamp,
+      sent: data.network.bytes_sent,
+      recv: data.network.bytes_recv,
+    });
+    renderGraph(history);
+  }
+};
+```

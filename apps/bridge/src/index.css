@@ -1,0 +1,49 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Space+Grotesk:wght@300..700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #202022;
+  --color-bg-dark: #18181a;
+  --color-accent: #67ff90;
+  --color-fg-muted: #808080;
+  --color-card: #28292b;
+  --color-secondary: #79797a;
+  --color-toggle-bg: #3c3c41;
+  --color-border: rgba(255, 255, 255, 0.05);
+  --font-sans: "Space Grotesk", sans-serif;
+  --font-mono: "Geist Mono", monospace;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border, currentcolor);
+    font-family: var(--font-sans);
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-toggle-bg) transparent;
+}
+
+body {
+  background: #202022;
+  color: #ffffff;
+  user-select: none;
+  width: 100vw;
+  overflow-x: hidden;
+  height: 100vh;
+  overflow-y: auto;
+}

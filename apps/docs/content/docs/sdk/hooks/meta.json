@@ -1,0 +1,13 @@
+{
+  "title": "Hooks",
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "use-bridge-status",
+    "use-system-stats",
+    "use-system-info",
+    "use-media",
+    "use-processes",
+    "use-power"
+  ]
+}

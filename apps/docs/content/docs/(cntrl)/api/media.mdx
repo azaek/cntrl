@@ -1,0 +1,173 @@
+---
+title: Media Control
+description: Control media playback and system volume.
+badge: Updated
+icon: Headphones
+---
+
+<Callout type="tip" title="Prefer WebSocket for Media">
+For building media widgets or dashboards, we **strongly recommend** the [WebSocket API](/docs/ws/media) instead of polling this endpoint.
+
+**Why WebSocket?**
+
+- **Instant updates** - Receive `media_update` events only when something changes (track, volume, mute)
+- **Bidirectional** - Send play/pause/skip commands and receive feedback through the same connection
+- **Zero polling** - No need to hammer the server every second to check for changes
+- **Efficient** - Cntrl uses smart change detection, so you only get data when it matters
+  </Callout>
+
+<Callout type="success" title="Introducing Volume Control">
+  The `set_volume` action is now supported on both Windows and Mac.
+</Callout>
+
+<Callout type="info" title="macOS Permissions Required">
+  On macOS, the first time you use media control endpoints, the system will prompt for
+  **Media & Apple Music** permissions. Grant access in **System Settings → Privacy &
+  Security → Media & Apple Music** to enable media playback control.
+</Callout>
+
+The media endpoints allow you to control system-wide media playback, system volume, and retrieve information about what's currently playing.
+
+## Endpoints
+
+### Get Media Status
+
+Returns information about the currently playing media, including system volume.
+
+```http
+GET /api/media/status
+```
+
+**Response:**
+
+```json
+{
+  "status": "active",
+  "title": "Song Name",
+  "artist": "Artist Name",
+  "album": "Album Name",
+  "source": "SpotifyAB.SpotifyMusic...",
+  "has_image": true,
+  "volume": 50,
+  "muted": false
+}
+```
+
+### Field Reference
+
+| Field       | Type    | Description                                      |
+| :---------- | :------ | :----------------------------------------------- |
+| `status`    | string  | Current status (`active`, `stopped`, or `idle`). |
+| `title`     | string  | Current track title.                             |
+| `artist`    | string  | Current artist name.                             |
+| `album`     | string  | Current album name.                              |
+| `source`    | string  | App ID of the media source (Win only).           |
+| `has_image` | boolean | If true, a thumbnail is available.               |
+| `volume`    | number  | Current system volume (0-100).                   |
+| `muted`     | boolean | True if system volume is muted.                  |
+
+<Callout type="info" title="Status Note">
+  On Windows, `status` returns `"active"` for both playing and paused states if a media
+  session exists.
+</Callout>
+
+---
+
+### Control Media Playback
+
+Send commands to control media playback and system volume.
+
+```http
+POST /api/media/control
+```
+
+**Body:**
+
+```json
+{
+    "action": "play"
+    // OR
+    "action": "set_volume",
+    "value": 50
+}
+```
+
+**Response:**
+
+```json
+{
+  "result": "success",
+  "volume": 50 // Returned for volume actions
+}
+```
+
+### Supported Actions
+
+#### Playback Control
+
+| Action  | Description      |
+| :------ | :--------------- |
+| `play`  | Resume playback. |
+| `pause` | Pause playback.  |
+| `next`  | Next track.      |
+| `prev`  | Previous track.  |
+
+#### Volume Control
+
+| Action        | Value         | Description                   |
+| :------------ | :------------ | :---------------------------- |
+| `volume_up`   | -             | Increase volume by 10%.       |
+| `volume_down` | -             | Decrease volume by 10%.       |
+| `set_volume`  | `0-100` (int) | Set volume to specific level. |
+| `mute`        | -             | Mute system volume.           |
+| `unmute`      | -             | Unmute system volume.         |
+| `toggle_mute` | -             | Toggle mute state.            |
+
+<Callout type="info" title="System-Wide Control">
+  Media controls work with any application (Spotify, Chrome, VLC). Volume controls affect
+  the global system output.
+</Callout>
+
+<Callout type="tip" title="Real-Time Updates via WebSocket">
+  Instead of polling `/api/media/status`, use the [WebSocket API](/docs/ws/media) for
+  instant updates. Subscribe to the `media` topic and receive `media_update` events only
+  when something changes (track, play/pause, volume). You can also send media commands
+  through the same WebSocket connection and receive `media_feedback` confirming your
+  actions.
+</Callout>
+
+## Example Usage Scenarios
+
+### 1. Media Widget (Recommended: WebSocket)
+
+For a real-time "Now Playing" widget, use the [WebSocket API](/docs/ws/media):
+
+```javascript
+const ws = new WebSocket("ws://your-pc:9990/api/ws");
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ op: "subscribe", data: { topics: ["media"] } }));
+};
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  if (type === "media_update") {
+    document.getElementById("title").textContent = data.title || "Nothing playing";
+    document.getElementById("artist").textContent = data.artist || "";
+  }
+};
+
+// Send commands through the same connection
+function togglePlay() {
+  ws.send(JSON.stringify({ op: "media", data: { action: "play_pause" } }));
+}
+```
+
+The WebSocket approach is more efficient - you only receive updates when the track, volume, or playback state changes.
+
+### 2. Auto-Mute for Meetings
+
+Automatically mute the PC when you join a zoom call on your phone.
+
+1. Authenticate with your local home automation system (e.g., Home Assistant).
+2. Trigger the `control` endpoint with `{"action": "mute"}` when the "Meeting" scene is activated.

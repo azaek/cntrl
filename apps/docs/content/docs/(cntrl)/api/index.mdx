@@ -1,0 +1,81 @@
+---
+title: Overview
+description: Overview of all Cntrl API endpoints and capabilities.
+icon: ChartNoAxesGantt
+---
+
+Cntrl exposes a simple RESTful API. All endpoints are prefixed with `/api`.
+
+## Base URL
+
+By default, the API is available at:
+`http://<YOUR_PC_IP>:9990`
+
+<Callout title="Custom Ports">
+  `9990` is the default port. If you changed the port during installation or in the
+  `config.json` file, make sure to use your custom port here.
+</Callout>
+
+## Quick Reference
+
+<Cards>
+  <Card
+    title="System Info"
+    href="/docs/api/system"
+    description="Static hardware information (CPU, GPU, RAM specs)."
+  />
+  <Card
+    title="Usage Data"
+    href="/docs/api/usage"
+    description="Dynamic usage metrics (load, temps, percentages)."
+  />
+  <Card
+    title="Power Control"
+    href="/docs/api/power"
+    description="Shutdown, restart, sleep, and hibernate commands."
+  />
+  <Card
+    title="Media Control"
+    href="/docs/api/media"
+    description="Control media playback and get now-playing info."
+  />
+  <Card
+    title="Processes"
+    href="/docs/api/processes"
+    description="Top processes by memory usage."
+  />
+  <Card
+    title="SSE Stream"
+    href="/docs/api/stream"
+    description="Real-time system stats stream."
+  />
+  <Card
+    title="WebSocket"
+    href="/docs/ws"
+    description="Real-time bidirectional API with subscriptions."
+  />
+</Cards>
+
+## Endpoint Summary
+
+| Method | Endpoint                | Description                | Status        |
+| :----- | :---------------------- | :------------------------- | :------------ |
+| `GET`  | `/api/status`           | Health check               | ✅ Stable     |
+| `GET`  | `/api/system`           | Static system info         | ✅ Stable     |
+| `GET`  | `/api/usage`            | Dynamic usage data         | ✅ Stable     |
+| `POST` | `/api/pw/*`             | Power commands             | ✅ Stable     |
+| `GET`  | `/api/media/status`     | Now playing info           | ✅ Stable     |
+| `POST` | `/api/media/control`    | Media controls             | ✅ Stable     |
+| `GET`  | `/api/processes`        | Top processes (Aggregated) | ✅ Stable     |
+| `GET`  | `/api/processes/{name}` | Process details & PIDs     | ✅ Stable     |
+| `POST` | `/api/processes/focus`  | Focus window               | ✅ Stable     |
+| `POST` | `/api/processes/kill`   | Terminate process          | ✅ Stable     |
+| `POST` | `/api/processes/launch` | Launch application         | ✅ Stable     |
+| `GET`  | `/api/stream`           | SSE real-time stats        | ✅ Stable     |
+| `WS`   | `/api/ws`               | WebSocket (bidirectional)  | ✅ Stable     |
+| `GET`  | `/api/stats`            | Combined stats             | ⚠️ Deprecated |
+
+<Callout type="warn" title="Deprecated Endpoint">
+  `/api/stats` is deprecated and will be removed in **v0.1**. Use `/api/system` and
+  `/api/usage` instead.
+</Callout>

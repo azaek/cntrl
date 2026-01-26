@@ -1,0 +1,40 @@
+---
+title: Guide
+description: Get Cntrl up and running on your computer.
+icon: BookOpen
+---
+
+Choose your platform to get started:
+
+<Cards>
+  <Card
+    title="Windows"
+    href="/docs/setup/windows"
+    description="Install on Windows 10/11 with automated setup and configuration."
+    icon={<Icon name="MonitorDot" />}
+  />
+  <Card
+    title="macOS"
+    href="/docs/setup/mac"
+    description="Install on macOS with menu bar integration and universal support."
+    icon={<Icon name="Apple" />}
+  />
+</Cards>
+
+## Static IP Reservation (Important)
+
+If you plan to control your PC from your phone or another device, you need to ensure your computer's address doesn't change over time.
+
+Most home routers assign IP addresses dynamically (DHCP), which means your PC might be `192.168.1.10` today but `192.168.1.15` tomorrow. If that happens, your phone won't be able to find it.
+
+### How to reserve your IP:
+
+1.  Open your router's web interface (usually `192.168.1.1` or `192.168.0.1`).
+2.  Look for a section named **DHCP Server**, **Static IP**, or **Address Reservation**.
+3.  Find your computer in the list.
+4.  Click **Add** or **Reserve** to bind your computer's physical (MAC) address to a specific IP address.
+
+<Callout type="info" title="Reliable Endpoints">
+  Once reserved, you can always reach your computer at the same address, making it a
+  reliable "Static" endpoint for your remote dashboards.
+</Callout>

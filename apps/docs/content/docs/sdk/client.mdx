@@ -1,0 +1,167 @@
+---
+title: BridgeClient
+description: Low-level REST client for direct Bridge API access.
+icon: Terminal
+---
+
+<Callout type="info" title="Prefer Hooks">
+  For most use cases, we recommend using the [React hooks](/docs/sdk/hooks) instead of BridgeClient. The hooks provide automatic caching, real-time updates via WebSocket, and proper React integration.
+
+Use BridgeClient only when you need:
+
+- Direct API access outside of React components
+- One-off requests without caching
+- Custom integration with non-React frameworks
+  </Callout>
+
+## Installation
+
+BridgeClient is included in the SDK:
+
+```tsx
+import { BridgeClient, createBridgeClient } from "@cntrl-pw/sdk";
+```
+
+## Usage
+
+```tsx
+import { createBridgeClient } from "@cntrl-pw/sdk";
+
+const client = createBridgeClient({
+  host: "192.168.1.100",
+  port: 9990,
+  secure: false,
+  apiKey: "your-api-key", // optional
+});
+
+// Health check
+const isOnline = await client.ping();
+
+// Get system info
+const systemInfo = await client.getSystemInfo();
+console.log(`Connected to ${systemInfo.hostname}`);
+```
+
+## API Reference
+
+### Constructor
+
+```tsx
+const client = new BridgeClient(config);
+// or
+const client = createBridgeClient(config);
+```
+
+**Config options:**
+
+| Option   | Type      | Default  | Description                |
+| -------- | --------- | -------- | -------------------------- |
+| `host`   | `string`  | required | Bridge IP or hostname      |
+| `port`   | `number`  | `9990`   | Bridge port                |
+| `secure` | `boolean` | `false`  | Use HTTPS/WSS              |
+| `apiKey` | `string`  | -        | API key for authentication |
+
+### Properties
+
+```tsx
+client.baseUrl; // HTTP base URL (e.g., "http://192.168.1.100:9990")
+client.wsUrl; // WebSocket URL (e.g., "ws://192.168.1.100:9990/api/ws")
+```
+
+### Methods
+
+#### `ping(): Promise<boolean>`
+
+Simple health check. Returns `true` if bridge is reachable.
+
+```tsx
+if (await client.ping()) {
+  console.log("Bridge is online");
+}
+```
+
+#### `getStatus(): Promise<StatusResponse>`
+
+Get detailed status from `/api/status`.
+
+```tsx
+const status = await client.getStatus();
+console.log(status.status); // "ok"
+```
+
+#### `getSystemInfo(): Promise<SystemInfo>`
+
+Get static system information (CPU specs, GPU, memory, etc.).
+
+```tsx
+const info = await client.getSystemInfo();
+console.log(info.hostname); // "GAMING-PC"
+console.log(info.cpu.brand); // "AMD Ryzen 9 5900X"
+console.log(info.gpu?.brand); // "NVIDIA GeForce RTX 3080"
+console.log(info.memory.total); // 34359738368 (bytes)
+```
+
+#### Power Control
+
+```tsx
+await client.shutdown(); // Shut down system
+await client.restart(); // Restart system
+await client.sleep(); // Put system to sleep
+await client.hibernate(); // Hibernate system
+```
+
+#### Process Control
+
+```tsx
+// Kill process by PID
+await client.killProcess(1234);
+
+// Kill all processes by name
+await client.killProcessByName("notepad.exe");
+
+// Launch application
+await client.launchProcess("notepad.exe");
+await client.launchProcess("code", ["--new-window", "/path/to/project"]);
+```
+
+## Error Handling
+
+All methods throw on failure:
+
+```tsx
+try {
+  await client.shutdown();
+} catch (error) {
+  console.error("Failed to shutdown:", error.message);
+}
+```
+
+## Example: Connection Test Script
+
+```tsx
+import { createBridgeClient } from "@cntrl-pw/sdk";
+
+async function testConnection(host: string) {
+  const client = createBridgeClient({ host, port: 9990 });
+
+  console.log(`Testing connection to ${host}...`);
+
+  const online = await client.ping();
+  if (!online) {
+    console.log("Bridge is offline");
+    return;
+  }
+
+  console.log("Bridge is online!");
+
+  const info = await client.getSystemInfo();
+  console.log(`Hostname: ${info.hostname}`);
+  console.log(`OS: ${info.os.name} ${info.os.version}`);
+  console.log(`CPU: ${info.cpu.brand}`);
+  if (info.gpu) {
+    console.log(`GPU: ${info.gpu.brand}`);
+  }
+}
+
+testConnection("192.168.1.100");
+```

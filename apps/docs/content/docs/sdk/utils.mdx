@@ -1,0 +1,131 @@
+---
+title: Utilities
+description: Helper functions for formatting data.
+icon: Wrench
+---
+
+The SDK includes utility functions for common formatting tasks.
+
+## formatBytes
+
+Format bytes to human-readable string:
+
+```tsx
+import { formatBytes } from "@cntrl-pw/sdk";
+
+formatBytes(0); // "0 B"
+formatBytes(1024); // "1 KB"
+formatBytes(1536); // "1.5 KB"
+formatBytes(1073741824); // "1 GB"
+formatBytes(1099511627776); // "1 TB"
+
+// Custom decimal places
+formatBytes(1536, 0); // "2 KB"
+formatBytes(1536, 3); // "1.500 KB"
+```
+
+### Usage Example
+
+```tsx
+import { useSystemStats, formatBytes } from "@cntrl-pw/sdk";
+
+function MemoryUsage({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId, { fields: ["memory"] });
+
+  if (!data?.memory) return null;
+
+  return (
+    <div>
+      <p>Used: {formatBytes(data.memory.used)}</p>
+      <p>Free: {formatBytes(data.memory.free)}</p>
+      <p>Usage: {data.memory.used_percent.toFixed(1)}%</p>
+    </div>
+  );
+}
+```
+
+## formatUptime
+
+Format seconds to human-readable uptime:
+
+```tsx
+import { formatUptime } from "@cntrl-pw/sdk";
+
+formatUptime(0); // "0s"
+formatUptime(45); // "45s"
+formatUptime(60); // "1m"
+formatUptime(3600); // "1h 0m"
+formatUptime(3660); // "1h 1m"
+formatUptime(86400); // "1d 0h"
+formatUptime(90061); // "1d 1h"
+```
+
+### Usage Example
+
+```tsx
+import { useSystemStats, formatUptime } from "@cntrl-pw/sdk";
+
+function SystemUptime({ bridgeId }: { bridgeId: string }) {
+  const { data } = useSystemStats(bridgeId);
+
+  if (!data) return null;
+
+  return <span>Uptime: {formatUptime(data.uptime)}</span>;
+}
+```
+
+## Type Exports
+
+Import types for TypeScript usage:
+
+```tsx
+import type {
+  // Core types
+  BridgeConfig,
+  StoredBridge,
+  BridgeConnection,
+  ConnectionStatus,
+  CachedSystemInfo,
+  BridgeError,
+
+  // API response types (from /api/system)
+  SystemInfo,
+  OsInfo,
+  CpuInfo,
+  GpuInfo,
+  MemoryInfo,
+  DiskInfo,
+  NetworkInfo,
+
+  // Real-time stats (from WS system_stats)
+  StreamPayload,
+  CpuUsage,
+  MemoryUsage,
+  GpuUsage,
+  DiskUsage,
+  NetworkUsage,
+
+  // Media types
+  MediaStatus,
+  MediaAction,
+  MediaActionType,
+
+  // Process types
+  ProcessInfo,
+  ProcessDetail,
+  ProcessListPayload,
+  OperationFeedback,
+
+  // Power types
+  PowerAction,
+
+  // Status types
+  StatusResponse,
+  PingResult,
+
+  // WebSocket types
+  WSIncomingEvent,
+  WSOutgoingMessage,
+  WSTopic,
+} from "@cntrl-pw/sdk";
+```

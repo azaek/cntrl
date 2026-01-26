@@ -1,0 +1,219 @@
+---
+title: Authentication
+description: Secure your Cntrl API with API keys and IP whitelisting.
+badge: New
+icon: Shield
+---
+
+<Callout type="error" title="Security Warning">
+  **Authentication alone may not make Cntrl safe for the public internet.** We strongly
+  recommend against exposing port `9990` via router port forwarding. Use a VPN
+  (Tailscale/WireGuard) for remote access.
+</Callout>
+
+By default, Cntrl's API is open to anyone on your network. If you are on a **shared network** (like a dorm or office) or using a VPN like Tailscale, you should enable authentication to secure endpoints.
+
+<Callout type="info" title="How it works">
+  **Whitelisted IPs bypass the API key check entirely.** This means trusted devices (like
+  a dashboard server) can use `EventSource` or WebSocket without custom headers, while
+  external clients still need the API key.
+</Callout>
+
+## Quick Setup
+
+Add this to your `config.json`:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "api_key": "your-secret-key-here",
+    "allowed_ips": ["192.168.1.100"]
+  }
+}
+```
+
+<Callout type="info">
+  The IP `192.168.1.100` (your dashboard server, for example) will bypass the API key
+  check entirely.
+</Callout>
+
+## Making Authenticated Requests
+
+Include your API key in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer your-secret-key-here" \
+     http://your-pc:9990/api/system
+```
+
+<Callout type="info" title="Public Endpoint">
+  The `/api/status` endpoint is always public for health checks—no authentication
+  required.
+</Callout>
+
+## IP Whitelisting
+
+For additional security, you can restrict access to specific IP addresses:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "api_key": "your-secret-key-here",
+    "allowed_ips": ["192.168.1.100", "192.168.1.0/24"]
+  }
+}
+```
+
+### Supported Formats
+
+| Format    | Example          | Description                          |
+| --------- | ---------------- | ------------------------------------ |
+| Single IP | `192.168.1.100`  | Exact IP match                       |
+| CIDR      | `192.168.1.0/24` | Subnet range                         |
+| Wildcard  | `*`              | Allow all IPs (only API key checked) |
+
+## Common Configurations
+
+### Tailscale Network
+
+If both your PC and dashboard are on Tailscale:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "api_key": "your-secret-key-here",
+    "allowed_ips": ["100.64.0.0/10"]
+  }
+}
+```
+
+### Local Network Only
+
+Restrict to your home network:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "api_key": "your-secret-key-here",
+    "allowed_ips": ["192.168.1.0/24"]
+  }
+}
+```
+
+### API Key Only (No IP Restriction)
+
+Allow any IP with the correct key:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "api_key": "your-secret-key-here",
+    "allowed_ips": ["*"]
+  }
+}
+```
+
+## Dashboard Integration
+
+### JavaScript / TypeScript
+
+```javascript
+const API_KEY = "your-secret-key-here";
+const API_URL = "http://your-pc:9990";
+
+// Regular fetch
+const response = await fetch(`${API_URL}/api/system`, {
+  headers: {
+    Authorization: `Bearer ${API_KEY}`,
+  },
+});
+
+// SSE Stream
+const eventSource = new EventSource(
+  `${API_URL}/api/stream?fields=cpu,memory`,
+  // Note: EventSource doesn't support custom headers natively
+  // See workaround below
+);
+```
+
+<Callout type="warning" title="SSE and Authentication">
+The browser's `EventSource` API doesn't support custom headers. For authenticated SSE streams, you have two options:
+
+1. **Use IP whitelisting** - Add your dashboard's IP to `allowed_ips` and skip the API key check for SSE
+2. **Use a fetch-based SSE client** like [eventsource-parser](https://github.com/rexxars/eventsource-parser)
+   </Callout>
+
+<Callout type="tip" title="WebSocket Authentication">
+  The WebSocket endpoint (`/api/ws`) follows the same authentication rules. Use IP
+  whitelisting for browser WebSocket connections, or pass the API key via a query
+  parameter if needed.
+</Callout>
+
+### Fetch-based SSE Example
+
+```javascript
+async function streamWithAuth(url, apiKey, onMessage) {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const text = decoder.decode(value);
+    const lines = text.split("\n");
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        onMessage(JSON.parse(line.slice(6)));
+      }
+    }
+  }
+}
+
+// Usage
+streamWithAuth(
+  "http://your-pc:9990/api/stream?fields=cpu,memory",
+  "your-secret-key-here",
+  (data) => console.log(data),
+);
+```
+
+## Error Responses
+
+| Status             | Meaning                                     |
+| ------------------ | ------------------------------------------- |
+| `401 Unauthorized` | Missing or malformed `Authorization` header |
+| `403 Forbidden`    | Invalid API key or IP not in whitelist      |
+
+Example error response:
+
+```json
+{ "error": "Missing Authorization header" }
+```
+
+## Generating a Secure Key
+
+Use a random string generator to create a strong API key:
+
+```bash
+# Linux/macOS
+openssl rand -base64 32
+
+# PowerShell
+[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
+<Callout type="tip" title="Key Length">
+  A 32-character random string is more than enough for a home network. For production,
+  consider using a UUID or a 64-character hex string.
+</Callout>

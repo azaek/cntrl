@@ -1,5 +1,5 @@
 {
-  "name": "@repo/tsconfig",
+  "name": "@cntrl-pw/tsconfig",
   "version": "0.0.0",
   "type": "module",
   "private": true,

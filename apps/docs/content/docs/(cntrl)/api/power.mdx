@@ -1,0 +1,72 @@
+---
+title: Power Control
+description: Control system power state remotely.
+icon: Power
+---
+
+The power endpoints allow you to remotely control your computer's power state, including shutdown, restart, sleep, and hibernate.
+
+## Endpoints
+
+### System Controls
+
+All power endpoints accept a `POST` request and return the same success response.
+
+```http
+POST /api/pw/shutdown
+POST /api/pw/restart
+POST /api/pw/sleep
+POST /api/pw/hibernate
+```
+
+**Response:**
+
+```json
+{
+  "status": "success"
+}
+```
+
+## Configuration
+
+Power commands can be enabled or disabled in your `config.json`:
+
+```json title="config.json"
+{
+  "features": {
+    "enable_sleep": true,
+    "enable_restart": true,
+    "enable_shutdown": true,
+    "enable_hibernate": true
+  }
+}
+```
+
+<Callout type="info">
+  By default, **shutdown** and **restart** are disabled for safety. Sleep and hibernate
+  are enabled. You can toggle them individually in the configuration file or through the
+  Cntrl Bridge dashboard settings.
+</Callout>
+
+<Callout type="warn" title="Security">
+  These endpoints perform system-level actions. Ensure your Cntrl server is only
+  accessible on your trusted local network.
+</Callout>
+
+## Example Usage Scenarios
+
+### 1. Bedtime Routine
+
+Turn off your PC from your phone (on the same Wi-Fi) when you go to bed.
+
+1. Tap the "Shutdown PC" button on your mobile dashboard.
+2. App sends `POST /api/pw/shutdown`.
+3. PC gracefully shuts down.
+
+### 2. Remote Wake & Unlock
+
+(Combined with WoL)
+
+1. Send WoL packet to wake PC.
+2. Wait for `GET /api/status` to return 200 OK.
+3. You are now ready to control it.

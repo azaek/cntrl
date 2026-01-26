@@ -1,0 +1,263 @@
+---
+title: useProcesses
+description: Running processes list and controls.
+icon: ListTree
+---
+
+Subscribe to running processes and control them (kill, launch, focus).
+
+## Usage
+
+```tsx
+import { useProcesses } from "@cntrl-pw/sdk";
+
+function ProcessList({ bridgeId }: { bridgeId: string }) {
+  const { data, kill } = useProcesses(bridgeId);
+
+  if (!data) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <p>Total processes: {data.total_count}</p>
+      <ul>
+        {data.processes.map((proc) => (
+          <li key={proc.name}>
+            {proc.name} ({proc.count} instances) - {proc.memory_mb.toFixed(0)} MB
+            <button onClick={() => kill.mutate({ name: proc.name })}>Kill All</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+## Return Type
+
+The hook returns `ProcessListPayload` from the Bridge API:
+
+```tsx
+interface ProcessListPayload {
+  timestamp: number; // Unix timestamp
+  processes: ProcessInfo[]; // Aggregated process list
+  total_count: number; // Total number of processes
+}
+
+interface ProcessInfo {
+  name: string; // Process name (e.g., "chrome.exe")
+  count: number; // Number of instances with this name
+  memory: number; // Total memory in bytes
+  memory_mb: number; // Total memory in MB
+  cpu_time: number; // CPU time
+}
+```
+
+<Callout title="Note">
+  Processes are aggregated by name. Multiple instances of the same process (e.g., multiple
+  Chrome tabs) are grouped together with a `count` field showing how many instances are
+  running.
+</Callout>
+
+## Options
+
+### Connection Mode
+
+Control how the hook handles WebSocket connection:
+
+```tsx
+// Auto (default) - connects if disconnected
+const { data, kill, launch } = useProcesses(bridgeId);
+
+// Passive - don't trigger connection
+const { data } = useProcesses(bridgeId, { connectionMode: "passive" });
+
+// Eager - connect once, respect manual disconnects
+const { data } = useProcesses(bridgeId, { connectionMode: "eager" });
+```
+
+| Mode        | Behavior                                                |
+| ----------- | ------------------------------------------------------- |
+| `"auto"`    | Connects if disconnected. Reconnects on rerenders.      |
+| `"passive"` | Never triggers connection. Only uses data if connected. |
+| `"eager"`   | Connects once on mount. Respects manual disconnects.    |
+
+## Available Mutations
+
+### kill
+
+Kill processes by PID or name:
+
+```tsx
+const { kill } = useProcesses(bridgeId);
+
+// Kill by specific PID
+kill.mutate({ pid: 1234 });
+
+// Kill all processes by name
+kill.mutate({ name: "notepad.exe" });
+```
+
+### launch
+
+Launch an application:
+
+```tsx
+const { launch } = useProcesses(bridgeId);
+
+// Simple launch
+launch.mutate({ path: "notepad.exe" });
+
+// With arguments
+launch.mutate({
+  path: "C:\\Program Files\\MyApp\\app.exe",
+  args: ["--flag", "value"],
+});
+```
+
+### focus
+
+Bring a window to the foreground by PID:
+
+```tsx
+const { focus } = useProcesses(bridgeId);
+
+focus.mutate(1234); // PID
+```
+
+## Examples
+
+### Process Table
+
+```tsx
+function ProcessTable({ bridgeId }: { bridgeId: string }) {
+  const { data, kill } = useProcesses(bridgeId);
+
+  if (!data) return <div>Loading processes...</div>;
+
+  // Sort by memory usage
+  const sorted = [...data.processes].sort((a, b) => b.memory_mb - a.memory_mb);
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Instances</th>
+          <th>Memory</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.slice(0, 20).map((proc) => (
+          <tr key={proc.name}>
+            <td>{proc.name}</td>
+            <td>{proc.count}</td>
+            <td>{proc.memory_mb.toFixed(0)} MB</td>
+            <td>
+              <button onClick={() => kill.mutate({ name: proc.name })}>Kill All</button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+```
+
+### App Launcher
+
+```tsx
+import { useState } from "react";
+
+function AppLauncher({ bridgeId }: { bridgeId: string }) {
+  const { launch } = useProcesses(bridgeId);
+  const [path, setPath] = useState("");
+
+  const quickLaunch = [
+    { name: "Notepad", path: "notepad.exe" },
+    { name: "Calculator", path: "calc.exe" },
+    { name: "Explorer", path: "explorer.exe" },
+  ];
+
+  return (
+    <div>
+      <div className="quick-launch">
+        {quickLaunch.map((app) => (
+          <button key={app.path} onClick={() => launch.mutate({ path: app.path })}>
+            {app.name}
+          </button>
+        ))}
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          launch.mutate({ path });
+          setPath("");
+        }}
+      >
+        <input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="Enter path or command..."
+        />
+        <button type="submit">Launch</button>
+      </form>
+    </div>
+  );
+}
+```
+
+### Memory Usage Chart
+
+```tsx
+function TopProcesses({ bridgeId }: { bridgeId: string }) {
+  const { data } = useProcesses(bridgeId);
+
+  if (!data) return null;
+
+  const top5 = [...data.processes].sort((a, b) => b.memory_mb - a.memory_mb).slice(0, 5);
+
+  const maxMemory = Math.max(...top5.map((p) => p.memory_mb));
+
+  return (
+    <div className="top-processes">
+      <h3>Top Memory Usage</h3>
+      {top5.map((proc) => (
+        <div key={proc.name} className="process-bar">
+          <span className="name">
+            {proc.name} {proc.count > 1 && `(${proc.count})`}
+          </span>
+          <div className="bar">
+            <div style={{ width: `${(proc.memory_mb / maxMemory) * 100}%` }} />
+          </div>
+          <span className="value">{proc.memory_mb.toFixed(0)} MB</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### Process Summary
+
+```tsx
+import { formatBytes } from "@cntrl-pw/sdk";
+
+function ProcessSummary({ bridgeId }: { bridgeId: string }) {
+  const { data } = useProcesses(bridgeId);
+
+  if (!data) return null;
+
+  const totalMemory = data.processes.reduce((sum, p) => sum + p.memory, 0);
+
+  return (
+    <div className="process-summary">
+      <p>Total Processes: {data.total_count}</p>
+      <p>Unique Names: {data.processes.length}</p>
+      <p>Total Memory: {formatBytes(totalMemory)}</p>
+      <p>Last Updated: {new Date(data.timestamp).toLocaleTimeString()}</p>
+    </div>
+  );
+}
+```

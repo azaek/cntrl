@@ -1,0 +1,91 @@
+---
+title: macOS
+description: Get Cntrl Bridge running on your Mac.
+icon: macos
+---
+
+macOS is fully supported with menu bar integration.
+
+## Installation
+
+<Steps>
+<Step>
+### Download
+
+Download the Universal DMG from the [GitHub Releases](https://github.com/azaek/cntrl/releases):
+
+**`Cntrl Bridge_vX.X.X_universal.dmg`** - Works on all Macs (Intel and Apple Silicon)
+
+<Callout type="info">
+The universal build works on both Intel and Apple Silicon (M1/M2/M3/M4) Macs, providing native performance on both architectures.
+</Callout>
+</Step>
+
+<Step>
+  ### Install 1. Open the DMG file 2. Drag **Cntrl Bridge** to your **Applications**
+  folder
+</Step>
+
+<Step>
+### Launch
+**Important:** After installing, you must manually open Cntrl Bridge for it to start.
+
+1. Open **Applications** folder
+2. Double-click **Cntrl Bridge**
+3. The Cntrl Bridge icon will appear in your menu bar
+
+<Callout type="info">
+On first launch, macOS may show a security warning because the app is not notarized. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+</Callout>
+</Step>
+</Steps>
+
+## Configure Settings
+
+After installation, click the menu bar icon to open the dashboard where you can:
+
+- Change the server port
+- Enable/disable features
+- Configure autostart (toggle "Start on Login")
+- Enable power management options (Shutdown, Restart, Sleep)
+- Open the configuration file location
+
+All settings are saved to `~/Library/Application Support/com.azaek.cntrl-bridge/config.json`
+
+## Verify It's Working
+
+Open your browser and go to:
+
+```
+http://localhost:9990/api/status
+```
+
+You should see `{"status":"ok"}`.
+
+## macOS Permissions
+
+Certain features require system permissions on macOS. The app will prompt you when these permissions are needed:
+
+<Callout type="warn" title="Required Permissions">
+  - **Media Control**: When using `/api/media/*` endpoints, macOS will prompt for **Media
+  & Apple Music** access permission. Go to **System Settings → Privacy & Security → Media
+  & Apple Music** to grant access. - **Process Control**: For `/api/processes/focus` and
+  `/api/processes/kill`, you may need to grant **Accessibility** permissions. Go to
+  **System Settings → Privacy & Security → Accessibility** and add Cntrl Bridge to the
+  allowed apps list.
+</Callout>
+
+These permissions are only required if you plan to use these specific features.
+
+## macOS Features
+
+- **Menu Bar Integration**: Lives in your menu bar (not the Dock)
+- **Universal Binary**: Optimized for both Intel and Apple Silicon Macs
+- **Tray-Only App**: No Dock icon, stays out of your way
+- **Full Feature Parity**: All features work the same as Windows (except Hibernate, which macOS doesn't support)
+- **Native Performance**: Fast and efficient with minimal resource usage
+
+<Callout type="info" title="Hibernate on macOS">
+  macOS does not have a separate hibernate command. Sleep on Mac automatically uses "Safe
+  Sleep" which writes RAM to disk for power loss protection.
+</Callout>

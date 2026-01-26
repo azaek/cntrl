@@ -1,0 +1,102 @@
+---
+title: Overview
+description: All available React hooks for Bridge data.
+icon: Anchor
+---
+
+The SDK provides React hooks for accessing Bridge data. All hooks take a `bridgeId` parameter and return React Query results.
+
+## Available Hooks
+
+<Cards>
+  <Card
+    title="useBridgeStatus"
+    href="/docs/sdk/hooks/use-bridge-status"
+    description="Check bridge online status without WebSocket."
+  />
+  <Card
+    title="useSystemStats"
+    href="/docs/sdk/hooks/use-system-stats"
+    description="Real-time CPU, memory, GPU, disk, and network stats."
+  />
+  <Card
+    title="useSystemInfo"
+    href="/docs/sdk/hooks/use-system-info"
+    description="Static system information (specs, hostname)."
+  />
+  <Card
+    title="useMedia"
+    href="/docs/sdk/hooks/use-media"
+    description="Now playing info and playback controls."
+  />
+  <Card
+    title="useProcesses"
+    href="/docs/sdk/hooks/use-processes"
+    description="Running processes with kill/launch controls."
+  />
+  <Card
+    title="usePower"
+    href="/docs/sdk/hooks/use-power"
+    description="Shutdown, restart, sleep, hibernate, Wake-on-LAN."
+  />
+</Cards>
+
+## Hook Patterns
+
+### WebSocket vs REST
+
+| Hook              | Data Source    | Updates                 |
+| ----------------- | -------------- | ----------------------- |
+| `useBridgeStatus` | REST (polling) | Configurable interval   |
+| `useSystemStats`  | WebSocket      | Real-time (1s interval) |
+| `useMedia`        | WebSocket      | On change               |
+| `useProcesses`    | WebSocket      | Real-time (3s interval) |
+| `useSystemInfo`   | REST           | Cached (5 min stale)    |
+| `usePower`        | REST/UDP       | Mutations only          |
+
+### Common Return Values
+
+All hooks return React Query results:
+
+```tsx
+const {
+  data, // The data (or null/undefined)
+  isLoading, // First load in progress
+  isError, // Query failed
+  error, // Error object
+  refetch, // Manual refetch function
+} = useSystemStats(bridgeId);
+```
+
+### Connection Awareness
+
+Hooks automatically handle connection state:
+
+```tsx
+function Stats({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+  const { data } = useSystemStats(bridgeId);
+
+  // Hook is disabled when bridge is not connected
+  if (bridge?.status !== "connected") {
+    return <div>Not connected</div>;
+  }
+
+  if (!data) {
+    return <div>Waiting for data...</div>;
+  }
+
+  return <div>CPU: {data.cpu.current_load}%</div>;
+}
+```
+
+### Optimistic Updates
+
+Mutation hooks support optimistic updates:
+
+```tsx
+const { control } = useMedia(bridgeId);
+
+// Volume change is optimistic - UI updates immediately
+control.mutate({ action: "set_volume", value: 50 });
+```

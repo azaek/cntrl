@@ -1,0 +1,180 @@
+---
+title: useBridgeStatus
+description: Check bridge online status without WebSocket connection.
+icon: Signal
+---
+
+Check if bridges are online using REST polling. Useful for:
+
+- Showing online/offline indicators in bridge lists
+- Checking reachability before establishing WebSocket connections
+- Monitoring multiple bridges without full connections
+
+## Usage
+
+### Single Bridge
+
+```tsx
+import { useBridgeStatus } from "@cntrl-pw/sdk";
+
+function BridgeIndicator({ bridgeId }: { bridgeId: string }) {
+  const { state, online, responseTime, isChecking } = useBridgeStatus(bridgeId, {
+    interval: 10000,
+  });
+
+  return (
+    <div>
+      <span>
+        {state === "checking" && "⏳ Checking..."}
+        {state === "online" && "🟢 Online"}
+        {state === "offline" && "🔴 Offline"}
+        {state === "unknown" && "⚪ Unknown"}
+      </span>
+      {responseTime && <span>{responseTime}ms</span>}
+    </div>
+  );
+}
+```
+
+### Multiple Bridges
+
+```tsx
+import { useBridgesStatus, useBridges } from "@cntrl-pw/sdk";
+
+function BridgeSelector() {
+  const { bridges } = useBridges();
+  const bridgeIds = Array.from(bridges.keys());
+  const { statuses, isChecking } = useBridgesStatus(bridgeIds, { interval: 15000 });
+
+  if (isChecking && Object.keys(statuses).length === 0) {
+    return <div>Checking bridges...</div>;
+  }
+
+  return (
+    <select>
+      {bridgeIds.map((id) => {
+        const bridge = bridges.get(id);
+        const status = statuses[id];
+        return (
+          <option key={id} disabled={!status?.online}>
+            {bridge?.name} {status?.online ? "(online)" : "(offline)"}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+```
+
+## API Reference
+
+### `useBridgeStatus(bridgeId, options?)`
+
+Check a single bridge's status.
+
+**Parameters:**
+
+| Parameter          | Type      | Description                             |
+| ------------------ | --------- | --------------------------------------- |
+| `bridgeId`         | `string`  | The bridge ID to check                  |
+| `options.interval` | `number`  | Polling interval in ms (default: 30000) |
+| `options.enabled`  | `boolean` | Enable/disable polling (default: true)  |
+
+**Returns:**
+
+```tsx
+{
+  state: BridgeStatusState; // "checking" | "online" | "offline" | "unknown"
+  online: boolean; // Whether bridge is online
+  responseTime: number | null; // Response time in ms
+  lastChecked: number | null; // Timestamp of last check
+  isChecking: boolean; // Whether a check is in progress
+  // Plus all React Query properties (data, isLoading, refetch, etc.)
+}
+```
+
+### `useBridgesStatus(bridgeIds, options?)`
+
+Check multiple bridges at once.
+
+**Parameters:**
+
+| Parameter          | Type       | Description                             |
+| ------------------ | ---------- | --------------------------------------- |
+| `bridgeIds`        | `string[]` | Array of bridge IDs to check            |
+| `options.interval` | `number`   | Polling interval in ms (default: 30000) |
+| `options.enabled`  | `boolean`  | Enable/disable polling (default: true)  |
+
+**Returns:**
+
+```tsx
+{
+  statuses: Record<string, PingResult>; // Status for each bridge
+  isChecking: boolean; // Whether a check is in progress
+  // Plus all React Query properties
+}
+```
+
+## Types
+
+```tsx
+type BridgeStatusState = "checking" | "online" | "offline" | "unknown";
+
+interface PingResult {
+  online: boolean; // Whether bridge responded
+  responseTime: number | null; // Response time in ms
+  lastChecked: number; // Timestamp of last check
+}
+```
+
+## Example: Bridge List with Status
+
+```tsx
+import { useBridges, useBridgesStatus } from "@cntrl-pw/sdk";
+
+function BridgeList() {
+  const { bridges } = useBridges();
+  const bridgeIds = Array.from(bridges.keys());
+  const { statuses, isChecking } = useBridgesStatus(bridgeIds, { interval: 5000 });
+
+  if (isChecking && Object.keys(statuses).length === 0) {
+    return <div>Checking bridges...</div>;
+  }
+
+  return (
+    <ul className="bridge-list">
+      {bridgeIds.map((id) => {
+        const bridge = bridges.get(id);
+        const status = statuses[id];
+
+        return (
+          <li key={id} className={status?.online ? "online" : "offline"}>
+            <span className="indicator">
+              {status?.online ? "Connected" : "Disconnected"}
+            </span>
+            <span className="name">{bridge?.name}</span>
+            {status?.responseTime && (
+              <span className="latency">{status.responseTime}ms</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+```
+
+## Comparison with WebSocket Connection
+
+| Feature             | `useBridgeStatus`        | WebSocket (via `useBridge`)    |
+| ------------------- | ------------------------ | ------------------------------ |
+| Connection overhead | Low (HTTP polling)       | Higher (persistent connection) |
+| Real-time updates   | No (polling interval)    | Yes                            |
+| Use case            | Status indicators, lists | Active data streaming          |
+| Data available      | Online, response time    | Full system stats, media, etc. |
+
+<Callout title="Best Practice">
+  Use `useBridgeStatus` for showing online/offline indicators in lists or selectors. Once
+  a user selects a bridge to interact with, establish a WebSocket connection using
+  `BridgesProvider` for real-time data.
+</Callout>

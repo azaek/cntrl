@@ -1,0 +1,410 @@
+---
+title: Processes Topic
+description: Real-time process list and process management via WebSocket
+badge: New
+icon: Cpu
+---
+
+The **processes** topic provides a real-time list of running processes and allows you to manage them (kill, launch) directly through WebSocket commands.
+
+## Subscribe
+
+```json
+{ "op": "subscribe", "data": { "topics": ["processes"] } }
+```
+
+## Event: `process_list`
+
+Broadcasts immediately on subscribe, then at the configured interval (default: 3000ms).
+
+```json
+{
+  "type": "process_list",
+  "data": {
+    "timestamp": 1706140800,
+    "total_count": 142,
+    "processes": [
+      {
+        "name": "chrome",
+        "count": 12,
+        "memory": 2147483648,
+        "memory_mb": 2048.0,
+        "cpu_time": 156.7
+      },
+      {
+        "name": "code",
+        "count": 8,
+        "memory": 1073741824,
+        "memory_mb": 1024.0,
+        "cpu_time": 89.3
+      }
+    ]
+  }
+}
+```
+
+### Field Reference
+
+#### Process List
+
+| Field         | Type  | Description                          |
+| :------------ | :---- | :----------------------------------- |
+| `timestamp`   | int   | Unix timestamp                       |
+| `total_count` | int   | Total number of unique process names |
+| `processes`   | array | Array of process info objects        |
+
+#### Process Info
+
+| Field       | Type   | Description                 |
+| :---------- | :----- | :-------------------------- |
+| `name`      | string | Process name (aggregated)   |
+| `count`     | int    | Number of instances running |
+| `memory`    | int    | Total memory usage in bytes |
+| `memory_mb` | float  | Total memory usage in MB    |
+| `cpu_time`  | float  | CPU time consumed           |
+
+<Callout type="info" title="Aggregated Processes">
+  Processes are grouped by name. For example, 12 Chrome helper processes appear as one
+  entry with `count: 12`.
+</Callout>
+
+## Sending Commands
+
+### Kill Process
+
+Kill by PID:
+
+```json
+{
+  "op": "process_kill",
+  "data": {
+    "pid": 1234
+  }
+}
+```
+
+Kill by name (first match):
+
+```json
+{
+  "op": "process_kill",
+  "data": {
+    "name": "notepad.exe"
+  }
+}
+```
+
+### Launch Process
+
+```json
+{
+  "op": "process_launch",
+  "data": {
+    "path": "notepad.exe",
+    "args": ["file.txt"]
+  }
+}
+```
+
+## Event: `process_feedback`
+
+After sending a process command, you'll receive feedback:
+
+```json
+{
+  "type": "process_feedback",
+  "data": {
+    "success": true,
+    "action": "kill",
+    "message": null,
+    "pid": 1234,
+    "name": "notepad.exe"
+  }
+}
+```
+
+### Feedback Fields
+
+| Field     | Type   | Description                                 |
+| :-------- | :----- | :------------------------------------------ |
+| `success` | bool   | Whether the command succeeded               |
+| `action`  | string | `"kill"` or `"launch"`                      |
+| `message` | string | Error message if failed                     |
+| `pid`     | int    | PID of the affected process (if applicable) |
+| `name`    | string | Name of the affected process                |
+
+### Kill Feedback Examples
+
+**Success:**
+
+```json
+{
+  "type": "process_feedback",
+  "data": {
+    "success": true,
+    "action": "kill",
+    "message": null,
+    "pid": 1234,
+    "name": "notepad.exe"
+  }
+}
+```
+
+**Failure (process not found):**
+
+```json
+{
+  "type": "process_feedback",
+  "data": {
+    "success": false,
+    "action": "kill",
+    "message": "Process not found or could not be killed",
+    "pid": 99999,
+    "name": null
+  }
+}
+```
+
+### Launch Feedback Examples
+
+**Success:**
+
+```json
+{
+  "type": "process_feedback",
+  "data": {
+    "success": true,
+    "action": "launch",
+    "message": null,
+    "pid": null,
+    "name": "notepad.exe"
+  }
+}
+```
+
+**Failure:**
+
+```json
+{
+  "type": "process_feedback",
+  "data": {
+    "success": false,
+    "action": "launch",
+    "message": "The system cannot find the file specified.",
+    "pid": null,
+    "name": "nonexistent.exe"
+  }
+}
+```
+
+## Configuration
+
+In `config.json`:
+
+```json
+{
+  "websocket": {
+    "processes": {
+      "enabled": true,
+      "interval_ms": 3000
+    }
+  }
+}
+```
+
+<Callout type="warn" title="Performance Note">
+  Process enumeration can be resource-intensive. The default 3-second interval balances
+  freshness with performance. Avoid setting this too low.
+</Callout>
+
+## Example Use Cases
+
+### 1. Task Manager Widget
+
+Display top processes by memory usage:
+
+```javascript
+const ws = new WebSocket("ws://localhost:9990/api/ws");
+
+ws.onopen = () => {
+  ws.send(
+    JSON.stringify({
+      op: "subscribe",
+      data: { topics: ["processes"] },
+    }),
+  );
+};
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "process_list") {
+    // Already sorted by memory (highest first)
+    const top5 = data.processes.slice(0, 5);
+    renderProcessList(top5);
+  }
+};
+
+function renderProcessList(processes) {
+  const container = document.getElementById("processes");
+  container.innerHTML = processes
+    .map(
+      (p) => `
+    <div class="process-row">
+      <span class="name">${p.name}</span>
+      <span class="count">${p.count} instance${p.count > 1 ? "s" : ""}</span>
+      <span class="memory">${p.memory_mb.toFixed(0)} MB</span>
+      <button onclick="killProcess('${p.name}')">Kill</button>
+    </div>
+  `,
+    )
+    .join("");
+}
+```
+
+### 2. Memory Hog Detector
+
+Alert when a process uses too much memory:
+
+```javascript
+const MEMORY_THRESHOLD_MB = 4096; // 4 GB
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "process_list") {
+    for (const process of data.processes) {
+      if (process.memory_mb > MEMORY_THRESHOLD_MB) {
+        showAlert(`${process.name} is using ${process.memory_mb.toFixed(0)} MB!`);
+      }
+    }
+  }
+};
+```
+
+### 3. Quick Launch Buttons
+
+Launch common applications:
+
+```javascript
+const quickLaunch = {
+  notepad: "notepad.exe",
+  calculator: "calc.exe",
+  explorer: "explorer.exe",
+  terminal: "wt.exe",
+};
+
+function launchApp(appKey) {
+  ws.send(
+    JSON.stringify({
+      op: "process_launch",
+      data: { path: quickLaunch[appKey] },
+    }),
+  );
+}
+
+// Listen for feedback
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "process_feedback" && data.action === "launch") {
+    if (data.success) {
+      showToast(`Launched ${data.name}`);
+    } else {
+      showError(`Failed to launch: ${data.message}`);
+    }
+  }
+};
+```
+
+### 4. Auto-Kill Memory Hogs
+
+Automatically kill processes that exceed a threshold:
+
+```javascript
+const AUTO_KILL_THRESHOLD_MB = 8192; // 8 GB
+const PROTECTED = ["explorer", "code", "chrome"]; // Don't kill these
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "process_list") {
+    for (const process of data.processes) {
+      if (process.memory_mb > AUTO_KILL_THRESHOLD_MB) {
+        if (!PROTECTED.includes(process.name.toLowerCase())) {
+          console.log(`Auto-killing ${process.name} (${process.memory_mb} MB)`);
+          ws.send(
+            JSON.stringify({
+              op: "process_kill",
+              data: { name: process.name },
+            }),
+          );
+        }
+      }
+    }
+  }
+};
+```
+
+### 5. Process Monitor with Kill Confirmation
+
+Full process manager with feedback handling:
+
+```javascript
+let processes = [];
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  switch (type) {
+    case "process_list":
+      processes = data.processes;
+      renderProcessTable(processes);
+      break;
+
+    case "process_feedback":
+      if (data.action === "kill") {
+        if (data.success) {
+          showToast(`Killed ${data.name} (PID: ${data.pid})`);
+        } else {
+          showError(data.message);
+        }
+      }
+      break;
+  }
+};
+
+function killByName(name) {
+  if (confirm(`Kill all instances of ${name}?`)) {
+    ws.send(
+      JSON.stringify({
+        op: "process_kill",
+        data: { name },
+      }),
+    );
+  }
+}
+```
+
+### 6. Startup Script
+
+Launch multiple apps on connection:
+
+```javascript
+const startupApps = [
+  { path: "spotify.exe" },
+  { path: "discord.exe" },
+  { path: "code.exe", args: ["C:\\Projects\\myapp"] },
+];
+
+ws.onopen = () => {
+  for (const app of startupApps) {
+    ws.send(
+      JSON.stringify({
+        op: "process_launch",
+        data: app,
+      }),
+    );
+  }
+};
+```

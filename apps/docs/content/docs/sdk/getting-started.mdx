@@ -1,0 +1,128 @@
+---
+title: Getting Started
+description: Install and configure the SDK in your React app.
+icon: Rocket
+---
+
+## Installation
+
+Install the SDK and its peer dependencies:
+
+```bash
+pnpm add @cntrl-pw/sdk @tanstack/react-query zustand
+```
+
+## Setup Providers
+
+Wrap your app with the required providers:
+
+```tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BridgesProvider } from "@cntrl-pw/sdk";
+
+const queryClient = new QueryClient();
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BridgesProvider>{/* Your app */}</BridgesProvider>
+    </QueryClientProvider>
+  );
+}
+```
+
+### Provider Options
+
+```tsx
+<BridgesProvider
+  autoConnect={true}  // Auto-connect to all saved bridges on mount (default: true)
+>
+```
+
+## Adding Your First Bridge
+
+```tsx
+import { useBridges } from "@cntrl-pw/sdk";
+
+function AddBridgeForm() {
+  const { addBridge } = useBridges();
+  const [host, setHost] = useState("");
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+
+    const bridgeId = addBridge({
+      name: "My PC",
+      config: {
+        host,
+        port: 9990, // Default port
+        secure: false, // Use wss:// instead of ws://
+        apiKey: undefined, // Optional API key
+      },
+    });
+
+    console.log("Added bridge:", bridgeId);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        value={host}
+        onChange={(e) => setHost(e.target.value)}
+        placeholder="192.168.1.100"
+      />
+      <button type="submit">Add Bridge</button>
+    </form>
+  );
+}
+```
+
+## Using Hooks
+
+Once a bridge is added, use hooks to access its data:
+
+```tsx
+import { useBridge, useSystemStats } from "@cntrl-pw/sdk";
+
+function BridgeStatus({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+  const { data, isLoading } = useSystemStats(bridgeId);
+
+  if (!bridge) return <div>Bridge not found</div>;
+
+  if (bridge.status === "connecting") return <div>Connecting...</div>;
+  if (bridge.status === "error") return <div>Connection failed</div>;
+  if (bridge.status === "disconnected") return <div>Disconnected</div>;
+
+  if (isLoading) return <div>Loading stats...</div>;
+
+  return (
+    <div>
+      <h2>{bridge.name}</h2>
+      <p>CPU: {data?.cpu.current_load.toFixed(1)}%</p>
+      <p>RAM: {data?.memory.percent.toFixed(1)}%</p>
+    </div>
+  );
+}
+```
+
+## TypeScript
+
+The SDK is fully typed. Import types as needed:
+
+```tsx
+import type {
+  BridgeConfig,
+  StoredBridge,
+  BridgeConnection,
+  ConnectionStatus,
+  SystemStats,
+  MediaState,
+  Process,
+} from "@cntrl-pw/sdk";
+```
+
+## Next Steps
+
+- [Managing Bridges](/docs/sdk/bridges) - Add, remove, update bridges
+- [Hooks Reference](/docs/sdk/hooks) - All available hooks

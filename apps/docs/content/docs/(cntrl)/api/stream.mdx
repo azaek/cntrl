@@ -1,0 +1,143 @@
+---
+title: SSE Stream
+description: Real-time system stats via Server-Sent Events.
+badge: New
+icon: Radio
+---
+
+<Callout type="success" title="Introducing SSE Stream">
+  A new and improved way to receive real-time usage data. It's a replacement for polling
+  `/api/usage`.
+</Callout>
+
+<Callout type="tip" title="Consider WebSocket">
+  For bidirectional communication (sending commands + receiving data), check out the
+  [WebSocket API](/docs/ws). It supports subscriptions, media control, process management,
+  and operation feedback.
+</Callout>
+
+The `/api/stream` endpoint provides a persistent Server-Sent Events (SSE) connection that pushes real-time system stats at a configurable interval.
+
+## Endpoints
+
+### Connect to Stream
+
+Open a persistent connection to receive real-time updates.
+
+```http
+GET /api/stream
+```
+
+**Query Parameters:**
+
+- `fields` (string): Comma-separated list of fields (`cpu`, `memory`, `gpu`, `disks`, `network`). Omit for all.
+
+**Response (Stream):**
+
+```json
+data: {"timestamp":1705123456,"uptime":3600,"cpu":{...},"memory":{...}}
+data: {"timestamp":1705123458,"uptime":3602,"cpu":{...},"memory":{...}}
+```
+
+**Payload Schema:**
+
+```json
+{
+  "timestamp": 1705123456,
+  "uptime": 3600,
+  "cpu": {
+    "current_load": 25.5,
+    "current_temp": 65.0,
+    "current_speed": 4.2
+  },
+  "memory": {
+    "used": 8589934592,
+    "free": 8589934592,
+    "used_percent": 50.0
+  }
+}
+```
+
+## Field Reference
+
+| Field       | Type   | Description                                            |
+| :---------- | :----- | :----------------------------------------------------- |
+| `timestamp` | int    | Unix timestamp of the update.                          |
+| `uptime`    | int    | System uptime in seconds.                              |
+| `cpu`       | object | CPU usage stats (omitted if filtered out).             |
+| `memory`    | object | Memory usage stats (omitted if filtered out).          |
+| `gpu`       | object | GPU usage stats (null if no GPU, omitted if filtered). |
+| `disks`     | array  | Disk usage per mount (omitted if filtered out).        |
+| `network`   | object | Network I/O counters (omitted if filtered out).        |
+
+## JavaScript Usage
+
+```javascript
+// Native EventSource (works from whitelisted IPs)
+const es = new EventSource("http://your-pc:9990/api/stream?fields=cpu,memory");
+es.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("CPU:", data.cpu.current_load);
+};
+
+// With auth (use fetch for custom headers)
+async function streamWithAuth(url, apiKey, onMessage) {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const text = decoder.decode(value);
+    for (const line of text.split("\n")) {
+      if (line.startsWith("data: ")) {
+        onMessage(JSON.parse(line.slice(6)));
+      }
+    }
+  }
+}
+```
+
+## Configuration
+
+The stream interval can be configured in `config.json`:
+
+```json
+{
+  "stats": {
+    "stream_interval_seconds": 2
+  }
+}
+```
+
+<Callout type="info">
+  The minimum interval is 1 second. Lower values provide more real-time updates but
+  increase network traffic and system resource usage.
+</Callout>
+
+<Callout type="tip" title="Filtering">
+  Use the `fields` parameter to reduce bandwidth and client processing. Only requested
+  fields are included in the payload.
+</Callout>
+
+## Example Usage Scenarios
+
+### 1. Real-Time Resource Monitor
+
+Build a line chart showing CPU and Memory history.
+
+1. Connect to `/api/stream?fields=cpu,memory`.
+2. Append new data points to your chart array as they arrive.
+3. Visualize the live load.
+
+### 2. Network Activity LED
+
+Blink an LED on your Raspberry Pi based on traffic.
+
+1. Listen to `/api/stream?fields=network`.
+2. If `bytesRecv` delta > threshold, turn on RX LED.
+3. If `bytesSent` delta > threshold, turn on TX LED.

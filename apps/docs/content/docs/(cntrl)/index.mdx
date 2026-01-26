@@ -1,0 +1,89 @@
+---
+title: Introduction
+description: Remote control for your PC, from anywhere in your home.
+icon: Album
+---
+
+<img
+  src="https://github.com/azaek/cntrl/blob/main/github.png?raw=true"
+  alt="Cover"
+  className="hidden dark:block"
+/>
+<img
+  src="https://github.com/azaek/cntrl/blob/main/github-light.png?raw=true"
+  alt="Cover"
+  className="mt-0 block dark:hidden"
+/>
+
+Welcome to **Cntrl Bridge**.
+
+<Callout type="warn" title="Public Alpha">
+  Cntrl Bridge is currently in early development (v0.x). Features and API endpoints are
+  subject to **breaking changes** without major version increments.
+</Callout>
+
+A lightweight system tray app that exposes your PC as a controllable API - monitor stats, control media, manage processes, and trigger power actions from any device
+on your network.
+
+Built with **Rust** and **Tauri**, it provides native performance with minimal resource usage. It was designed for personal use and for people who enjoy building their own dashboards or remote control setups.
+
+### Philosophy
+
+- **Lightweight**: Minimal memory footprint (~20MB) using native system WebView
+- **Fast**: Rust-powered backend for maximum performance
+- **Transparent**: What you see in the tray is what is running. No hidden services.
+
+### Key Features
+
+- **System Monitoring**: Access CPU load, GPU temperature, RAM usage, and Disk space via a simple JSON API.
+- **Real-Time Updates**: WebSocket API with lazy-spawned loops - zero CPU overhead when idle.
+- **Media Control**: Control playback, volume, and see what's playing on any media app.
+- **Process Management**: View running processes, kill memory hogs, and launch apps remotely.
+- **Power Management**: Remotely Shutdown, Restart, or put your computer to Sleep.
+- **Cross-Platform**: Runs on Windows and macOS (Intel & Apple Silicon).
+- **Tray-Only App**: Lives in your system tray/menu bar, no taskbar clutter.
+- **Native Performance**: Rust-powered backend with minimal resource usage (~20MB).
+
+<Callout type="warn" title="No Built-in Encryption">
+**Cntrl Bridge has no built-in encryption.** It is designed to be used within your local home network.
+
+We **do not recommend** exposing this port to the public internet or using port forwarding on your router for this application.
+
+We provide no guarantee of protection or security. Use it at your own risk.
+
+</Callout>
+
+## Next Steps
+
+<Cards>
+  <Card
+    title="Quick Setup"
+    href="/docs/setup"
+    description="How to get Cntrl running on your PC."
+    icon={<Icon name="Zap" />}
+  />
+  <Card
+    title="Configuration"
+    href="/docs/config"
+    description="Deep dive into the settings file."
+    icon={<Icon name="Settings" />}
+  />
+  <Card
+    title="REST API"
+    href="/docs/api"
+    description="HTTP endpoints for system data and control."
+    icon={<Icon name="Code" />}
+  />
+  <Card
+    title="WebSocket API"
+    href="/docs/ws"
+    description="Real-time subscriptions and bidirectional control."
+    icon={<Icon name="Radio" />}
+  />
+  <Card
+    title="FAQ"
+    href="/docs/faq"
+    description="Common questions and use cases."
+    icon={<Icon name="MessageCircleQuestionMark" />}
+  />
+</Cards>

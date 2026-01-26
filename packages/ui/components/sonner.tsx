@@ -1,4 +1,4 @@
-import { useTheme } from "@repo/ui/lib/theme-provider";
+import { useTheme } from "@cntrl-pw/ui/lib/theme-provider";
 import {
   CircleCheckIcon,
   InfoIcon,

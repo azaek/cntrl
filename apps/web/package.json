@@ -1,5 +1,5 @@
 {
-  "name": "@repo/web",
+  "name": "@cntrl-pw/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,28 +12,27 @@
     "ui": "pnpm dlx shadcn@latest"
   },
   "dependencies": {
-    "@repo/auth": "workspace:*",
-    "@repo/db": "workspace:*",
-    "@repo/ui": "workspace:*",
+    "@cntrl-pw/ui": "workspace:*",
     "@tanstack/react-form-start": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-router-ssr-query": "catalog:",
     "@tanstack/react-start": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "@cntrl-pw/sdk": "workspace:*",
     "date-fns": "catalog:",
-    "drizzle-orm": "catalog:",
     "lucide-react": "catalog:",
     "nitro": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "sonner": "catalog:",
     "vite": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "zustand": "catalog:"
   },
   "devDependencies": {
-    "@repo/eslint-config": "workspace:*",
-    "@repo/tsconfig": "workspace:*",
+    "@cntrl-pw/eslint-config": "workspace:*",
+    "@cntrl-pw/tsconfig": "workspace:*",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/devtools-vite": "catalog:",
     "@tanstack/react-devtools": "catalog:",

@@ -1,0 +1,198 @@
+---
+title: usePower
+description: Power control commands (shutdown, restart, sleep, WoL).
+icon: Power
+---
+
+Control system power state via REST API, including Wake-on-LAN.
+
+## Usage
+
+```tsx
+import { usePower } from "@cntrl-pw/sdk";
+
+function PowerControls({ bridgeId }: { bridgeId: string }) {
+  const { shutdown, restart, sleep, hibernate, wakeOnLan } = usePower(bridgeId);
+
+  return (
+    <div className="power-controls">
+      <button onClick={() => wakeOnLan.mutate()}>Wake Up</button>
+      <button onClick={() => sleep.mutate()}>Sleep</button>
+      <button onClick={() => hibernate.mutate()}>Hibernate</button>
+      <button onClick={() => restart.mutate()}>Restart</button>
+      <button onClick={() => shutdown.mutate()}>Shutdown</button>
+    </div>
+  );
+}
+```
+
+## Available Commands
+
+| Command     | Description                                       |
+| ----------- | ------------------------------------------------- |
+| `wakeOnLan` | Wake a sleeping/powered-off system (requires MAC) |
+| `sleep`     | Put system to sleep                               |
+| `hibernate` | Hibernate system                                  |
+| `restart`   | Restart system                                    |
+| `shutdown`  | Shut down system                                  |
+
+<Callout type="warn" title="Destructive Actions">
+  Shutdown and restart will immediately affect the remote system. Consider adding
+  confirmation dialogs.
+</Callout>
+
+## Example with Confirmation
+
+```tsx
+import { usePower } from "@cntrl-pw/sdk";
+import { useState } from "react";
+
+function PowerMenu({ bridgeId }: { bridgeId: string }) {
+  const { shutdown, restart, sleep, hibernate } = usePower(bridgeId);
+  const [confirmAction, setConfirmAction] = useState<string | null>(null);
+
+  const actions = {
+    sleep: { label: "Sleep", mutation: sleep, dangerous: false },
+    hibernate: { label: "Hibernate", mutation: hibernate, dangerous: false },
+    restart: { label: "Restart", mutation: restart, dangerous: true },
+    shutdown: { label: "Shutdown", mutation: shutdown, dangerous: true },
+  };
+
+  const handleClick = (key: string) => {
+    const action = actions[key as keyof typeof actions];
+    if (action.dangerous) {
+      setConfirmAction(key);
+    } else {
+      action.mutation.mutate();
+    }
+  };
+
+  const handleConfirm = () => {
+    if (confirmAction) {
+      actions[confirmAction as keyof typeof actions].mutation.mutate();
+      setConfirmAction(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="power-buttons">
+        {Object.entries(actions).map(([key, { label, dangerous }]) => (
+          <button
+            key={key}
+            onClick={() => handleClick(key)}
+            className={dangerous ? "dangerous" : ""}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {confirmAction && (
+        <div className="confirm-dialog">
+          <p>Are you sure you want to {confirmAction} the system?</p>
+          <button onClick={handleConfirm}>Yes, {confirmAction}</button>
+          <button onClick={() => setConfirmAction(null)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Mutation State
+
+Each power command returns a React Query mutation:
+
+```tsx
+const { shutdown } = usePower(bridgeId);
+
+// Check mutation state
+shutdown.isPending; // Request in progress
+shutdown.isSuccess; // Request succeeded
+shutdown.isError; // Request failed
+shutdown.error; // Error object
+
+// Callbacks
+shutdown.mutate(undefined, {
+  onSuccess: () => console.log("Shutdown initiated"),
+  onError: (err) => console.error("Failed:", err),
+});
+```
+
+<Callout title="Note">
+  Power commands are fire-and-forget. A successful response means the command was sent,
+  but the system may take a moment to actually shut down.
+</Callout>
+
+## Wake-on-LAN
+
+Wake up a sleeping or powered-off system using Wake-on-LAN.
+
+### Requirements
+
+1. **MAC address configured** - The bridge must have a `mac` field set
+2. **Node.js environment** - WoL uses UDP sockets (dgram module)
+3. **Network configuration** - Target system must have WoL enabled in BIOS
+
+<Callout type="warn" title="Browser Limitation">
+  Wake-on-LAN does not work in browser environments due to UDP socket restrictions. It only works in Node.js environments like Electron apps or server-side code.
+
+For browser-only apps, use a server-side proxy to send WoL packets.
+
+</Callout>
+
+### Usage
+
+```tsx
+import { usePower, useBridge } from "@cntrl-pw/sdk";
+
+function WakeButton({ bridgeId }: { bridgeId: string }) {
+  const bridge = useBridge(bridgeId);
+  const { wakeOnLan } = usePower(bridgeId);
+
+  // Only show if MAC is configured and system is offline
+  if (!bridge?.mac) {
+    return <span>MAC not configured</span>;
+  }
+
+  return (
+    <button onClick={() => wakeOnLan.mutate()} disabled={wakeOnLan.isPending}>
+      {wakeOnLan.isPending ? "Waking..." : "Wake Up"}
+    </button>
+  );
+}
+```
+
+### Setting MAC Address
+
+When adding a bridge, include the MAC address:
+
+```tsx
+const { addBridge, updateBridge } = useBridges();
+
+// Add with MAC
+addBridge({
+  name: "Gaming PC",
+  config: { host: "192.168.1.100", port: 9990 },
+  mac: "00:11:22:33:44:55",
+});
+
+// Or update existing bridge
+updateBridge(bridgeId, {
+  mac: "00:11:22:33:44:55",
+});
+```
+
+### Direct Function
+
+For non-React usage or custom implementations:
+
+```tsx
+import { sendWolPacket } from "@cntrl-pw/sdk";
+
+// Send WoL packet directly (Node.js only)
+await sendWolPacket("00:11:22:33:44:55", {
+  ip: "192.168.1.100", // Optional: helps derive broadcast address
+});
+```

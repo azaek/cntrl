@@ -1,0 +1,222 @@
+---
+title: useMedia
+description: Media playback state and controls.
+icon: Music
+---
+
+Subscribe to now-playing information and control media playback.
+
+## Usage
+
+```tsx
+import { useMedia } from "@cntrl-pw/sdk";
+
+function MediaPlayer({ bridgeId }: { bridgeId: string }) {
+  const { data, control } = useMedia(bridgeId);
+
+  if (!data) return <div>No media playing</div>;
+
+  return (
+    <div>
+      <h3>{data.title}</h3>
+      <p>{data.artist}</p>
+
+      {data.supports_ctrl && (
+        <div className="controls">
+          <button onClick={() => control.mutate({ action: "previous" })}>⏮</button>
+          <button onClick={() => control.mutate({ action: "play_pause" })}>
+            {data.playing ? "⏸" : "▶"}
+          </button>
+          <button onClick={() => control.mutate({ action: "next" })}>⏭</button>
+        </div>
+      )}
+
+      {data.volume !== null && (
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={data.volume}
+          onChange={(e) =>
+            control.mutate({ action: "set_volume", value: Number(e.target.value) })
+          }
+        />
+      )}
+    </div>
+  );
+}
+```
+
+## Return Type
+
+The hook returns `MediaStatus` from the Bridge API:
+
+```tsx
+interface MediaStatus {
+  status: string;              // Status description
+  volume: number | null;       // 0-100 or null if unavailable
+  muted: boolean | null;       // Mute state or null if unavailable
+  playing: boolean | null;     // Playing state or null if unavailable
+  title: string | null;        // Track title
+  artist: string | null;       // Artist name
+  supports_ctrl: boolean;      // Whether playback control is supported
+}
+
+// Control mutation
+const { control } = useMedia(bridgeId);
+control.mutate(action: MediaAction);
+
+interface MediaAction {
+  action: MediaActionType;
+  value?: number;              // Required for set_volume
+}
+```
+
+## Options
+
+### Connection Mode
+
+Control how the hook handles WebSocket connection:
+
+```tsx
+// Auto (default) - connects if disconnected
+const { data, control } = useMedia(bridgeId);
+
+// Passive - don't trigger connection
+const { data, control } = useMedia(bridgeId, { connectionMode: "passive" });
+
+// Eager - connect once, respect manual disconnects
+const { data, control } = useMedia(bridgeId, { connectionMode: "eager" });
+```
+
+| Mode        | Behavior                                                |
+| ----------- | ------------------------------------------------------- |
+| `"auto"`    | Connects if disconnected. Reconnects on rerenders.      |
+| `"passive"` | Never triggers connection. Only uses data if connected. |
+| `"eager"`   | Connects once on mount. Respects manual disconnects.    |
+
+## Available Actions
+
+| Action              | Description          | Value   |
+| ------------------- | -------------------- | ------- |
+| `play`              | Start playback       | -       |
+| `pause`             | Pause playback       | -       |
+| `play_pause`        | Toggle play/pause    | -       |
+| `next`              | Skip to next track   | -       |
+| `previous` / `prev` | Go to previous track | -       |
+| `stop`              | Stop playback        | -       |
+| `set_volume`        | Set volume level     | `0-100` |
+| `volume_up`         | Increase volume      | -       |
+| `volume_down`       | Decrease volume      | -       |
+| `mute`              | Mute audio           | -       |
+| `unmute`            | Unmute audio         | -       |
+| `toggle_mute`       | Toggle mute state    | -       |
+
+## Examples
+
+### Volume Slider with Optimistic Updates
+
+Volume changes are optimistic - the UI updates immediately:
+
+```tsx
+function VolumeSlider({ bridgeId }: { bridgeId: string }) {
+  const { data, control } = useMedia(bridgeId);
+
+  if (data?.volume === null) return null;
+
+  return (
+    <div className="volume">
+      <button onClick={() => control.mutate({ action: "toggle_mute" })}>
+        {data?.muted ? "🔇" : "🔊"}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={data?.volume ?? 50}
+        onChange={(e) =>
+          control.mutate({
+            action: "set_volume",
+            value: Number(e.target.value),
+          })
+        }
+      />
+      <span>{data?.volume}%</span>
+    </div>
+  );
+}
+```
+
+### Now Playing Card
+
+```tsx
+function NowPlaying({ bridgeId }: { bridgeId: string }) {
+  const { data } = useMedia(bridgeId);
+
+  if (!data?.title) {
+    return (
+      <div className="now-playing empty">
+        <p>Nothing playing</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="now-playing">
+      <div className="info">
+        <h4>{data.title}</h4>
+        {data.artist && <p>{data.artist}</p>}
+        <p className="status">{data.status}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+### Full Media Controls
+
+```tsx
+function MediaControls({ bridgeId }: { bridgeId: string }) {
+  const { data, control } = useMedia(bridgeId);
+
+  if (!data) return <div>Loading media...</div>;
+
+  // Check if controls are supported
+  if (!data.supports_ctrl) {
+    return (
+      <div className="media-info">
+        <p>{data.title ?? "No media"}</p>
+        <p className="note">Playback control not available</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="media-controls">
+      <div className="track-info">
+        <h3>{data.title ?? "Unknown"}</h3>
+        <p>{data.artist ?? "Unknown artist"}</p>
+      </div>
+
+      <div className="playback-controls">
+        <button onClick={() => control.mutate({ action: "previous" })}>Previous</button>
+        <button onClick={() => control.mutate({ action: "play_pause" })}>
+          {data.playing ? "Pause" : "Play"}
+        </button>
+        <button onClick={() => control.mutate({ action: "next" })}>Next</button>
+      </div>
+
+      {data.volume !== null && (
+        <div className="volume-controls">
+          <button onClick={() => control.mutate({ action: "volume_down" })}>-</button>
+          <span>{data.volume}%</span>
+          <button onClick={() => control.mutate({ action: "volume_up" })}>+</button>
+          <button onClick={() => control.mutate({ action: "toggle_mute" })}>
+            {data.muted ? "Unmute" : "Mute"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```

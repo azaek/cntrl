@@ -1,0 +1,304 @@
+---
+title: Media Topic
+description: Real-time media status and playback control via WebSocket
+badge: New
+icon: Headphones
+---
+
+The **media** topic is the **recommended way** to build media widgets and remote controls. It provides real-time now-playing information and allows you to control playback directly through the same WebSocket connection.
+
+<Callout type="tip" title="Why WebSocket for Media?">
+  Unlike the [REST API](/docs/api/media), the WebSocket media topic: - **Sends updates
+  instantly** when track, volume, or playback state changes - **No polling required** -
+  zero wasted requests - **Bidirectional** - send commands and receive feedback through
+  one connection - **Efficient** - Cntrl only broadcasts when something actually changes
+</Callout>
+
+<Callout type="success" title="Smart Updates">
+  Media events only broadcast when something changes (track, play/pause, volume, mute). No
+  constant polling - you only receive data when it matters.
+</Callout>
+
+## Subscribe
+
+```json
+{ "op": "subscribe", "data": { "topics": ["media"] } }
+```
+
+## Event: `media_update`
+
+Broadcasts immediately on subscribe, then whenever media state changes.
+
+```json
+{
+  "type": "media_update",
+  "data": {
+    "status": "playing",
+    "volume": 75,
+    "muted": false,
+    "playing": true,
+    "title": "Bohemian Rhapsody",
+    "artist": "Queen",
+    "supports_ctrl": true
+  }
+}
+```
+
+### Field Reference
+
+| Field           | Type   | Description                             |
+| :-------------- | :----- | :-------------------------------------- |
+| `status`        | string | `"playing"`, `"paused"`, or `"stopped"` |
+| `volume`        | int    | System volume (0-100)                   |
+| `muted`         | bool   | Whether system audio is muted           |
+| `playing`       | bool   | True if media is actively playing       |
+| `title`         | string | Current track title                     |
+| `artist`        | string | Current artist name                     |
+| `supports_ctrl` | bool   | Whether playback control is supported   |
+
+### When Updates Are Sent
+
+Updates trigger on any of these changes:
+
+- Track changes (new song)
+- Play/pause state changes
+- Mute/unmute
+- Volume changes
+
+<Callout type="info" title="Volume Detection">
+  Volume changes are detected and broadcast automatically. If you change volume using your
+  keyboard or system controls, connected clients will see the update.
+</Callout>
+
+## Sending Commands
+
+### Media Control
+
+```json
+{
+  "op": "media",
+  "data": {
+    "action": "play_pause"
+  }
+}
+```
+
+### Available Actions
+
+#### Playback
+
+| Action       | Description           |
+| :----------- | :-------------------- |
+| `play`       | Start/resume playback |
+| `pause`      | Pause playback        |
+| `play_pause` | Toggle play/pause     |
+| `next`       | Next track            |
+| `prev`       | Previous track        |
+
+#### Volume
+
+| Action        | Value   | Description               |
+| :------------ | :------ | :------------------------ |
+| `volume_up`   | -       | Increase volume           |
+| `volume_down` | -       | Decrease volume           |
+| `set_volume`  | `0-100` | Set specific volume level |
+| `mute`        | -       | Mute audio                |
+| `unmute`      | -       | Unmute audio              |
+| `toggle_mute` | -       | Toggle mute state         |
+
+### Set Volume Example
+
+```json
+{
+  "op": "media",
+  "data": {
+    "action": "set_volume",
+    "value": 50
+  }
+}
+```
+
+## Event: `media_feedback`
+
+After sending a media command, you'll receive feedback:
+
+```json
+{
+  "type": "media_feedback",
+  "data": {
+    "success": true,
+    "action": "play_pause",
+    "message": null
+  }
+}
+```
+
+### Feedback Fields
+
+| Field     | Type   | Description                               |
+| :-------- | :----- | :---------------------------------------- |
+| `success` | bool   | Whether the command succeeded             |
+| `action`  | string | The action that was executed              |
+| `message` | string | Error message if failed (null on success) |
+
+<Callout type="info" title="Two Messages">
+  After a media command, you receive: 1. `media_feedback` - Immediate confirmation 2.
+  `media_update` - State change (if the action changed something)
+</Callout>
+
+## Configuration
+
+In `config.json`:
+
+```json
+{
+  "websocket": {
+    "media": {
+      "enabled": true,
+      "interval_ms": 500
+    }
+  }
+}
+```
+
+The `interval_ms` controls how often the media state is polled for changes (not how often updates are sent).
+
+## Example Use Cases
+
+### 1. Now Playing Widget
+
+Display current track with play/pause control:
+
+```javascript
+const ws = new WebSocket("ws://localhost:9990/api/ws");
+let currentMedia = null;
+
+ws.onopen = () => {
+  ws.send(
+    JSON.stringify({
+      op: "subscribe",
+      data: { topics: ["media"] },
+    }),
+  );
+};
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "media_update") {
+    currentMedia = data;
+    document.getElementById("title").textContent = data.title || "Nothing playing";
+    document.getElementById("artist").textContent = data.artist || "";
+    document.getElementById("playBtn").textContent = data.playing ? "⏸" : "▶";
+  }
+};
+
+function togglePlayPause() {
+  ws.send(
+    JSON.stringify({
+      op: "media",
+      data: { action: "play_pause" },
+    }),
+  );
+}
+```
+
+### 2. Volume Slider
+
+Real-time volume control with visual feedback:
+
+```javascript
+const volumeSlider = document.getElementById("volume");
+
+// Update slider when volume changes externally
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  if (type === "media_update" && data.volume !== null) {
+    volumeSlider.value = data.volume;
+  }
+};
+
+// Send volume changes
+volumeSlider.oninput = (e) => {
+  ws.send(
+    JSON.stringify({
+      op: "media",
+      data: { action: "set_volume", value: parseInt(e.target.value) },
+    }),
+  );
+};
+```
+
+### 3. Smart Home Integration
+
+Auto-pause when leaving home:
+
+```javascript
+// Called by your smart home system
+function onUserLeftHome() {
+  ws.send(
+    JSON.stringify({
+      op: "media",
+      data: { action: "pause" },
+    }),
+  );
+}
+
+// Auto-mute during meetings
+function onMeetingStarted() {
+  ws.send(
+    JSON.stringify({
+      op: "media",
+      data: { action: "mute" },
+    }),
+  );
+}
+```
+
+### 4. Media Remote Control
+
+Full remote control for your PC:
+
+```javascript
+const controls = {
+  playPause: () => sendCommand("play_pause"),
+  next: () => sendCommand("next"),
+  prev: () => sendCommand("prev"),
+  mute: () => sendCommand("toggle_mute"),
+  volUp: () => sendCommand("volume_up"),
+  volDown: () => sendCommand("volume_down"),
+};
+
+function sendCommand(action) {
+  ws.send(
+    JSON.stringify({
+      op: "media",
+      data: { action },
+    }),
+  );
+}
+
+// Bind to UI buttons
+document.getElementById("playPauseBtn").onclick = controls.playPause;
+document.getElementById("nextBtn").onclick = controls.next;
+// ... etc
+```
+
+### 5. Track Change Notifications
+
+Get notified when a new song starts:
+
+```javascript
+let lastTitle = null;
+
+ws.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+
+  if (type === "media_update") {
+    if (data.title && data.title !== lastTitle) {
+      lastTitle = data.title;
+      showNotification(`Now playing: ${data.title} - ${data.artist}`);
+    }
+  }
+};
+```

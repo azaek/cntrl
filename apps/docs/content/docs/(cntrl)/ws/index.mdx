@@ -1,0 +1,132 @@
+---
+title: Overview
+description: Real-time WebSocket API with lazy-spawned monitoring loops
+icon: ChartNoAxesGantt
+---
+
+The WebSocket API provides real-time, bidirectional communication with Cntrl Bridge. Unlike HTTP polling, updates are pushed to you instantly.
+
+## Why WebSocket?
+
+<Cards>
+  <Card
+    title="Real-time Updates"
+    description="Get system stats, media changes, and process lists pushed instantly."
+  />
+  <Card
+    title="Bidirectional"
+    description="Send commands (media control, process kill) and receive responses in the same connection."
+  />
+  <Card
+    title="Zero Overhead"
+    description="Monitoring loops only run when clients are subscribed. No CPU usage when idle."
+  />
+  <Card
+    title="Granular Control"
+    description="Subscribe to exactly what you need. Only receive CPU data? Only subscribe to CPU."
+  />
+</Cards>
+
+## Architecture: Lazy Loop Spawning
+
+<Callout type="success" title="Efficient by Design">
+  Cntrl Bridge uses **demand-based monitoring**. No polling loops run until a client
+  subscribes. When the last subscriber disconnects, loops stop automatically.
+</Callout>
+
+```
+Idle state (no WebSocket clients):
+  └─ Zero monitoring loops running
+  └─ Zero CPU overhead
+  └─ Same as HTTP-only mode
+
+First "stats" subscriber connects:
+  └─ Stats monitoring loop spawns
+  └─ Data broadcasts every 1 second
+
+Last "stats" subscriber disconnects:
+  └─ Stats loop stops automatically
+  └─ Back to zero CPU usage
+```
+
+### Benefits
+
+| Benefit              | Description                                                              |
+| :------------------- | :----------------------------------------------------------------------- |
+| **No idle overhead** | Server uses ~0% CPU when no clients are connected                        |
+| **Shared resources** | 100 clients subscribing to "stats" share ONE monitoring loop             |
+| **Instant data**     | First message arrives immediately on subscribe (no waiting for interval) |
+| **Smart updates**    | Media only broadcasts when state changes (not constant polling)          |
+
+## Connection
+
+**Endpoint**: `ws://<host>:<port>/api/ws`
+
+```javascript
+const ws = new WebSocket("ws://192.168.1.100:9990/api/ws");
+
+ws.onopen = () => {
+  // Subscribe to topics you need
+  ws.send(
+    JSON.stringify({
+      op: "subscribe",
+      data: { topics: ["stats", "media"] },
+    }),
+  );
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log(message.type, message.data);
+};
+```
+
+## Topics
+
+<Cards>
+  <Card
+    title="Stats"
+    href="/docs/ws/stats"
+    description="System performance metrics (CPU, memory, GPU, disks, network)."
+  />
+  <Card
+    title="Media"
+    href="/docs/ws/media"
+    description="Now playing info, playback control, and volume changes."
+  />
+  <Card
+    title="Processes"
+    href="/docs/ws/processes"
+    description="Running processes list and process management."
+  />
+</Cards>
+
+## Quick Reference
+
+### Subscribe
+
+```json
+{ "op": "subscribe", "data": { "topics": ["stats", "media", "processes"] } }
+```
+
+### Event Types
+
+| Event              | Topic     | Description                             |
+| :----------------- | :-------- | :-------------------------------------- |
+| `system_stats`     | stats     | CPU, memory, GPU, disk, network metrics |
+| `media_update`     | media     | Now playing info, volume, mute state    |
+| `process_list`     | processes | List of running processes               |
+| `media_feedback`   | media     | Response to media commands              |
+| `process_feedback` | processes | Response to process commands            |
+
+## Default Intervals
+
+| Topic     | Interval | Behavior                        |
+| :-------- | :------- | :------------------------------ |
+| Stats     | 1000ms   | Broadcasts every second         |
+| Media     | 500ms    | Only broadcasts on state change |
+| Processes | 3000ms   | Broadcasts every 3 seconds      |
+
+<Callout type="info" title="Configurable">
+  Intervals can be changed in `config.json` under `websocket.stats.interval_ms`, etc.
+</Callout>

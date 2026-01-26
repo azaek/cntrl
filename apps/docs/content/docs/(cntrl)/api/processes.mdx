@@ -1,0 +1,249 @@
+---
+title: Processes
+description: Monitor and control system processes.
+badge: Updated
+icon: Activity
+---
+
+<Callout type="success" title="Introducing Process Control Actions">
+  Added `launch`, `focus`, and `kill` actions to the Processes API.
+</Callout>
+
+The Processes API allows you to monitor running applications and perform actions like focusing windows or terminating processes.
+
+<Callout type="info">
+  To use these endpoints, ensure `enable_processes: true` is set in your configuration.
+</Callout>
+
+<Callout type="warn" title="macOS Permissions Required">
+  On macOS, using `/api/processes/focus` or `/api/processes/kill` requires
+  **Accessibility** permissions. When you first use these features, macOS may prompt you
+  to grant access. Go to **System Settings → Privacy & Security → Accessibility** and add
+  Cntrl Bridge to the allowed apps list.
+</Callout>
+
+## Endpoints
+
+### Get Process List (Aggregated)
+
+Returns a list of top memory-consuming processes, aggregated by name. This is useful for general monitoring.
+
+```http
+GET /api/processes
+```
+
+**Response:**
+
+```json
+[
+  {
+    "name": "chrome.exe",
+    "count": 12,
+    "memory": 4294967296,
+    "memory_mb": 4096.0,
+    "cpu_time": 120.5
+  },
+  {
+    "name": "Code.exe",
+    "count": 5,
+    "memory": 2147483648,
+    "memory_mb": 2048.0,
+    "cpu_time": 45.2
+  }
+]
+```
+
+---
+
+### Get Process Details (By Name)
+
+Get detailed information about all running instances of a specific process, including PIDs and window titles.
+
+```http
+GET /api/processes/{name}
+```
+
+**Parameters:**
+
+- `name` (path): The name of the process (e.g., `notepad.exe`).
+
+**Response:**
+
+```json
+[
+  {
+    "pid": 1234,
+    "name": "notepad.exe",
+    "title": "Untitled - Notepad",
+    "has_window": true,
+    "memory": 15482880,
+    "cpu": 0.0
+  },
+  {
+    "pid": 5678,
+    "name": "notepad.exe",
+    "title": "",
+    "has_window": false,
+    "memory": 4096000,
+    "cpu": 0.0
+  }
+]
+```
+
+---
+
+### Focus Process Window
+
+Attempts to bring the main window of a specific process to the foreground. This is useful for switching context on the remote machine.
+
+```http
+POST /api/processes/focus
+```
+
+**Body:**
+
+```json
+{
+  "pid": 1234
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": "success"
+}
+```
+
+<Callout type="warn" title="Platform Requirements">
+This endpoint relies on the OS window manager. It works best for processes with visible windows (`has_window: true`).
+
+**macOS**: Requires **Accessibility** permissions (see note above).
+
+</Callout>
+
+---
+
+### Kill Process
+
+Terminate one or more processes. You can kill a specific PID or all instances of a process name.
+
+```http
+POST /api/processes/kill
+```
+
+<Callout type="info" title="macOS Note">
+  On macOS, terminating processes may require **Accessibility** permissions (see note
+  above).
+</Callout>
+
+**Body (Kill Single PID):**
+
+```json
+{
+  "pid": 1234
+}
+```
+
+**Body (Kill All by Name):**
+
+```json
+{
+  "name": "notepad.exe"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "count": 1
+}
+```
+
+The `count` field indicates how many processes were terminated.
+
+---
+
+### Launch Process
+
+Start a new application or script on the host machine.
+
+```http
+POST /api/processes/launch
+```
+
+**Body (Windows Examples):**
+
+```json
+// Launch Notepad
+{
+  "path": "notepad.exe"
+}
+
+// Launch Spotify (via Protocol)
+{
+  "path": "cmd",
+  "args": ["/C", "start", "spotify:"]
+}
+```
+
+**Body (macOS Examples):**
+
+```json
+// Launch TextEdit
+{
+  "path": "open",
+  "args": ["-a", "TextEdit"]
+}
+
+// Launch Spotify
+{
+  "path": "open",
+  "args": ["-a", "Spotify"]
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": "success"
+}
+```
+
+<Callout type="tip" title="Real-Time Process List">
+  For real-time updates, use the [WebSocket API](/docs/ws/processes). Subscribe to the
+  `processes` topic and receive `process_list` events automatically. You can also send
+  kill/launch commands and receive feedback through the same connection.
+</Callout>
+
+## Example Usage Scenarios
+
+### 1. Remote Task Manager
+
+Create a dashboard that lists top resource-hogging applications.
+
+1. Call `GET /api/processes` to get the top list.
+2. Display them in a table.
+3. If a user clicks "End Task" on "chrome.exe":
+4. Call `POST /api/processes/kill` with `{"name": "chrome.exe"}` to close all instances.
+
+### 2. App Launcher & Switcher
+
+Build a control panel for your favorite apps.
+
+1. **Launch**: Use `POST /api/processes/launch` to start an app.
+2. **Switch**: Check if the app is running via `GET /api/processes/spotify.exe`.
+3. If running, iterate through the list to find the instance with `has_window: true`.
+4. Call `POST /api/processes/focus` with its PID to bring Spotify to the front.
+
+### 3. "Boss Mode" / Panic Button
+
+Instantly close distracting apps.
+
+1. Define a list of apps to close (e.g., games, browsers).
+2. When the button is pressed, cycle through the list.
+3. Call `POST /api/processes/kill` with `{"name": "game.exe"}` for each one.

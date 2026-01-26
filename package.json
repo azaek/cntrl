@@ -1,10 +1,14 @@
 {
-  "name": "monorepo-tanstarter",
+  "name": "cntrl",
   "private": true,
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
-    "dev:web": "turbo run dev --filter=@repo/web",
+    "dev:web": "turbo run dev --filter=@cntrl-pw/web",
+    "dev:hub": "turbo run dev --filter=@cntrl-pw/hub",
+    "dev:rhub": "turbo run dev --filter=@cntrl-pw/rhub",
+    "dev:docs": "turbo run dev --filter=@cntrl-pw/docs",
+    "dev:bridge": "pnpm --filter=@cntrl-pw/bridge run tauri:dev",
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "check-types": "turbo run check-types",
@@ -12,11 +16,10 @@
     "prepare": "husky",
     "deps": "pnpm dlx taze@latest -Ilwr",
     "deps:major": "pnpm dlx taze@latest major -Ilwr",
-    "db": "pnpm --filter=@repo/db run db",
-    "ui": "pnpm --filter=@repo/ui run ui",
-    "ui:web": "pnpm --filter=@repo/web run ui",
-    "auth:secret": "pnpm dlx @better-auth/cli@latest secret",
-    "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config ./packages/auth/src/auth.ts --y --output ./packages/db/src/schema/auth.schema.ts && prettier --write ./packages/db/src/schema/auth.schema.ts"
+    "ui": "pnpm --filter=@cntrl-pw/ui run ui",
+    "ui:web": "pnpm --filter=@cntrl-pw/web run ui",
+    "ui:hub": "pnpm --filter=@cntrl-pw/hub run ui",
+    "ui:rhub": "pnpm --filter=@cntrl-pw/rhub run ui"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"

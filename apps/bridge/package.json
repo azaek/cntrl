@@ -1,0 +1,36 @@
+{
+  "name": "@cntrl-pw/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cntrl Bridge - Remote PC control and monitoring",
+  "author": "azaek",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1420",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "check-types": "tsc --noEmit",
+    "lint": "echo 'No lint configured for SolidJS yet'"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "lucide-solid": "^0.562.0",
+    "solid-js": "^1.9.3",
+    "tailwind-merge": "catalog:",
+    "tailwindcss": "catalog:"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

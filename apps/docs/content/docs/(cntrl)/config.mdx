@@ -1,0 +1,151 @@
+---
+title: Configuration
+description: Customize Cntrl Bridge to fit your needs.
+icon: Settings
+---
+
+Cntrl Bridge uses a simple `config.json` file to store your settings. You can open this file location by clicking the tray/menu bar icon and selecting **Open Config Dir** in the dashboard.
+
+## File Location
+
+The configuration file is stored in your user's standard config folder:
+
+- **Windows**: `%APPDATA%\com.azaek.cntrl-bridge\config.json`
+- **macOS**: `~/Library/Application Support/com.azaek.cntrl-bridge/config.json`
+
+## Structure
+
+Here is a breakdown of the standard configuration options:
+
+```json title="config.json"
+{
+  "server": {
+    "host": "0.0.0.0", // Listen on all network interfaces
+    "port": 9990 // The HTTP port for the API
+  },
+  "display": {
+    "hostname": "" // Custom hostname (empty = auto-detect)
+  },
+  "features": {
+    "enable_system": true, // /api/system (static info)
+    "enable_usage": true, // /api/usage (dynamic usage)
+    "enable_stats": false, // /api/stats (legacy, deprecated)
+    "enable_stream": true, // /api/stream (SSE)
+    "enable_shutdown": false, // ⚠️ Critical - disabled by default
+    "enable_restart": false, // ⚠️ Critical - disabled by default
+    "enable_sleep": true, // /api/pw/sleep
+    "enable_hibernate": true, // /api/pw/hibernate
+    "enable_media": true, // /api/media/*
+    "enable_processes": true, // /api/processes
+    "enable_autostart": true // Start on login/boot
+  },
+  "stats": {
+    "gpu_enabled": true, // Enable GPU detection (NVIDIA, AMD, Intel)
+    "disk_cache_seconds": 30, // How long to cache disk stats
+    "stream_interval_seconds": 2 // SSE update interval (min 1s)
+  },
+  "websocket": {
+    "stats": {
+      "enabled": true, // Enable stats broadcasting
+      "interval_ms": 1000 // Broadcast every 1 second
+    },
+    "media": {
+      "enabled": true, // Enable media broadcasting
+      "interval_ms": 500 // Poll for changes every 500ms
+    },
+    "processes": {
+      "enabled": true, // Enable process list broadcasting
+      "interval_ms": 3000 // Broadcast every 3 seconds
+    }
+  },
+  "auth": {
+    "enabled": false, // Enable API key authentication
+    "api_key": null, // Your secret API key
+    "allowed_ips": [] // IP whitelist (empty = allow all)
+  }
+}
+```
+
+### Server Settings
+
+- **`host`**: By default, this is set to `0.0.0.0` so other devices on your network can reach the API. If you only want local access on the PC itself, change it to `127.0.0.1`.
+- **`port`**: The port number. If you change this, remember to update any remote dashboards or phone apps that connect to Cntrl.
+
+### Feature Toggles
+
+You can enable or disable specific parts of the API.
+
+- If a feature is set to `false`, the corresponding API endpoint will return a `403 Forbidden` error.
+- You can toggle these features instantly via the **Dashboard** by clicking the tray/menu bar icon.
+- **`enable_autostart`**: When enabled, the app automatically starts when you log in to your computer.
+
+<Callout
+  type="info"
+  title="Changes made in the Dashboard are automatically saved to the configuration file."
+></Callout>
+
+### WebSocket Settings
+
+Configure the real-time WebSocket API behavior for each topic.
+
+| Topic       | Default Interval | Description                                       |
+| :---------- | :--------------- | :------------------------------------------------ |
+| `stats`     | 1000ms           | System metrics (CPU, memory, GPU, disks, network) |
+| `media`     | 500ms            | Now playing info (only broadcasts on change)      |
+| `processes` | 3000ms           | Running process list                              |
+
+- **`enabled`**: Set to `false` to disable a topic entirely. The monitoring loop won't run even if clients subscribe.
+- **`interval_ms`**: How often to broadcast updates (in milliseconds).
+
+<Callout type="info" title="Media Behavior">
+  The media `interval_ms` controls how often the system checks for changes, not how often
+  updates are sent. Updates only broadcast when the media state actually changes (track,
+  play/pause, volume, mute).
+</Callout>
+
+<Callout type="tip" title="Performance Tuning">
+  - Lower intervals = more responsive, higher CPU usage - Higher intervals = less
+  responsive, lower CPU usage - Process enumeration is expensive; avoid intervals below
+  2000ms
+</Callout>
+
+### Authentication
+
+<Callout type="warning" title="Security">
+  By default, authentication is **disabled** for backward compatibility. Enable it if your
+  PC is accessible from untrusted networks.
+</Callout>
+
+- **`enabled`**: Set to `true` to require authentication for protected endpoints.
+- **`api_key`**: A secret key for clients not in the IP whitelist.
+- **`allowed_ips`**: IPs that **bypass the API key check entirely**. Supports:
+  - Individual IPs: `["192.168.1.100", "10.0.0.5"]`
+  - CIDR ranges: `["192.168.1.0/24", "100.64.0.0/10"]`
+  - Wildcard: `["*"]` to allow all IPs (API key still required)
+
+**Example with Tailscale:**
+
+```yaml
+auth:
+  enabled: true
+  api_key: "your-secret-key-here"
+  allowed_ips:
+    - "100.64.0.0/10" # Tailscale CGNAT range
+```
+
+<Callout type="tip" title="Public Endpoint">
+  The `/api/status` endpoint is always public (no auth required) for health checks.
+</Callout>
+
+## Applying Changes
+
+After editing the config file manually, you have two options:
+
+1. **Use Reload Config** - Click the tray/menu bar icon to open the dashboard, then click the **Restart** button
+2. **Restart the app** - Quit from the tray menu (Quit button) and reopen Cntrl Bridge
+
+<Callout type="tip" title="Reload Config">
+  The **Restart** button in the dashboard is the fastest way to apply changes like port
+  updates without fully closing the application. The server will briefly restart while
+  your settings are reloaded.
+</Callout>

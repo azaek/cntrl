@@ -1,0 +1,107 @@
+---
+title: Usage Data
+description: Get dynamic system usage metrics.
+icon: ChartLine
+---
+
+The `/api/usage` endpoint returns real-time usage data that changes frequently, such as CPU load, memory usage, and temperatures.
+
+<Callout type="warn" title="Prefer Real-Time APIs">
+  For real-time data, we recommend using [WebSocket](/docs/ws) or [SSE
+  Stream](/docs/api/stream) instead of polling this endpoint. Both push updates to you
+  automatically and are more efficient.
+</Callout>
+
+## Endpoints
+
+### Get Usage Data
+
+Returns real-time usage data that changes frequently, such as CPU load, memory usage, and temperatures.
+
+```http
+GET /api/usage
+```
+
+**Response:**
+
+```json
+{
+  "uptime": 86400,
+  "cpu": {
+    "current_load": 12.5,
+    "current_speed": 5.2
+  },
+  "memory": {
+    "used": 12456789012,
+    "free": 21811522540,
+    "used_percent": 36.35
+  }
+  // ... gpu, disks
+}
+```
+
+## Field Reference
+
+### Root Object
+
+| Field    | Type   | Description                               |
+| :------- | :----- | :---------------------------------------- |
+| `uptime` | int    | System uptime in seconds.                 |
+| `cpu`    | object | Current CPU usage metrics.                |
+| `memory` | object | Current memory usage.                     |
+| `gpu`    | object | Current GPU usage (null if not detected). |
+| `disks`  | array  | Current disk usage for each drive.        |
+
+### CPU Object
+
+| Field           | Type  | Description                   |
+| :-------------- | :---- | :---------------------------- |
+| `current_load`  | float | Current CPU usage percentage. |
+| `current_speed` | float | Current clock speed in GHz.   |
+
+### Memory Object
+
+| Field          | Type  | Description            |
+| :------------- | :---- | :--------------------- |
+| `used`         | int   | Used RAM in bytes.     |
+| `free`         | int   | Free RAM in bytes.     |
+| `used_percent` | float | Usage as a percentage. |
+
+### GPU Object
+
+| Field            | Type | Description            |
+| :--------------- | :--- | :--------------------- |
+| `current_load`   | int  | GPU usage percentage.  |
+| `current_temp`   | int  | GPU temperature in °C. |
+| `current_memory` | int  | VRAM usage in MB.      |
+
+### Disk Object
+
+| Field          | Type   | Description               |
+| :------------- | :----- | :------------------------ |
+| `fs`           | string | Filesystem identifier.    |
+| `used`         | int    | Used space in bytes.      |
+| `available`    | int    | Available space in bytes. |
+| `used_percent` | float  | Usage as a percentage.    |
+
+<Callout type="info" title="Polling Recommendation">
+  For dashboards, poll this endpoint every 2-5 seconds. More frequent polling provides
+  smoother updates but increases network traffic.
+</Callout>
+
+## Example Usage Scenarios
+
+### 1. Minimalistic Stat Bar
+
+Build a tiny status bar for your second monitor.
+
+1. Poll `/api/usage` every 5 seconds.
+2. Display simple bars for `cpu.current_load` and `memory.used_percent`.
+
+### 2. High Load Alert
+
+Notify yourself if the server is struggling.
+
+1. Monitor `/api/usage`.
+2. If `cpu.current_load` > 90% for 1 minute:
+3. Send a push notification to your phone.

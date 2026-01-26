@@ -1,0 +1,153 @@
+---
+title: Compatibility
+description: Platform and hardware support matrix.
+icon: MonitorSmartphone
+---
+
+This page details what features and statistics are available on each platform.
+
+## Operating System Support
+
+| Feature               | Windows | macOS |
+| :-------------------- | :-----: | :---: |
+| System Tray App       |   ✅    |  ✅   |
+| `/api/system`         |   ✅    |  ✅   |
+| `/api/usage`          |   ✅    |  ✅   |
+| `/api/stream` (SSE)   |   ✅    |  ✅   |
+| `/api/ws` (WebSocket) |   ✅    |  ✅   |
+| `/api/processes`      |   ✅    |  ✅   |
+| `/api/media/status`   |   ✅    |  ✅   |
+| `/api/media/control`  |   ✅    |  ✅   |
+| `/api/pw/shutdown`    |   ✅    |  ✅   |
+| `/api/pw/restart`     |   ✅    |  ✅   |
+| `/api/pw/sleep`       |   ✅    |  ✅   |
+| `/api/pw/hibernate`   |   ✅    |  ❌   |
+
+<Callout type="info" title="macOS Hibernate">
+  macOS does not expose a separate hibernate command. Sleep on Mac automatically uses
+  "Safe Sleep" which combines RAM and disk storage.
+</Callout>
+
+---
+
+## CPU Statistics
+
+| Stat           | Windows | macOS |
+| :------------- | :-----: | :---: |
+| Manufacturer   |   ✅    |  ✅   |
+| Brand/Model    |   ✅    |  ✅   |
+| Core Count     |   ✅    |  ✅   |
+| Physical Cores |   ✅    |  ✅   |
+| Base Speed     |   ✅    |  ✅   |
+| Current Load % |   ✅    |  ✅   |
+| Current Speed  |   ✅    |  ✅   |
+| Temperature    |   ❌    |  ❌   |
+
+<Callout type="warn" title="CPU Temperature">
+  CPU temperature is not currently supported on either platform. Windows requires
+  WMI/OpenHardwareMonitor, and macOS requires SMC access which needs elevated permissions.
+</Callout>
+
+---
+
+## GPU Statistics
+
+### Windows GPU Support
+
+| Vendor         | Model | VRAM | Temperature | Utilization |
+| :------------- | :---: | :--: | :---------: | :---------: |
+| NVIDIA         |  ✅   |  ✅  |     ✅      |     ✅      |
+| AMD (rocm-smi) |  ✅   |  ❌  |     ✅      |     ✅      |
+| AMD (fallback) |  ✅   |  ✅  |     ❌      |     ❌      |
+| Intel          |  ✅   |  ✅  |     ❌      |     ❌      |
+
+<Callout type="info" title="NVIDIA Best Support">
+  NVIDIA GPUs have the best support because `nvidia-smi` provides all metrics. AMD falls
+  back to WMIC if `rocm-smi` is not installed. Intel integrated graphics only provide
+  basic info.
+</Callout>
+
+### macOS GPU Support
+
+| Vendor        | Model | VRAM | Temperature | Utilization |
+| :------------ | :---: | :--: | :---------: | :---------: |
+| Apple Silicon |  ✅   |  ❌  |     ❌      |     ❌      |
+| Intel (iGPU)  |  ✅   |  ❌  |     ❌      |     ❌      |
+| AMD (dGPU)    |  ✅   |  ❌  |     ❌      |     ❌      |
+
+macOS GPU detection uses `system_profiler` which only provides model name.
+
+---
+
+## Memory Statistics
+
+| Stat      | Windows | macOS |
+| :-------- | :-----: | :---: |
+| Total RAM |   ✅    |  ✅   |
+| Used RAM  |   ✅    |  ✅   |
+| Free RAM  |   ✅    |  ✅   |
+| Usage %   |   ✅    |  ✅   |
+
+---
+
+## Disk Statistics
+
+| Stat               | Windows | macOS |
+| :----------------- | :-----: | :---: |
+| Drive Letter/Mount |   ✅    |  ✅   |
+| Filesystem Type    |   ✅    |  ✅   |
+| Total Size         |   ✅    |  ✅   |
+| Used Space         |   ✅    |  ✅   |
+| Available Space    |   ✅    |  ✅   |
+| Usage %            |   ✅    |  ✅   |
+
+---
+
+## Media Control
+
+| Feature         | Windows | macOS |
+| :-------------- | :-----: | :---: |
+| Get Now Playing |   ✅    |  ✅   |
+| Play/Pause      |   ✅    |  ✅   |
+| Next Track      |   ✅    |  ✅   |
+| Previous Track  |   ✅    |  ✅   |
+| Volume Control  |   ✅    |  ✅   |
+| Mute/Unmute     |   ✅    |  ✅   |
+
+<Callout type="info" title="System-Wide Control">
+  Media controls work with any application (Spotify, Chrome, VLC, etc.). Volume controls
+  affect the global system output.
+</Callout>
+
+---
+
+## Process Management
+
+| Stat/Feature             | Windows | macOS |
+| :----------------------- | :-----: | :---: |
+| Process Name             |   ✅    |  ✅   |
+| Instance Count           |   ✅    |  ✅   |
+| Memory Usage             |   ✅    |  ✅   |
+| CPU utilization          |   ✅    |  ✅   |
+| `GET /processes/{name}`  |   ✅    |  ✅   |
+| `POST /processes/kill`   |   ✅    |  ✅   |
+| `POST /processes/launch` |   ✅    |  ✅   |
+| `POST /processes/focus`  |   ✅    |  ✅   |
+
+---
+
+## WebSocket API
+
+| Feature              | Windows | macOS |
+| :------------------- | :-----: | :---: |
+| Stats subscription   |   ✅    |  ✅   |
+| Media subscription   |   ✅    |  ✅   |
+| Process subscription |   ✅    |  ✅   |
+| Media commands       |   ✅    |  ✅   |
+| Process commands     |   ✅    |  ✅   |
+| Operation feedback   |   ✅    |  ✅   |
+
+<Callout type="info" title="Lazy Loop Spawning">
+  WebSocket monitoring loops only run when clients are subscribed. Zero CPU overhead when
+  idle.
+</Callout>

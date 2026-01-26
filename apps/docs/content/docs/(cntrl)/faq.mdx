@@ -1,0 +1,99 @@
+---
+title: FAQ
+description: Common questions and use cases for Cntrl.
+icon: MessageCircleQuestionMark
+---
+
+### Why "Cntrl Bridge"?
+
+The name represents the core purpose of the app: giving you **Control** over your PC from anywhere in your home network. It's a bridge between your computer and whatever remote dashboard or mobile app you're using.
+
+### What are the main use cases?
+
+<Steps>
+  <Step>
+    **Home Monitoring**: Check your PC stats (CPU Temp, GPU Load) while you're in the next
+    room without having to walk back to your desk.
+  </Step>
+  <Step>
+    **Remote Power**: Turn off or hibernate your PC from your phone after you've finished
+    a movie or when you realized you left it on.
+  </Step>
+  <Step>
+    **Dashboard Integration**: Cntrl provides raw JSON data, making it perfect for custom
+    home automation dashboards built with Home Assistant, Dashy, or custom React apps.
+  </Step>
+</Steps>
+
+### Which platforms are supported?
+
+Cntrl Bridge supports both **Windows** and **macOS** (Intel and Apple Silicon). We are committed to maintaining feature parity where possible.
+
+For a detailed breakdown of features per OS, check out the [Compatibility Matrix](/docs/compatibility).
+
+### Why Rust and Tauri?
+
+We chose **Rust** for its performance, safety, and ability to produce optimized binaries with minimal resource usage. Combined with **Tauri**, we get:
+
+- **Lightweight**: ~20MB memory footprint vs 200-500MB for Electron apps
+- **Native Performance**: Rust backend is incredibly fast and efficient
+- **Small Binaries**: ~10-15MB installer vs 100MB+ for Electron
+- **Native UI**: Uses your system's WebView (Edge on Windows, Safari on macOS)
+- **Cross-Platform**: Same codebase for Windows and macOS with platform-specific optimizations
+
+### Is it safe to use over the internet?
+
+<Callout type="error" title="LOCAL NETWORK ONLY">
+    Cntrl Bridge is designed for **local network use**. It has **no** built-in encryption (HTTPS) and relies on simple API keys (if enabled).
+
+    We **do not recommend** exposing the Cntrl Bridge port (default `9990`) to the public internet via router port forwarding. Doing so would give anyone full control over your PC's power state, processes, and file system visibility.
+
+</Callout>
+
+If you need remote access away from home, we strongly recommend using a secure VPN like **Tailscale** or **WireGuard** to access your local network safely.
+
+### Project Status & Stability
+
+<Callout type="warn" title="Public Alpha">
+  Cntrl Bridge is currently in early development (v0.x). Features and API endpoints are
+  subject to **breaking changes** without major version increments.
+</Callout>
+
+- **Experimental Features**: Media controls and Process management are actively evolving.
+- **Updates**: Always check the [Release Notes](https://github.com/azaek/cntrl/releases) before updating.
+
+### Feature Questions
+
+#### Why can't I see CPU temperatures on Windows?
+
+Windows does not strictly expose CPU temperatures via standard APIs. Cntrl relies on WMI or OpenHardwareMonitor. If you don't use OHM, you might not see temp data.
+
+#### How do I kill a specific process?
+
+You can use the `/api/processes/kill` endpoint with either a `pid` (for a specific instance) or `name` (to close all instances, e.g., "chrome.exe"). See the [Processes API](/docs/api/processes) for details.
+
+### Can I change the port?
+
+Yes! You can change it through the dashboard (click the tray/menu bar icon) or by editing the `config.json` file manually. See the [Configuration Guide](/docs/config) for details.
+
+### Should I use WebSocket or SSE Stream?
+
+| Feature             | WebSocket (`/api/ws`) |    SSE (`/api/stream`)    |
+| :------------------ | :-------------------: | :-----------------------: |
+| Real-time data      |          ✅           |            ✅             |
+| Send commands       |          ✅           |            ❌             |
+| Topic subscriptions |          ✅           | ❌ (field filtering only) |
+| Operation feedback  |          ✅           |            ❌             |
+| Browser EventSource |          ❌           |            ✅             |
+
+**TL;DR**: Use **WebSocket** if you need to send commands (media control, process management) or want granular subscriptions. Use **SSE** if you only need to display stats and want simpler browser integration.
+
+### Does WebSocket use CPU when idle?
+
+No! Cntrl uses **lazy loop spawning**. Monitoring loops only run when clients are subscribed:
+
+- No WebSocket clients → Zero loops running → ~0% CPU
+- Subscribe to "stats" → Stats loop starts
+- Disconnect → Loop stops automatically
+
+This means the server has zero overhead when you're not actively using real-time features.

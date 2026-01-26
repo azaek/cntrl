@@ -1,0 +1,62 @@
+---
+title: Windows
+description: Get Cntrl Bridge running on your Windows PC.
+icon: windows
+---
+
+Setting up Cntrl Bridge on Windows is simple with the installer.
+
+## Installation
+
+<Steps>
+<Step>
+### Download
+Download one of the Windows installers from the [GitHub Releases](https://github.com/azaek/cntrl/releases):
+
+- **NSIS Installer**: `Cntrl Bridge_vX.X.X_x64-setup.exe` (recommended)
+- **MSI Installer**: `Cntrl Bridge_vX.X.X_x64_en-US.msi`
+
+Both installers will:
+
+- Install the application to your Program Files
+- Create a default configuration file
+- Add a Windows Firewall rule automatically
+  </Step>
+
+<Step>
+  ### Run the Installer The installer will set up everything automatically with sensible
+  defaults: - **Port**: `9990` - **Enabled Features**: System Info, Usage Data, Stream,
+  Media Controls, Processes, Autostart - **Power Management**: Sleep and Hibernate
+  enabled, Shutdown/Restart disabled for safety
+</Step>
+
+<Step>
+### Launch
+Once installed, Cntrl Bridge will appear in your system tray as a tray-only app (no taskbar icon). Look for the teal icon!
+
+Click the tray icon to open the dashboard and configure settings.
+
+</Step>
+</Steps>
+
+## Configure Settings
+
+After installation, click the tray icon to open the dashboard where you can:
+
+- Change the server port
+- Enable/disable features
+- Configure autostart
+- Enable power management options (Shutdown, Restart)
+- Open the configuration file location
+
+All settings are saved to `%APPDATA%\com.azaek.cntrl-bridge\config.json`
+
+## Verify It's Working
+
+Open your browser and go to:
+
+```
+http://localhost:9990/api/status
+```
+
+You should see `{"status":"ok"}`.

@@ -1,0 +1,5 @@
+{
+  "title": "WebSocket",
+  "defaultOpen": true,
+  "pages": ["index", "stats", "media", "processes"]
+}

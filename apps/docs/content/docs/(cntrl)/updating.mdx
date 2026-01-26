@@ -1,0 +1,76 @@
+---
+title: Updating
+description: How to update Cntrl Bridge to the latest version.
+icon: RefreshCw
+---
+
+Cntrl Bridge does not currently have a built-in auto-update feature. To update to a new version, follow these steps:
+
+## Windows
+
+<Steps>
+<Step>
+### Close Cntrl Bridge
+Right-click the tray icon and select **Quit** to stop the running instance.
+</Step>
+
+<Step>
+  ### Download the new installer Get the latest installer from the [GitHub
+  Releases](https://github.com/azaek/cntrl/releases) page: - `Cntrl
+  Bridge_vX.X.X_x64-setup.exe` (NSIS - recommended) - `Cntrl Bridge_vX.X.X_x64_en-US.msi`
+  (MSI)
+</Step>
+
+<Step>
+### Run the installer
+The new installer will automatically replace the old version. Your configuration file will be preserved.
+</Step>
+</Steps>
+
+<Callout type="info" title="Config is preserved">
+  Your `config.json` in `%APPDATA%\com.azaek.cntrl-bridge\` is **not** touched by the
+  installer. All your settings will remain after updating.
+</Callout>
+
+---
+
+## macOS
+
+<Steps>
+<Step>
+### Quit Cntrl Bridge
+Click the menu bar icon and select **Quit**, or use `Cmd+Q` if the dashboard is focused.
+</Step>
+
+<Step>
+  ### Delete the old app Drag `Cntrl Bridge.app` from your Applications folder to the
+  Trash.
+</Step>
+
+<Step>
+  ### Download the new DMG Get the latest universal DMG from the [GitHub
+  Releases](https://github.com/azaek/cntrl/releases) page: - `Cntrl
+  Bridge_vX.X.X_universal.dmg`
+</Step>
+
+<Step>
+### Install the new version
+Open the DMG and drag `Cntrl Bridge.app` to your Applications folder.
+</Step>
+</Steps>
+
+<Callout type="info" title="Config is preserved">
+  Your `config.json` in `~/Library/Application Support/com.azaek.cntrl-bridge/` is **not**
+  deleted when you remove the app. All your settings will remain after updating.
+</Callout>
+
+---
+
+## Checking Your Version
+
+To see which version you're running:
+
+1. Right-click the Cntrl tray icon
+2. The version is displayed in the menu (or run `Cntrl.exe version` in terminal)
+
+Compare with the [latest release](https://github.com/azaek/cntrl/releases/latest) to see if an update is available.
