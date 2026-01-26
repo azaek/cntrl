@@ -3,5 +3,16 @@
   "description": "The headless library",
   "icon": "Package",
   "root": true,
-  "pages": ["index", "getting-started", "bridges", "hooks", "client", "utils"]
+  "pages": [
+    "---Introduction---",
+    "index",
+    "getting-started",
+    "---Bridges---",
+    "bridges",
+    "---Hooks---",
+    "...hooks",
+    "---Low-level---",
+    "client",
+    "utils"
+  ]
 }

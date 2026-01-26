@@ -5,6 +5,16 @@ import type { WSIncomingEvent, WSOutgoingMessage } from "../types/ws";
 /** Callback for connection status changes */
 export type StatusChangeCallback = (status: ConnectionStatus) => void;
 
+/** Error info received from the bridge */
+export interface BridgeError {
+  code?: string;
+  message: string;
+  bridgeId: string;
+}
+
+/** Callback for error messages from the bridge */
+export type ErrorCallback = (error: BridgeError) => void;
+
 /**
  * WebSocket connection manager for a single bridge.
  * Handles:
@@ -26,6 +36,7 @@ export class WebSocketManager {
     private queryClient: QueryClient,
     private onStatusChange: StatusChangeCallback,
     private apiKey?: string,
+    private onError?: ErrorCallback,
   ) {}
 
   /**
@@ -186,6 +197,12 @@ export class WebSocketManager {
 
       case "error":
         console.error(`[WS ${this.bridgeId}] Server error:`, message.data);
+        // Call error callback for DX (toasts, etc.)
+        this.onError?.({
+          code: message.data.code,
+          message: message.data.message,
+          bridgeId: this.bridgeId,
+        });
         break;
 
       default:

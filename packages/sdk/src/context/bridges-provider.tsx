@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useBridgesStore } from "../store/bridges-store";
 import type { BridgeConnection, ConnectionStatus, StoredBridge } from "../types";
-import { WebSocketManager } from "../ws/ws-manager";
+import { WebSocketManager, type ErrorCallback } from "../ws/ws-manager";
 
 interface BridgesContextValue {
   /** All bridges with runtime state */
@@ -42,9 +42,15 @@ interface BridgesProviderProps {
   children: ReactNode;
   /** Auto-connect to all bridges on mount (default: true) */
   autoConnect?: boolean;
+  /** Callback for error messages from bridges (useful for toasts) */
+  onError?: ErrorCallback;
 }
 
-export function BridgesProvider({ children, autoConnect = true }: BridgesProviderProps) {
+export function BridgesProvider({
+  children,
+  autoConnect = true,
+  onError,
+}: BridgesProviderProps) {
   const queryClient = useQueryClient();
 
   // Zustand store for persistence
@@ -79,13 +85,14 @@ export function BridgesProvider({ children, autoConnect = true }: BridgesProvide
             setStatuses((prev) => ({ ...prev, [bridge.id]: status }));
           },
           bridge.config.apiKey,
+          onError,
         );
         wsManagersRef.current.set(bridge.id, manager);
       }
 
       return manager;
     },
-    [buildWsUrl, queryClient],
+    [buildWsUrl, queryClient, onError],
   );
 
   // Connect to a bridge

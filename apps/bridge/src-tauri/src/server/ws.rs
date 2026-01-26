@@ -5,7 +5,7 @@ use axum::{
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use futures::{sink::SinkExt, stream::StreamExt};
-use crate::server::{handlers::AppState, types::{WebSocketMessage, BroadcastEvent, OperationFeedback}};
+use crate::server::{handlers::{AppState, subscribe_topics, unsubscribe_topics}, types::{WebSocketMessage, BroadcastEvent, OperationFeedback}};
 
 /// Expand hierarchical topic subscriptions.
 /// e.g., "stats" expands to ["stats", "stats.cpu", "stats.memory", "stats.gpu", "stats.disks", "stats.network"]
@@ -47,171 +47,112 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.broadcast_tx.subscribe();
 
+    // Channel for sending messages from recv_task (errors, acks)
+    let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel::<String>(32);
+
     // Local subscription state for THIS connection
     // Starts EMPTY (None). User must subscribe to get data.
     let subscriptions: Arc<Mutex<Option<HashSet<String>>>> = Arc::new(Mutex::new(None));
 
-    // Helper to update global ref-counts and manage loop lifecycle
-    let state_for_ops = state.clone();
-    let update_global_counts = move |old: &Option<HashSet<String>>, new: &Option<HashSet<String>>| {
-        // Track which topics went from 0->1 and 1->0
-        let mut topics_to_start: Vec<String> = Vec::new();
-        let mut topics_to_stop: Vec<String> = Vec::new();
-
-        {
-            let mut global_map = state_for_ops.active_topics.lock().unwrap();
-
-            // Decrement old and track 1->0 transitions
-            if let Some(old_set) = old {
-                for topic in old_set {
-                    if let Some(count) = global_map.get_mut(topic) {
-                        if *count > 0 {
-                            *count -= 1;
-                            if *count == 0 {
-                                topics_to_stop.push(topic.clone());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Increment new and track 0->1 transitions
-            if let Some(new_set) = new {
-                for topic in new_set {
-                    let entry = global_map.entry(topic.clone()).or_insert(0);
-                    let was_zero = *entry == 0;
-                    *entry += 1;
-                    if was_zero {
-                        topics_to_start.push(topic.clone());
-                    }
-                }
-            }
-        }
-
-        // Start loops for topics that went 0->1
-        for topic in topics_to_start {
-            state_for_ops.loop_manager.ensure_loop_running(&topic, state_for_ops.clone());
-        }
-
-        // Stop loops for topics that went 1->0
-        for topic in topics_to_stop {
-            state_for_ops.loop_manager.stop_loop_if_idle(&topic, &state_for_ops);
-        }
-    };
-
-    // Initialize with NO subscriptions (count doesn't change yet)
-    // Actually, decision: Default = ALL or Default = NONE?
-    // User requested "Demand-Based". Ideally Default = NONE.
-    // But for backward compat with my code 5 mins ago, I had Default=ALL.
-    // Let's implement Default=NONE (Explicit Subscribe).
-    // So on connect, we do nothing to global counts.
-    
-    // SEND TASK
+    // SEND TASK - handles both broadcast events and outgoing messages from recv_task
     let mut send_task = tokio::spawn({
         let subs = subscriptions.clone();
         async move {
-            while let Ok(event) = rx.recv().await {
-                match event {
-                    BroadcastEvent::SystemStats(payload) => {
-                        let msg_opt = {
-                            let subs_lock = subs.lock().unwrap();
-                            if let Some(topics) = &*subs_lock {
-                                // Filter based on topics (check both legacy and new format)
-                                let mut filtered = payload.clone();
-                                let mut has_content = false;
+            loop {
+                tokio::select! {
+                    // Handle outgoing messages from recv_task (errors, acks)
+                    Some(msg) = outgoing_rx.recv() => {
+                        if sender.send(Message::Text(msg)).await.is_err() {
+                            break;
+                        }
+                    }
+                    // Handle broadcast events
+                    result = rx.recv() => {
+                        let event = match result {
+                            Ok(e) => e,
+                            Err(_) => break,
+                        };
 
-                                let has_cpu = topics.contains("cpu") || topics.contains("stats.cpu") || topics.contains("stats");
-                                let has_memory = topics.contains("memory") || topics.contains("stats.memory") || topics.contains("stats");
-                                let has_gpu = topics.contains("gpu") || topics.contains("stats.gpu") || topics.contains("stats");
-                                let has_disks = topics.contains("disks") || topics.contains("stats.disks") || topics.contains("stats");
-                                let has_network = topics.contains("network") || topics.contains("stats.network") || topics.contains("stats");
+                        match event {
+                            BroadcastEvent::SystemStats(payload) => {
+                                let msg_opt = {
+                                    let subs_lock = subs.lock().unwrap();
+                                    if let Some(topics) = &*subs_lock {
+                                        let mut filtered = payload.clone();
+                                        let mut has_content = false;
 
-                                if !has_cpu { filtered.cpu = None; } else { has_content = true; }
-                                if !has_memory { filtered.memory = None; } else { has_content = true; }
-                                if !has_gpu { filtered.gpu = None; } else { has_content = true; }
-                                if !has_disks { filtered.disks = None; } else { has_content = true; }
-                                if !has_network { filtered.network = None; } else { has_content = true; }
-                                // Media is separate event usually
-                                if !topics.contains("media") { filtered.media = None; }
+                                        let has_cpu = topics.contains("cpu") || topics.contains("stats.cpu") || topics.contains("stats");
+                                        let has_memory = topics.contains("memory") || topics.contains("stats.memory") || topics.contains("stats");
+                                        let has_gpu = topics.contains("gpu") || topics.contains("stats.gpu") || topics.contains("stats");
+                                        let has_disks = topics.contains("disks") || topics.contains("stats.disks") || topics.contains("stats");
+                                        let has_network = topics.contains("network") || topics.contains("stats.network") || topics.contains("stats");
 
-                                if has_content || topics.contains("system") {
-                                    Some(BroadcastEvent::SystemStats(filtered))
-                                } else {
-                                    None
+                                        if !has_cpu { filtered.cpu = None; } else { has_content = true; }
+                                        if !has_memory { filtered.memory = None; } else { has_content = true; }
+                                        if !has_gpu { filtered.gpu = None; } else { has_content = true; }
+                                        if !has_disks { filtered.disks = None; } else { has_content = true; }
+                                        if !has_network { filtered.network = None; } else { has_content = true; }
+                                        if !topics.contains("media") { filtered.media = None; }
+
+                                        if has_content || topics.contains("system") {
+                                            Some(BroadcastEvent::SystemStats(filtered))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                };
+
+                                if let Some(msg) = msg_opt {
+                                    if let Ok(text) = serde_json::to_string(&msg) {
+                                        if sender.send(Message::Text(text)).await.is_err() { break; }
+                                    }
                                 }
-                            } else {
-                                // None = Initial state = No data. User must send subscribe.
-                                None
                             }
-                        };
-
-                        if let Some(msg) = msg_opt {
-                            if let Ok(text) = serde_json::to_string(&msg) {
-                                if sender.send(Message::Text(text)).await.is_err() { break; }
+                            BroadcastEvent::MediaUpdate(status) => {
+                                let should_send = {
+                                    let subs_lock = subs.lock().unwrap();
+                                    subs_lock.as_ref().map_or(false, |t| t.contains("media") || t.contains("stats.media"))
+                                };
+                                if should_send {
+                                    if let Ok(text) = serde_json::to_string(&BroadcastEvent::MediaUpdate(status)) {
+                                        if sender.send(Message::Text(text)).await.is_err() { break; }
+                                    }
+                                }
                             }
-                        }
-                    }
-                    BroadcastEvent::MediaUpdate(status) => {
-                        let should_send = {
-                            let subs_lock = subs.lock().unwrap();
-                            if let Some(topics) = &*subs_lock {
-                                topics.contains("media") || topics.contains("stats.media")
-                            } else {
-                                false
+                            BroadcastEvent::ProcessList(payload) => {
+                                let should_send = {
+                                    let subs_lock = subs.lock().unwrap();
+                                    subs_lock.as_ref().map_or(false, |t| t.contains("processes") || t.contains("process"))
+                                };
+                                if should_send {
+                                    if let Ok(text) = serde_json::to_string(&BroadcastEvent::ProcessList(payload)) {
+                                        if sender.send(Message::Text(text)).await.is_err() { break; }
+                                    }
+                                }
                             }
-                        };
-
-                        if should_send {
-                            if let Ok(text) = serde_json::to_string(&BroadcastEvent::MediaUpdate(status)) {
-                                if sender.send(Message::Text(text)).await.is_err() { break; }
+                            BroadcastEvent::MediaFeedback(feedback) => {
+                                let should_send = {
+                                    let subs_lock = subs.lock().unwrap();
+                                    subs_lock.as_ref().map_or(false, |t| t.contains("media") || t.contains("stats.media"))
+                                };
+                                if should_send {
+                                    if let Ok(text) = serde_json::to_string(&BroadcastEvent::MediaFeedback(feedback)) {
+                                        if sender.send(Message::Text(text)).await.is_err() { break; }
+                                    }
+                                }
                             }
-                        }
-                    }
-                    BroadcastEvent::ProcessList(payload) => {
-                        let should_send = {
-                            let subs_lock = subs.lock().unwrap();
-                            if let Some(topics) = &*subs_lock {
-                                topics.contains("processes") || topics.contains("process")
-                            } else {
-                                false
-                            }
-                        };
-
-                        if should_send {
-                            if let Ok(text) = serde_json::to_string(&BroadcastEvent::ProcessList(payload)) {
-                                if sender.send(Message::Text(text)).await.is_err() { break; }
-                            }
-                        }
-                    }
-                    BroadcastEvent::MediaFeedback(feedback) => {
-                        let should_send = {
-                            let subs_lock = subs.lock().unwrap();
-                            if let Some(topics) = &*subs_lock {
-                                topics.contains("media") || topics.contains("stats.media")
-                            } else {
-                                false
-                            }
-                        };
-
-                        if should_send {
-                            if let Ok(text) = serde_json::to_string(&BroadcastEvent::MediaFeedback(feedback)) {
-                                if sender.send(Message::Text(text)).await.is_err() { break; }
-                            }
-                        }
-                    }
-                    BroadcastEvent::ProcessFeedback(feedback) => {
-                        let should_send = {
-                            let subs_lock = subs.lock().unwrap();
-                            if let Some(topics) = &*subs_lock {
-                                topics.contains("processes") || topics.contains("process")
-                            } else {
-                                false
-                            }
-                        };
-
-                        if should_send {
-                            if let Ok(text) = serde_json::to_string(&BroadcastEvent::ProcessFeedback(feedback)) {
-                                if sender.send(Message::Text(text)).await.is_err() { break; }
+                            BroadcastEvent::ProcessFeedback(feedback) => {
+                                let should_send = {
+                                    let subs_lock = subs.lock().unwrap();
+                                    subs_lock.as_ref().map_or(false, |t| t.contains("processes") || t.contains("process"))
+                                };
+                                if should_send {
+                                    if let Ok(text) = serde_json::to_string(&BroadcastEvent::ProcessFeedback(feedback)) {
+                                        if sender.send(Message::Text(text)).await.is_err() { break; }
+                                    }
+                                }
                             }
                         }
                     }
@@ -224,14 +165,21 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let mut recv_task = tokio::spawn({
         let state = state.clone();
         let subs = subscriptions.clone();
+        let tx = outgoing_tx;
         async move {
-            while let Some(Ok(msg)) = receiver.next().await {
-                if let Message::Text(text) = msg {
-                    if let Ok(cmd) = serde_json::from_str::<WebSocketMessage>(&text) {
-                        match cmd {
-                            WebSocketMessage::Subscribe(req) => {
-                                let mut lock = subs.lock().unwrap();
-                                let old_subs = lock.clone();
+            while let Some(result) = receiver.next().await {
+                match result {
+                    Ok(msg) => {
+                        if let Message::Text(text) = msg {
+                            match serde_json::from_str::<WebSocketMessage>(&text) {
+                                Ok(cmd) => {
+                                    match cmd {
+                                        WebSocketMessage::Subscribe(req) => {
+                                // Get old subscriptions
+                                let old_subs = {
+                                    let lock = subs.lock().unwrap();
+                                    lock.clone()
+                                };
 
                                 // Expand hierarchical topics
                                 let mut new_set = HashSet::new();
@@ -241,29 +189,60 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                         new_set.insert(et);
                                     }
                                 }
-                                let new_subs = Some(new_set);
 
-                                update_global_counts(&old_subs, &new_subs);
-                                *lock = new_subs;
+                                // Unsubscribe from old topics
+                                if let Some(old_set) = &old_subs {
+                                    let old_refs: Vec<&str> = old_set.iter().map(|s| s.as_str()).collect();
+                                    unsubscribe_topics(&state, &old_refs);
+                                }
+
+                                // Subscribe to new topics
+                                let new_refs: Vec<&str> = new_set.iter().map(|s| s.as_str()).collect();
+                                subscribe_topics(&state, &new_refs);
+
+                                // Update local subscription state
+                                {
+                                    let mut lock = subs.lock().unwrap();
+                                    *lock = Some(new_set);
+                                }
                             }
-                            ref other => {
-                                // Handle command and get feedback
-                                let feedback = handle_ws_command(other.clone(), &state).await;
+                                        ref other => {
+                                            // Handle command and get feedback
+                                            let feedback = handle_ws_command(other.clone(), &state).await;
 
-                                // Broadcast feedback to all relevant subscribers
-                                if let Some(fb) = feedback {
-                                    let _ = state.broadcast_tx.send(fb);
+                                            // Broadcast feedback to all relevant subscribers
+                                            if let Some(fb) = feedback {
+                                                let _ = state.broadcast_tx.send(fb);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    // Send error back to client via outgoing channel
+                                    let error_msg = serde_json::json!({
+                                        "type": "error",
+                                        "data": {
+                                            "code": "PARSE_ERROR",
+                                            "message": format!("Invalid message format: {}", e)
+                                        }
+                                    });
+                                    if let Ok(text) = serde_json::to_string(&error_msg) {
+                                        let _ = tx.send(text).await;
+                                    }
                                 }
                             }
                         }
                     }
+                    Err(_) => {}
                 }
             }
 
-            // CLEANUP ON DISCONNECT
-            // When loop ends (websocket closed)
-            let lock = subs.lock().unwrap();
-            update_global_counts(&*lock, &None);
+            // CLEANUP ON DISCONNECT - take() ensures we only cleanup once
+            let old_subs = subs.lock().unwrap().take();
+            if let Some(old_set) = old_subs {
+                let old_refs: Vec<&str> = old_set.iter().map(|s| s.as_str()).collect();
+                unsubscribe_topics(&state, &old_refs);
+            }
         }
     });
 
@@ -271,28 +250,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
-    
-    // Ensure we run cleanup if select unwinds? 
-    // recv_task does it at end of loop. 
-    // If send_task fails, recv_task is aborted.
-    // If recv_task is aborted, the cleanup code at the end might NOT run!
-    // We need a Drop guard or ensure cleanup runs.
-    // The easiest way in async rust without Drop guards is strictly managing the lifecycle.
-    // Or we rely on the fact that if `recv_task` is aborted, we can't easily run cleanup code unless we use a destructor.
-    // Actually, `active_subs` is shared (Arc Mutex). We can do cleanup in `handle_socket` after the select!
-    
-    // Cleanup Logic (Post-Disconnect)
-    // We need to know what the final subscriptions were.
-    let final_subs = subscriptions.lock().unwrap().clone();
-    
-    // Inline cleanup to avoid closure move issues
+
+    // Cleanup after disconnect (handles case where recv_task was aborted)
+    // Get the final subscriptions and properly decrement counts + stop loops
+    let final_subs = subscriptions.lock().unwrap().take(); // take() to avoid double cleanup
+
     if let Some(old_set) = final_subs {
-        let mut global_map = state.active_topics.lock().unwrap();
-        for topic in old_set {
-            if let Some(count) = global_map.get_mut(&topic) {
-                if *count > 0 { *count -= 1; }
-            }
-        }
+        let topic_refs: Vec<&str> = old_set.iter().map(|s| s.as_str()).collect();
+        crate::server::handlers::unsubscribe_topics(&state, &topic_refs);
     }
 }
 

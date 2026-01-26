@@ -28,7 +28,8 @@ Add this to your `config.json`:
   "auth": {
     "enabled": true,
     "api_key": "your-secret-key-here",
-    "allowed_ips": ["192.168.1.100"]
+    "allowed_ips": ["192.168.1.100"],
+    "blocked_ips": []
   }
 }
 ```
@@ -36,6 +37,23 @@ Add this to your `config.json`:
 <Callout type="info">
   The IP `192.168.1.100` (your dashboard server, for example) will bypass the API key
   check entirely.
+</Callout>
+
+## IP Blocking (Blacklist)
+
+You can block specific IPs from accessing your API entirely. **Blocked IPs are checked first, even when authentication is disabled.**
+
+```json
+{
+  "auth": {
+    "enabled": false,
+    "blocked_ips": ["192.168.1.50", "10.0.0.0/8"]
+  }
+}
+```
+
+<Callout type="warning" title="Blocked IPs Take Priority">
+  If an IP appears in both `allowed_ips` and `blocked_ips`, it will be **blocked**. The blocklist is always checked first.
 </Callout>
 
 ## Making Authenticated Requests
@@ -146,7 +164,7 @@ The browser's `EventSource` API doesn't support custom headers. For authenticate
 
 1. **Use IP whitelisting** - Add your dashboard's IP to `allowed_ips` and skip the API key check for SSE
 2. **Use a fetch-based SSE client** like [eventsource-parser](https://github.com/rexxars/eventsource-parser)
-   </Callout>
+</Callout>
 
 <Callout type="tip" title="WebSocket Authentication">
   The WebSocket endpoint (`/api/ws`) follows the same authentication rules. Use IP
@@ -190,16 +208,14 @@ streamWithAuth(
 
 ## Error Responses
 
-| Status             | Meaning                                     |
-| ------------------ | ------------------------------------------- |
-| `401 Unauthorized` | Missing or malformed `Authorization` header |
-| `403 Forbidden`    | Invalid API key or IP not in whitelist      |
+| Status             | Meaning                                              |
+| ------------------ | ---------------------------------------------------- |
+| `401 Unauthorized` | Missing or invalid API key                           |
+| `403 Forbidden`    | IP is blocked, or IP not in whitelist (when enabled) |
 
-Example error response:
-
-```json
-{ "error": "Missing Authorization header" }
-```
+<Callout type="info" title="No Error Body">
+  For security reasons, `401` and `403` responses do not include a JSON body with details.
+</Callout>
 
 ## Generating a Secure Key
 

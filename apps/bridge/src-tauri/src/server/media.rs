@@ -6,8 +6,6 @@ use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator, IMMD
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
-#[cfg(target_os = "windows")]
-use windows::core::ComInterface;
 
 use crate::server::types::MediaStatus;
 
@@ -269,61 +267,56 @@ pub fn get_media_status_sync() -> Option<MediaStatus> {
     None
 }
 
-pub async fn run_media_action(_action: &str) -> Option<()> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        let script = match _action {
-            "play" | "pause" | "play_pause" | "toggle_mute" => {
-                r#"
-                tell application "System Events"
-                    set spotifyRunning to (name of processes) contains "Spotify"
-                    set musicRunning to (name of processes) contains "Music"
-                end tell
-                if spotifyRunning then
-                    tell application "Spotify" to playpause
-                else if musicRunning then
-                    tell application "Music" to playpause
-                end if
-                "#
-            },
-            "next" => {
-                r#"
-                tell application "System Events"
-                    set spotifyRunning to (name of processes) contains "Spotify"
-                    set musicRunning to (name of processes) contains "Music"
-                end tell
-                if spotifyRunning then
-                    tell application "Spotify" to next track
-                else if musicRunning then
-                    tell application "Music" to next track
-                end if
-                "#
-            },
-            "prev" | "previous" => {
-                r#"
-                tell application "System Events"
-                    set spotifyRunning to (name of processes) contains "Spotify"
-                    set musicRunning to (name of processes) contains "Music"
-                end tell
-                if spotifyRunning then
-                    tell application "Spotify" to previous track
-                else if musicRunning then
-                    tell application "Music" to previous track
-                end if
-                "#
-            },
-            "volume_up" => "set volume output volume ((output volume of (get volume settings)) + 5)",
-            "volume_down" => "set volume output volume ((output volume of (get volume settings)) - 5)",
-            _ => return None,
-        };
-        
-        Command::new("osascript").args(["-e", script]).status().ok()?;
-        return Some(());
-    }
-    
-    // Windows implementation is usually via keyboard simulation in handlers.rs for now
-    None
+#[cfg(target_os = "macos")]
+pub async fn run_media_action(action: &str) -> Option<()> {
+    use std::process::Command;
+    let script = match action {
+        "play" | "pause" | "play_pause" | "toggle_mute" => {
+            r#"
+            tell application "System Events"
+                set spotifyRunning to (name of processes) contains "Spotify"
+                set musicRunning to (name of processes) contains "Music"
+            end tell
+            if spotifyRunning then
+                tell application "Spotify" to playpause
+            else if musicRunning then
+                tell application "Music" to playpause
+            end if
+            "#
+        },
+        "next" => {
+            r#"
+            tell application "System Events"
+                set spotifyRunning to (name of processes) contains "Spotify"
+                set musicRunning to (name of processes) contains "Music"
+            end tell
+            if spotifyRunning then
+                tell application "Spotify" to next track
+            else if musicRunning then
+                tell application "Music" to next track
+            end if
+            "#
+        },
+        "prev" | "previous" => {
+            r#"
+            tell application "System Events"
+                set spotifyRunning to (name of processes) contains "Spotify"
+                set musicRunning to (name of processes) contains "Music"
+            end tell
+            if spotifyRunning then
+                tell application "Spotify" to previous track
+            else if musicRunning then
+                tell application "Music" to previous track
+            end if
+            "#
+        },
+        "volume_up" => "set volume output volume ((output volume of (get volume settings)) + 5)",
+        "volume_down" => "set volume output volume ((output volume of (get volume settings)) - 5)",
+        _ => return None,
+    };
+
+    Command::new("osascript").args(["-e", script]).status().ok()?;
+    Some(())
 }
 
 #[cfg(target_os = "windows")]

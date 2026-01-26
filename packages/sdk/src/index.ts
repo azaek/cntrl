@@ -27,6 +27,7 @@ export { useSystemStats } from "./hooks/use-system-stats";
 export * from "./types";
 export * from "./types/api";
 export * from "./types/ws";
+export type { BridgeError, ErrorCallback } from "./ws/ws-manager";
 
 // Client (low-level) - keep for direct usage
 export { BridgeClient, createBridgeClient } from "./client";

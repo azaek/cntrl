@@ -23,6 +23,49 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::server::types::*;
 use crate::config::AppConfig;
 
+/// Subscribe to topics - increments ref counts and starts loops if needed
+pub fn subscribe_topics(state: &Arc<AppState>, topics: &[&str]) {
+    let mut global_map = state.active_topics.lock().unwrap();
+    let mut topics_to_start = Vec::new();
+
+    for topic in topics {
+        let entry = global_map.entry(topic.to_string()).or_insert(0);
+        if *entry == 0 {
+            topics_to_start.push(topic.to_string());
+        }
+        *entry += 1;
+    }
+    drop(global_map);
+
+    // Start loops outside of lock
+    for topic in topics_to_start {
+        state.loop_manager.ensure_loop_running(&topic, state.clone());
+    }
+}
+
+/// Unsubscribe from topics - decrements ref counts and stops loops if needed
+pub fn unsubscribe_topics(state: &Arc<AppState>, topics: &[&str]) {
+    let mut global_map = state.active_topics.lock().unwrap();
+    let mut topics_to_stop = Vec::new();
+
+    for topic in topics {
+        if let Some(count) = global_map.get_mut(*topic) {
+            if *count > 0 {
+                *count -= 1;
+                if *count == 0 {
+                    topics_to_stop.push(topic.to_string());
+                }
+            }
+        }
+    }
+    drop(global_map);
+
+    // Stop loops outside of lock
+    for topic in topics_to_stop {
+        state.loop_manager.stop_loop_if_idle(&topic, state);
+    }
+}
+
 pub struct AppState {
     pub system: Arc<Mutex<System>>,
     pub networks: Arc<Mutex<Networks>>,
@@ -35,9 +78,17 @@ pub struct AppState {
 }
 
 pub fn get_or_update_gpu_stats(state: &Arc<AppState>) -> Option<crate::server::gpu::GpuData> {
+    let cache_seconds = {
+        let config = state.config.lock().unwrap();
+        if !config.stats.gpu_enabled {
+            return None;
+        }
+        config.stats.disk_cache_seconds // Reusing disk_cache for GPU too
+    };
+
     let mut cache = state.gpu_cache.lock().unwrap();
     if let Some(stats) = &*cache {
-        if stats.last_updated.elapsed() < std::time::Duration::from_secs(2) {
+        if stats.last_updated.elapsed() < std::time::Duration::from_secs(cache_seconds) {
             return Some(stats.clone());
         }
     }
@@ -47,13 +98,16 @@ pub fn get_or_update_gpu_stats(state: &Arc<AppState>) -> Option<crate::server::g
         *cache = Some(stats.clone());
         return Some(stats);
     }
-    
-    // Keep old stats if refresh failed? Or clear?
-    None
+
+    // Return stale cache if refresh failed
+    cache.clone()
 }
 
 pub async fn status_handler() -> Json<Value> {
-    Json(json!({"status": "ok"}))
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
 }
 
 pub async fn get_client_count(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -230,22 +284,24 @@ pub async fn handle_stream(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-        
+
+    // Subscribe to stats topic and get cleanup handle
+    subscribe_topics(&state, &["stats"]);
+    let state_for_cleanup = state.clone();
+
     let stream = async_stream::stream! {
         let mut rx = state.broadcast_tx.subscribe();
-        
+
+        // Use scopeguard to ensure cleanup runs when stream is dropped
+        let _cleanup = scopeguard::guard((), |_| {
+            unsubscribe_topics(&state_for_cleanup, &["stats"]);
+        });
+
         loop {
             match rx.recv().await {
                 Ok(event) => {
                     match event {
                         BroadcastEvent::SystemStats(payload) => {
-                            // Filter fields if needed based on `fields_set`
-                            // Optimally we'd do this filtering logic here, creating a new struct or just letting serde skip fields if they were Option::None (but the payload already has data).
-                            // Since the payload is already constructed, filtering doesn't save computation, only bandwidth.
-                            // For minimal changes and max perf, we can just send the whole thing or reconstruct.
-                            // The legacy `handle_stream` did filtering during construction.
-                            // If we want exact parity, we should reconstruct.
-                            
                             let mut filtered_payload = payload.clone();
                             if !fields_set.is_empty() {
                                 if !fields_set.contains("cpu") { filtered_payload.cpu = None; }
@@ -254,29 +310,18 @@ pub async fn handle_stream(
                                 if !fields_set.contains("disks") { filtered_payload.disks = None; }
                                 if !fields_set.contains("network") { filtered_payload.network = None; }
                             }
-                            
+
                             yield Ok::<Event, Infallible>(Event::default().json_data(filtered_payload).unwrap());
                         }
-                        BroadcastEvent::MediaUpdate(_) => {
-                            // Legacy SSE stream does not support media updates (use WS or polling)
-                            continue;
-                        }
-                        BroadcastEvent::ProcessList(_) => {
-                            // Legacy SSE stream does not support process list (use WS)
-                            continue;
-                        }
-                        BroadcastEvent::MediaFeedback(_) => {
-                            // Feedback events are WS-only
-                            continue;
-                        }
+                        BroadcastEvent::MediaUpdate(_) |
+                        BroadcastEvent::ProcessList(_) |
+                        BroadcastEvent::MediaFeedback(_) |
                         BroadcastEvent::ProcessFeedback(_) => {
-                            // Feedback events are WS-only
                             continue;
                         }
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // Receiver is lagging, just skip.
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {

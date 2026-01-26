@@ -6,7 +6,9 @@
       "Bash(pnpm lint:*)",
       "Bash(timeout 10 pnpm dev:hub:*)",
       "Bash(timeout 10 pnpm dev:rhub:*)",
-      "WebFetch(domain:www.anthropic.com)"
+      "WebFetch(domain:www.anthropic.com)",
+      "Bash(cargo check:*)",
+      "Bash(pnpm --filter @cntrl-pw/sdk check-types:*)"
     ]
   }
 }

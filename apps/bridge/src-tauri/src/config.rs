@@ -59,6 +59,8 @@ pub struct AuthConfig {
     pub enabled: bool,
     pub api_key: Option<String>,
     pub allowed_ips: Vec<String>,
+    #[serde(default)]
+    pub blocked_ips: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -127,6 +129,7 @@ impl Default for AppConfig {
                 enabled: false,
                 api_key: None,
                 allowed_ips: vec![],
+                blocked_ips: vec![],
             },
             websocket: WebSocketConfig::default(),
         }

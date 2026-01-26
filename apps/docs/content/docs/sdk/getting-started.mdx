@@ -34,9 +34,27 @@ function App() {
 ### Provider Options
 
 ```tsx
+import { BridgesProvider, type BridgeError } from "@cntrl-pw/sdk";
+import { toast } from "sonner"; // or your toast library
+
 <BridgesProvider
   autoConnect={true}  // Auto-connect to all saved bridges on mount (default: true)
+  onError={(error: BridgeError) => {
+    // Handle errors from the bridge (useful for toasts)
+    toast.error(`Bridge error: ${error.message}`);
+    console.error(`[${error.bridgeId}] ${error.code}: ${error.message}`);
+  }}
 >
+```
+
+The `onError` callback receives a `BridgeError` object:
+
+```tsx
+interface BridgeError {
+  code?: string;    // Error code (e.g., "PARSE_ERROR")
+  message: string;  // Human-readable error message
+  bridgeId: string; // Which bridge sent the error
+}
 ```
 
 ## Adding Your First Bridge

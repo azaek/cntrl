@@ -19,3 +19,4 @@ drizzle/
 .wrangler
 .netlify
 dist
+*.mdx

@@ -61,7 +61,8 @@ Here is a breakdown of the standard configuration options:
   "auth": {
     "enabled": false, // Enable API key authentication
     "api_key": null, // Your secret API key
-    "allowed_ips": [] // IP whitelist (empty = allow all)
+    "allowed_ips": [], // IP whitelist (empty = allow all when auth enabled)
+    "blocked_ips": [] // IP blacklist (always enforced, even when auth disabled)
   }
 }
 ```

@@ -141,7 +141,6 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
 
             if !enabled {
                 // Loop exits gracefully if disabled
-                println!("[StatsLoop] Disabled via config, exiting");
                 break;
             }
 
@@ -152,7 +151,8 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             first_run = false;
 
             // Check if still have subscribers
-            if state.broadcast_tx.receiver_count() == 0 {
+            let receiver_count = state.broadcast_tx.receiver_count();
+            if receiver_count == 0 {
                 continue;
             }
 
@@ -270,7 +270,6 @@ fn spawn_media_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             };
 
             if !enabled {
-                println!("[MediaLoop] Disabled via config, exiting");
                 break;
             }
 
@@ -332,7 +331,6 @@ fn spawn_processes_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             };
 
             if !enabled {
-                println!("[ProcessesLoop] Disabled via config, exiting");
                 break;
             }
 
@@ -465,6 +463,8 @@ pub async fn start_server(
         *status = ServerStatus::Running;
     }
 
+    let app = app.into_make_service_with_connect_info::<SocketAddr>();
+
     let server = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown_rx.recv().await.ok();
@@ -483,35 +483,116 @@ pub async fn start_server(
 
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let (auth_enabled, api_key) = {
+    let (auth_enabled, api_key, allowed_ips, blocked_ips) = {
         let config = state.config.lock().unwrap();
-        (config.auth.enabled, config.auth.api_key.clone())
+        (
+            config.auth.enabled,
+            config.auth.api_key.clone(),
+            config.auth.allowed_ips.clone(),
+            config.auth.blocked_ips.clone(),
+        )
     };
 
+    let client_ip = addr.ip().to_string();
+
+    // Always check blocked IPs first (even if auth is disabled)
+    if !blocked_ips.is_empty() && is_ip_in_list(&client_ip, &blocked_ips) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    // If auth is disabled, allow the request
     if !auth_enabled {
         return next.run(req).await;
     }
 
+    // Check IP in allowlist, if found bypass auth
+    if is_ip_in_list(&client_ip, &allowed_ips) {
+        return next.run(req).await;
+    }
+
+    // Check API key (if configured)
     let required_key = match api_key {
         Some(k) => k,
-        None => return next.run(req).await,
+        None => return next.run(req).await, // No key configured, allow
     };
 
+    // Check Authorization header first
     let auth_header = req.headers().get("Authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "));
 
-    let token_valid = match auth_header {
-        Some(token) => token == required_key,
-        None => false,
+    if let Some(token) = auth_header {
+        if token == required_key {
+            return next.run(req).await;
+        }
+    }
+
+    // For WebSocket endpoint only, also check query param
+    let is_ws_endpoint = req.uri().path() == "/api/ws";
+    if is_ws_endpoint {
+        if let Some(query) = req.uri().query() {
+            for param in query.split('&') {
+                if let Some(key) = param.strip_prefix("api_key=") {
+                    if key == required_key {
+                        return next.run(req).await;
+                    }
+                }
+            }
+        }
+    }
+
+    StatusCode::UNAUTHORIZED.into_response()
+}
+
+/// Check if an IP matches any entry in a list (supports exact match and CIDR)
+fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
+    let client: std::net::IpAddr = match client_ip.parse() {
+        Ok(ip) => ip,
+        Err(_) => return false,
     };
 
-    if token_valid {
-        next.run(req).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
+    for entry in list {
+        // Exact match
+        if entry == client_ip {
+            return true;
+        }
+
+        // CIDR match (simplified - just prefix check for common cases)
+        if entry.contains('/') {
+            if let Some((network, prefix_len)) = entry.split_once('/') {
+                if let (Ok(net_ip), Ok(prefix)) = (network.parse::<std::net::IpAddr>(), prefix_len.parse::<u8>()) {
+                    if ip_matches_cidr(&client, &net_ip, prefix) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Simple CIDR matching
+fn ip_matches_cidr(client: &std::net::IpAddr, network: &std::net::IpAddr, prefix_len: u8) -> bool {
+    match (client, network) {
+        (std::net::IpAddr::V4(c), std::net::IpAddr::V4(n)) => {
+            if prefix_len > 32 { return false; }
+            let mask = if prefix_len == 0 { 0 } else { !0u32 << (32 - prefix_len) };
+            let c_bits = u32::from_be_bytes(c.octets());
+            let n_bits = u32::from_be_bytes(n.octets());
+            (c_bits & mask) == (n_bits & mask)
+        }
+        (std::net::IpAddr::V6(c), std::net::IpAddr::V6(n)) => {
+            if prefix_len > 128 { return false; }
+            let mask = if prefix_len == 0 { 0 } else { !0u128 << (128 - prefix_len) };
+            let c_bits = u128::from_be_bytes(c.octets());
+            let n_bits = u128::from_be_bytes(n.octets());
+            (c_bits & mask) == (n_bits & mask)
+        }
+        _ => false, // IPv4/IPv6 mismatch
     }
 }

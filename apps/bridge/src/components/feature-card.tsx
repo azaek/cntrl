@@ -3,7 +3,7 @@ import { Switch } from "./switch";
 import { cn } from "./utils";
 
 const FeatureCard = (props: {
-  id: string;
+  id?: string;
   className?: string;
   icon: JSX.Element;
   title: string;
