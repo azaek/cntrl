@@ -93,6 +93,24 @@ jobs:
         with:
           workspaces: apps/bridge/src-tauri -> target
 
+      - name: Sync version from tag
+        run: |
+          # Extract version from tag: bridge-v0.1.0-beta.1 -> 0.1.0-beta.1
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#bridge-v}"
+          echo "Setting version to $VERSION"
+
+          # Update tauri.conf.json
+          cd apps/bridge/src-tauri
+          sed -i 's/"version": "[^"]*"/"version": "'"$VERSION"'"/' tauri.conf.json
+          cat tauri.conf.json | grep '"version"'
+
+          # Update Cargo.toml (only supports semver, strip pre-release for Cargo)
+          CARGO_VERSION=$(echo "$VERSION" | sed 's/-.*//')
+          sed -i 's/^version = "[^"]*"/version = "'"$CARGO_VERSION"'"/' Cargo.toml
+          grep '^version' Cargo.toml
+        shell: bash
+
       - name: Install frontend dependencies
         run: pnpm install
 
