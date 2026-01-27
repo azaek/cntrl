@@ -1,11 +1,17 @@
+use crate::server::{
+    handlers::{subscribe_topics, unsubscribe_topics, AppState},
+    types::{BroadcastEvent, OperationFeedback, WebSocketMessage},
+};
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::Response,
 };
-use std::sync::{Arc, Mutex};
-use std::collections::HashSet;
 use futures::{sink::SinkExt, stream::StreamExt};
-use crate::server::{handlers::{AppState, subscribe_topics, unsubscribe_topics}, types::{WebSocketMessage, BroadcastEvent, OperationFeedback}};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 /// Expand hierarchical topic subscriptions.
 /// e.g., "stats" expands to ["stats", "stats.cpu", "stats.memory", "stats.gpu", "stats.disks", "stats.network"]
@@ -36,10 +42,7 @@ fn expand_topic(topic: &str) -> Vec<String> {
     }
 }
 
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
@@ -175,40 +178,43 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                 Ok(cmd) => {
                                     match cmd {
                                         WebSocketMessage::Subscribe(req) => {
-                                // Get old subscriptions
-                                let old_subs = {
-                                    let lock = subs.lock().unwrap();
-                                    lock.clone()
-                                };
+                                            // Get old subscriptions
+                                            let old_subs = {
+                                                let lock = subs.lock().unwrap();
+                                                lock.clone()
+                                            };
 
-                                // Expand hierarchical topics
-                                let mut new_set = HashSet::new();
-                                for t in req.topics {
-                                    let expanded = expand_topic(&t.to_lowercase());
-                                    for et in expanded {
-                                        new_set.insert(et);
-                                    }
-                                }
+                                            // Expand hierarchical topics
+                                            let mut new_set = HashSet::new();
+                                            for t in req.topics {
+                                                let expanded = expand_topic(&t.to_lowercase());
+                                                for et in expanded {
+                                                    new_set.insert(et);
+                                                }
+                                            }
 
-                                // Unsubscribe from old topics
-                                if let Some(old_set) = &old_subs {
-                                    let old_refs: Vec<&str> = old_set.iter().map(|s| s.as_str()).collect();
-                                    unsubscribe_topics(&state, &old_refs);
-                                }
+                                            // Unsubscribe from old topics
+                                            if let Some(old_set) = &old_subs {
+                                                let old_refs: Vec<&str> =
+                                                    old_set.iter().map(|s| s.as_str()).collect();
+                                                unsubscribe_topics(&state, &old_refs);
+                                            }
 
-                                // Subscribe to new topics
-                                let new_refs: Vec<&str> = new_set.iter().map(|s| s.as_str()).collect();
-                                subscribe_topics(&state, &new_refs);
+                                            // Subscribe to new topics
+                                            let new_refs: Vec<&str> =
+                                                new_set.iter().map(|s| s.as_str()).collect();
+                                            subscribe_topics(&state, &new_refs);
 
-                                // Update local subscription state
-                                {
-                                    let mut lock = subs.lock().unwrap();
-                                    *lock = Some(new_set);
-                                }
-                            }
+                                            // Update local subscription state
+                                            {
+                                                let mut lock = subs.lock().unwrap();
+                                                *lock = Some(new_set);
+                                            }
+                                        }
                                         ref other => {
                                             // Handle command and get feedback
-                                            let feedback = handle_ws_command(other.clone(), &state).await;
+                                            let feedback =
+                                                handle_ws_command(other.clone(), &state).await;
 
                                             // Broadcast feedback to all relevant subscribers
                                             if let Some(fb) = feedback {
@@ -361,7 +367,11 @@ async fn handle_ws_command(cmd: WebSocketMessage, state: &Arc<AppState>) -> Opti
             Some(BroadcastEvent::ProcessFeedback(OperationFeedback {
                 success,
                 action: "kill".to_string(),
-                message: if success { None } else { Some("Process not found or could not be killed".to_string()) },
+                message: if success {
+                    None
+                } else {
+                    Some("Process not found or could not be killed".to_string())
+                },
                 pid: req.pid,
                 name: killed_name.or(req.name),
             }))
@@ -404,13 +414,12 @@ async fn handle_ws_command(cmd: WebSocketMessage, state: &Arc<AppState>) -> Opti
 
 #[cfg(target_os = "windows")]
 fn trigger_windows_media_key(action: &str) {
-      unsafe {
+    unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::{
-            SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_VOLUME_MUTE, VK_VOLUME_DOWN, 
-            VK_VOLUME_UP, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PREV_TRACK, VK_MEDIA_PLAY_PAUSE, 
-            KEYEVENTF_KEYUP
+            SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_MEDIA_NEXT_TRACK,
+            VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
         };
-        
+
         let vk = match action {
             "volume_up" => Some(VK_VOLUME_UP),
             "volume_down" => Some(VK_VOLUME_DOWN),

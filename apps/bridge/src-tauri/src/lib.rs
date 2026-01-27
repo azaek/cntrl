@@ -9,16 +9,16 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-mod server;
-mod tray;
 mod config;
 mod mac_rounded_corners;
+mod server;
+mod tray;
 
-use std::sync::{Arc, Mutex};
 use config::AppConfig;
+use server::types::{ServerState, ServerStatus};
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
-use server::types::{ServerStatus, ServerState};
 
 // Server Control State
 struct ServerControl {
@@ -26,13 +26,13 @@ struct ServerControl {
 }
 
 fn spawn_server(
-    port: u16, 
-    config: Arc<Mutex<AppConfig>>, 
-    status: Arc<Mutex<ServerStatus>>, 
-    control: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>
+    port: u16,
+    config: Arc<Mutex<AppConfig>>,
+    status: Arc<Mutex<ServerStatus>>,
+    control: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
 ) {
     let (tx, rx) = tokio::sync::broadcast::channel(1);
-    
+
     // Store sender
     let mut c = control.lock().unwrap();
     *c = Some(tx);
@@ -41,20 +41,20 @@ fn spawn_server(
         server::start_server(port, config, status, rx).await;
     });
 }
-            
+
 #[tauri::command]
 fn get_config(state: tauri::State<Arc<Mutex<AppConfig>>>) -> AppConfig {
     state.lock().unwrap().clone()
 }
 
 #[tauri::command]
-fn get_server_status(state: tauri::State<Arc<Mutex<ServerStatus>>>, config: tauri::State<Arc<Mutex<AppConfig>>>) -> ServerState {
+fn get_server_status(
+    state: tauri::State<Arc<Mutex<ServerStatus>>>,
+    config: tauri::State<Arc<Mutex<AppConfig>>>,
+) -> ServerState {
     let status = state.lock().unwrap().clone();
     let port = config.lock().unwrap().server.port;
-    ServerState {
-        status,
-        port
-    }
+    ServerState { status, port }
 }
 
 #[tauri::command]
@@ -97,19 +97,19 @@ fn stop_service(control_state: tauri::State<ServerControl>) -> Result<(), String
 
 #[tauri::command]
 fn reload_config(
-    state: tauri::State<Arc<Mutex<AppConfig>>>, 
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
     status_state: tauri::State<Arc<Mutex<ServerStatus>>>,
     control_state: tauri::State<ServerControl>,
-    app: tauri::AppHandle
+    app: tauri::AppHandle,
 ) -> Result<AppConfig, String> {
     let new_config = config::load_config(&app);
-    
+
     // 1. Update config state
     {
         let mut config = state.lock().unwrap();
         *config = new_config.clone();
     }
-    
+
     // 2. Stop existing server
     {
         let control = control_state.tx.lock().unwrap();
@@ -123,17 +123,21 @@ fn reload_config(
 
     // 4. Start new server
     spawn_server(
-        new_config.server.port, 
-        state.inner().clone(), 
-        status_state.inner().clone(), 
-        control_state.tx.clone()
+        new_config.server.port,
+        state.inner().clone(),
+        status_state.inner().clone(),
+        control_state.tx.clone(),
     );
 
     Ok(new_config)
 }
 
 #[tauri::command]
-fn toggle_feature(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, feature: String) -> Result<AppConfig, String> {
+fn toggle_feature(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    feature: String,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     match feature.as_str() {
         "system" => config.features.enable_system = !config.features.enable_system,
@@ -152,7 +156,7 @@ fn toggle_feature(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHan
             } else {
                 let _ = app.autolaunch().disable();
             }
-        },
+        }
         _ => return Err("Feature not found".to_string()),
     }
 
@@ -167,7 +171,12 @@ fn toggle_feature(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHan
 // ============================================================================
 
 #[tauri::command]
-fn update_ws_interval(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, topic: String, interval_ms: u64) -> Result<AppConfig, String> {
+fn update_ws_interval(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    topic: String,
+    interval_ms: u64,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
 
     // Validate interval (minimum 100ms, maximum 60s)
@@ -187,7 +196,11 @@ fn update_ws_interval(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::Ap
 }
 
 #[tauri::command]
-fn toggle_ws_topic(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, topic: String) -> Result<AppConfig, String> {
+fn toggle_ws_topic(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    topic: String,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
 
     match topic.as_str() {
@@ -206,7 +219,11 @@ fn toggle_ws_topic(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHa
 // ============================================================================
 
 #[tauri::command]
-fn update_server_port(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, port: u16) -> Result<AppConfig, String> {
+fn update_server_port(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    port: u16,
+) -> Result<AppConfig, String> {
     if port < 1024 {
         return Err("Port must be >= 1024".to_string());
     }
@@ -218,7 +235,11 @@ fn update_server_port(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::Ap
 }
 
 #[tauri::command]
-fn update_server_host(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, host: String) -> Result<AppConfig, String> {
+fn update_server_host(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    host: String,
+) -> Result<AppConfig, String> {
     // Validate host is a valid IP
     if host.parse::<std::net::IpAddr>().is_err() {
         return Err("Invalid IP address".to_string());
@@ -231,7 +252,11 @@ fn update_server_host(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::Ap
 }
 
 #[tauri::command]
-fn update_hostname(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, hostname: String) -> Result<AppConfig, String> {
+fn update_hostname(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    hostname: String,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.display.hostname = hostname;
     config::save_config(&app, &config);
@@ -243,7 +268,10 @@ fn update_hostname(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHa
 // ============================================================================
 
 #[tauri::command]
-fn toggle_auth(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle) -> Result<AppConfig, String> {
+fn toggle_auth(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.auth.enabled = !config.auth.enabled;
     config::save_config(&app, &config);
@@ -251,7 +279,11 @@ fn toggle_auth(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle
 }
 
 #[tauri::command]
-fn update_api_key(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, api_key: Option<String>) -> Result<AppConfig, String> {
+fn update_api_key(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    api_key: Option<String>,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.auth.api_key = api_key;
     config::save_config(&app, &config);
@@ -259,7 +291,10 @@ fn update_api_key(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHan
 }
 
 #[tauri::command]
-fn generate_api_key(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle) -> Result<AppConfig, String> {
+fn generate_api_key(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+) -> Result<AppConfig, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Generate a random-ish key using timestamp and random bytes
@@ -277,7 +312,11 @@ fn generate_api_key(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppH
 }
 
 #[tauri::command]
-fn add_allowed_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, ip: String) -> Result<AppConfig, String> {
+fn add_allowed_ip(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    ip: String,
+) -> Result<AppConfig, String> {
     // Validate IP
     if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
         return Err("Invalid IP address or CIDR".to_string());
@@ -292,7 +331,11 @@ fn add_allowed_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHan
 }
 
 #[tauri::command]
-fn remove_allowed_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, ip: String) -> Result<AppConfig, String> {
+fn remove_allowed_ip(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    ip: String,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.auth.allowed_ips.retain(|x| x != &ip);
     config::save_config(&app, &config);
@@ -300,7 +343,11 @@ fn remove_allowed_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::App
 }
 
 #[tauri::command]
-fn add_blocked_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, ip: String) -> Result<AppConfig, String> {
+fn add_blocked_ip(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    ip: String,
+) -> Result<AppConfig, String> {
     // Validate IP or CIDR
     if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
         return Err("Invalid IP address or CIDR".to_string());
@@ -315,7 +362,11 @@ fn add_blocked_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHan
 }
 
 #[tauri::command]
-fn remove_blocked_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, ip: String) -> Result<AppConfig, String> {
+fn remove_blocked_ip(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    ip: String,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.auth.blocked_ips.retain(|x| x != &ip);
     config::save_config(&app, &config);
@@ -323,7 +374,10 @@ fn remove_blocked_ip(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::App
 }
 
 #[tauri::command]
-fn clear_blocked_ips(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle) -> Result<AppConfig, String> {
+fn clear_blocked_ips(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.auth.blocked_ips.clear();
     config::save_config(&app, &config);
@@ -335,7 +389,10 @@ fn clear_blocked_ips(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::App
 // ============================================================================
 
 #[tauri::command]
-fn toggle_gpu_stats(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle) -> Result<AppConfig, String> {
+fn toggle_gpu_stats(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
     config.stats.gpu_enabled = !config.stats.gpu_enabled;
     config::save_config(&app, &config);
@@ -343,7 +400,11 @@ fn toggle_gpu_stats(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppH
 }
 
 #[tauri::command]
-fn update_disk_cache_seconds(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, seconds: u64) -> Result<AppConfig, String> {
+fn update_disk_cache_seconds(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    seconds: u64,
+) -> Result<AppConfig, String> {
     if seconds < 1 || seconds > 300 {
         return Err("Seconds must be between 1 and 300".to_string());
     }
@@ -355,7 +416,11 @@ fn update_disk_cache_seconds(state: tauri::State<Arc<Mutex<AppConfig>>>, app: ta
 }
 
 #[tauri::command]
-fn update_stream_interval(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, seconds: u64) -> Result<AppConfig, String> {
+fn update_stream_interval(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    seconds: u64,
+) -> Result<AppConfig, String> {
     if seconds < 1 || seconds > 60 {
         return Err("Seconds must be between 1 and 60".to_string());
     }
@@ -371,7 +436,11 @@ fn update_stream_interval(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri
 // ============================================================================
 
 #[tauri::command]
-fn update_config(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHandle, updates: serde_json::Value) -> Result<AppConfig, String> {
+fn update_config(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    app: tauri::AppHandle,
+    updates: serde_json::Value,
+) -> Result<AppConfig, String> {
     let mut config = state.lock().unwrap();
 
     // Apply server updates
@@ -399,7 +468,10 @@ fn update_config(state: tauri::State<Arc<Mutex<AppConfig>>>, app: tauri::AppHand
         if let Some(disk) = stats.get("disk_cache_seconds").and_then(|v| v.as_u64()) {
             config.stats.disk_cache_seconds = disk;
         }
-        if let Some(stream) = stats.get("stream_interval_seconds").and_then(|v| v.as_u64()) {
+        if let Some(stream) = stats
+            .get("stream_interval_seconds")
+            .and_then(|v| v.as_u64())
+        {
             config.stats.stream_interval_seconds = stream;
         }
     }
@@ -459,12 +531,25 @@ fn get_local_ips() -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Determine update channel based on current version
+    let current_version = env!("CARGO_PKG_VERSION");
+    let update_endpoint = if current_version.contains("beta") {
+        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-beta.json"
+    } else {
+        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-stable.json"
+    };
+
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .endpoints(vec![update_endpoint.parse().unwrap()])
+                .build(),
+        )
         .setup(|app| {
             let cfg = config::load_config(app.handle());
             let port = cfg.server.port;
             let autostart_enabled = cfg.features.enable_autostart;
-            
+
             // Share config state
             let shared_config = Arc::new(Mutex::new(cfg));
             app.manage(shared_config.clone());
@@ -472,17 +557,19 @@ pub fn run() {
             // Server Status State
             let server_status = Arc::new(Mutex::new(ServerStatus::Starting));
             app.manage(server_status.clone());
-            
+
             // Server Control
             let control_tx = Arc::new(Mutex::new(None));
-            app.manage(ServerControl { tx: control_tx.clone() });
+            app.manage(ServerControl {
+                tx: control_tx.clone(),
+            });
 
             // Start initial server
             spawn_server(port, shared_config, server_status, control_tx);
 
             // Sync Autostart
             // let autostart_enabled is extracted above
-            
+
             if autostart_enabled {
                 let _ = app.handle().autolaunch().enable();
             } else {
@@ -507,7 +594,10 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .invoke_handler(tauri::generate_handler![
             greet,
             get_app_version,

@@ -1,6 +1,6 @@
 use axum::{
-    http::StatusCode,
     extract::State,
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -14,12 +14,12 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::AppConfig;
 
-pub mod handlers;
-pub mod types;
 pub mod gpu;
+pub mod handlers;
 pub mod hardware;
 pub mod media;
 pub mod process;
+pub mod types;
 pub mod ws;
 
 /// Manages lazy-spawned monitoring loops.
@@ -44,8 +44,18 @@ impl LoopManager {
         // Determine which loop category this topic belongs to
         let is_stats_topic = matches!(
             topic,
-            "stats" | "stats.cpu" | "stats.memory" | "stats.gpu" | "stats.disks" | "stats.network"
-                | "cpu" | "memory" | "gpu" | "disks" | "network" | "system"
+            "stats"
+                | "stats.cpu"
+                | "stats.memory"
+                | "stats.gpu"
+                | "stats.disks"
+                | "stats.network"
+                | "cpu"
+                | "memory"
+                | "gpu"
+                | "disks"
+                | "network"
+                | "system"
         );
         let is_media_topic = matches!(topic, "media" | "stats.media");
         let is_processes_topic = matches!(topic, "processes" | "process");
@@ -78,16 +88,39 @@ impl LoopManager {
         // Check if ANY stats sub-topic has subscribers
         let is_stats_topic = matches!(
             topic,
-            "stats" | "stats.cpu" | "stats.memory" | "stats.gpu" | "stats.disks" | "stats.network"
-                | "cpu" | "memory" | "gpu" | "disks" | "network" | "system"
+            "stats"
+                | "stats.cpu"
+                | "stats.memory"
+                | "stats.gpu"
+                | "stats.disks"
+                | "stats.network"
+                | "cpu"
+                | "memory"
+                | "gpu"
+                | "disks"
+                | "network"
+                | "system"
         );
         let is_media_topic = matches!(topic, "media" | "stats.media");
         let is_processes_topic = matches!(topic, "processes" | "process");
 
         if is_stats_topic {
-            let has_stats_subs = ["stats", "stats.cpu", "stats.memory", "stats.gpu", "stats.disks", "stats.network", "cpu", "memory", "gpu", "disks", "network", "system"]
-                .iter()
-                .any(|t| *topics.get(*t).unwrap_or(&0) > 0);
+            let has_stats_subs = [
+                "stats",
+                "stats.cpu",
+                "stats.memory",
+                "stats.gpu",
+                "stats.disks",
+                "stats.network",
+                "cpu",
+                "memory",
+                "gpu",
+                "disks",
+                "network",
+                "system",
+            ]
+            .iter()
+            .any(|t| *topics.get(*t).unwrap_or(&0) > 0);
 
             if !has_stats_subs {
                 drop(topics); // Release lock before acquiring another
@@ -136,7 +169,10 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             // Read interval from config each iteration (allows runtime changes)
             let (interval_ms, enabled) = {
                 let config = state.config.lock().unwrap();
-                (config.websocket.stats.interval_ms, config.websocket.stats.enabled)
+                (
+                    config.websocket.stats.interval_ms,
+                    config.websocket.stats.enabled,
+                )
             };
 
             if !enabled {
@@ -160,11 +196,22 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             let (need_cpu, need_mem, need_gpu, need_disks, need_net) = {
                 let topics = state.active_topics.lock().unwrap();
                 (
-                    *topics.get("cpu").unwrap_or(&0) > 0 || *topics.get("stats.cpu").unwrap_or(&0) > 0 || *topics.get("stats").unwrap_or(&0) > 0,
-                    *topics.get("memory").unwrap_or(&0) > 0 || *topics.get("stats.memory").unwrap_or(&0) > 0 || *topics.get("stats").unwrap_or(&0) > 0,
-                    *topics.get("gpu").unwrap_or(&0) > 0 || *topics.get("stats.gpu").unwrap_or(&0) > 0 || *topics.get("stats").unwrap_or(&0) > 0,
-                    *topics.get("disks").unwrap_or(&0) > 0 || *topics.get("stats.disks").unwrap_or(&0) > 0 || *topics.get("stats").unwrap_or(&0) > 0,
-                    *topics.get("network").unwrap_or(&0) > 0 || *topics.get("net").unwrap_or(&0) > 0 || *topics.get("stats.network").unwrap_or(&0) > 0 || *topics.get("stats").unwrap_or(&0) > 0,
+                    *topics.get("cpu").unwrap_or(&0) > 0
+                        || *topics.get("stats.cpu").unwrap_or(&0) > 0
+                        || *topics.get("stats").unwrap_or(&0) > 0,
+                    *topics.get("memory").unwrap_or(&0) > 0
+                        || *topics.get("stats.memory").unwrap_or(&0) > 0
+                        || *topics.get("stats").unwrap_or(&0) > 0,
+                    *topics.get("gpu").unwrap_or(&0) > 0
+                        || *topics.get("stats.gpu").unwrap_or(&0) > 0
+                        || *topics.get("stats").unwrap_or(&0) > 0,
+                    *topics.get("disks").unwrap_or(&0) > 0
+                        || *topics.get("stats.disks").unwrap_or(&0) > 0
+                        || *topics.get("stats").unwrap_or(&0) > 0,
+                    *topics.get("network").unwrap_or(&0) > 0
+                        || *topics.get("net").unwrap_or(&0) > 0
+                        || *topics.get("stats.network").unwrap_or(&0) > 0
+                        || *topics.get("stats").unwrap_or(&0) > 0,
                 )
             };
 
@@ -175,11 +222,17 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
 
             let payload = {
                 let mut sys = state.system.lock().unwrap();
-                if need_cpu { sys.refresh_cpu(); }
-                if need_mem { sys.refresh_memory(); }
+                if need_cpu {
+                    sys.refresh_cpu();
+                }
+                if need_mem {
+                    sys.refresh_memory();
+                }
 
                 let mut networks = state.networks.lock().unwrap();
-                if need_net { networks.refresh(); }
+                if need_net {
+                    networks.refresh();
+                }
 
                 types::StreamPayload {
                     timestamp: std::time::SystemTime::now()
@@ -200,7 +253,8 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
                         Some(types::MemoryUsage {
                             used: sys.used_memory(),
                             free: sys.free_memory(),
-                            used_percent: (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0,
+                            used_percent: (sys.used_memory() as f64 / sys.total_memory() as f64)
+                                * 100.0,
                         })
                     } else {
                         None
@@ -221,7 +275,11 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
                             disks_lock
                                 .iter()
                                 .map(|d| types::DiskUsage {
-                                    fs: d.mount_point().to_string_lossy().trim_end_matches('\\').into(),
+                                    fs: d
+                                        .mount_point()
+                                        .to_string_lossy()
+                                        .trim_end_matches('\\')
+                                        .into(),
                                     used: d.total_space() - d.available_space(),
                                     available: d.available_space(),
                                     used_percent: ((d.total_space() - d.available_space()) as f64
@@ -251,7 +309,9 @@ fn spawn_stats_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
                 }
             };
 
-            let _ = state.broadcast_tx.send(types::BroadcastEvent::SystemStats(payload));
+            let _ = state
+                .broadcast_tx
+                .send(types::BroadcastEvent::SystemStats(payload));
         }
     })
 }
@@ -266,7 +326,10 @@ fn spawn_media_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             // Read interval from config each iteration
             let (interval_ms, enabled) = {
                 let config = state.config.lock().unwrap();
-                (config.websocket.media.interval_ms, config.websocket.media.enabled)
+                (
+                    config.websocket.media.interval_ms,
+                    config.websocket.media.enabled,
+                )
             };
 
             if !enabled {
@@ -286,7 +349,8 @@ fn spawn_media_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             // Check demand
             let need_media = {
                 let topics = state.active_topics.lock().unwrap();
-                *topics.get("media").unwrap_or(&0) > 0 || *topics.get("stats.media").unwrap_or(&0) > 0
+                *topics.get("media").unwrap_or(&0) > 0
+                    || *topics.get("stats.media").unwrap_or(&0) > 0
             };
 
             if !need_media {
@@ -311,7 +375,9 @@ fn spawn_media_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
 
                 if changed {
                     last_status = Some(current_sig);
-                    let _ = state.broadcast_tx.send(types::BroadcastEvent::MediaUpdate(status));
+                    let _ = state
+                        .broadcast_tx
+                        .send(types::BroadcastEvent::MediaUpdate(status));
                 }
             }
         }
@@ -327,7 +393,10 @@ fn spawn_processes_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             // Read interval from config each iteration
             let (interval_ms, enabled) = {
                 let config = state.config.lock().unwrap();
-                (config.websocket.processes.interval_ms, config.websocket.processes.enabled)
+                (
+                    config.websocket.processes.interval_ms,
+                    config.websocket.processes.enabled,
+                )
             };
 
             if !enabled {
@@ -347,7 +416,8 @@ fn spawn_processes_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
             // Check demand
             let need_processes = {
                 let topics = state.active_topics.lock().unwrap();
-                *topics.get("processes").unwrap_or(&0) > 0 || *topics.get("process").unwrap_or(&0) > 0
+                *topics.get("processes").unwrap_or(&0) > 0
+                    || *topics.get("process").unwrap_or(&0) > 0
             };
 
             if !need_processes {
@@ -371,7 +441,9 @@ fn spawn_processes_loop(state: Arc<handlers::AppState>) -> JoinHandle<()> {
                 total_count,
             };
 
-            let _ = state.broadcast_tx.send(types::BroadcastEvent::ProcessList(payload));
+            let _ = state
+                .broadcast_tx
+                .send(types::BroadcastEvent::ProcessList(payload));
         }
     })
 }
@@ -384,7 +456,7 @@ pub async fn start_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
     status_handle: Arc<Mutex<ServerStatus>>,
-    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     let loop_manager = Arc::new(LoopManager::new());
 
@@ -426,11 +498,13 @@ pub async fn start_server(
         .route("/api/pw/:action", post(power_action))
         .route("/api/media/control", post(media_control))
         .route("/api/media/status", get(get_media_status))
-
         .route("/api/stream", get(handle_stream))
         .route("/api/ws", get(ws_handler))
         .route("/api/clients", get(get_client_count))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
@@ -439,7 +513,7 @@ pub async fn start_server(
         let c = state.config.lock().unwrap();
         c.server.host.clone()
     };
-    
+
     let ip_addr: std::net::IpAddr = host.parse().unwrap_or_else(|_| {
         println!("Invalid host '{}', defaulting to 0.0.0.0", host);
         std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))
@@ -465,19 +539,18 @@ pub async fn start_server(
 
     let app = app.into_make_service_with_connect_info::<SocketAddr>();
 
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_rx.recv().await.ok();
-            println!("Server received shutdown signal");
-        });
+    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+        shutdown_rx.recv().await.ok();
+        println!("Server received shutdown signal");
+    });
 
     if let Err(e) = server.await {
-         println!("Server exited with error: {}", e);
-         let mut status = status_handle.lock().unwrap();
-         *status = ServerStatus::Error(format!("Server exited: {}", e));
+        println!("Server exited with error: {}", e);
+        let mut status = status_handle.lock().unwrap();
+        *status = ServerStatus::Error(format!("Server exited: {}", e));
     } else {
-         let mut status = status_handle.lock().unwrap();
-         *status = ServerStatus::Stopped;       
+        let mut status = status_handle.lock().unwrap();
+        *status = ServerStatus::Stopped;
     }
 }
 
@@ -521,7 +594,9 @@ async fn auth_middleware(
     };
 
     // Check Authorization header first
-    let auth_header = req.headers().get("Authorization")
+    let auth_header = req
+        .headers()
+        .get("Authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "));
 
@@ -564,7 +639,10 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
         // CIDR match (simplified - just prefix check for common cases)
         if entry.contains('/') {
             if let Some((network, prefix_len)) = entry.split_once('/') {
-                if let (Ok(net_ip), Ok(prefix)) = (network.parse::<std::net::IpAddr>(), prefix_len.parse::<u8>()) {
+                if let (Ok(net_ip), Ok(prefix)) = (
+                    network.parse::<std::net::IpAddr>(),
+                    prefix_len.parse::<u8>(),
+                ) {
                     if ip_matches_cidr(&client, &net_ip, prefix) {
                         return true;
                     }
@@ -580,15 +658,27 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
 fn ip_matches_cidr(client: &std::net::IpAddr, network: &std::net::IpAddr, prefix_len: u8) -> bool {
     match (client, network) {
         (std::net::IpAddr::V4(c), std::net::IpAddr::V4(n)) => {
-            if prefix_len > 32 { return false; }
-            let mask = if prefix_len == 0 { 0 } else { !0u32 << (32 - prefix_len) };
+            if prefix_len > 32 {
+                return false;
+            }
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                !0u32 << (32 - prefix_len)
+            };
             let c_bits = u32::from_be_bytes(c.octets());
             let n_bits = u32::from_be_bytes(n.octets());
             (c_bits & mask) == (n_bits & mask)
         }
         (std::net::IpAddr::V6(c), std::net::IpAddr::V6(n)) => {
-            if prefix_len > 128 { return false; }
-            let mask = if prefix_len == 0 { 0 } else { !0u128 << (128 - prefix_len) };
+            if prefix_len > 128 {
+                return false;
+            }
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                !0u128 << (128 - prefix_len)
+            };
             let c_bits = u128::from_be_bytes(c.octets());
             let n_bits = u128::from_be_bytes(n.octets());
             (c_bits & mask) == (n_bits & mask)

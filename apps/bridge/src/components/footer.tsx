@@ -3,6 +3,7 @@ import { BookOpen } from "lucide-solid";
 import { createSignal, onMount } from "solid-js";
 import { getAppVersion } from "../lib/backend";
 import Divider from "./ui/divider";
+import { cn } from "./utils";
 const Footer = () => {
   const [version, setVersion] = createSignal("");
 
@@ -30,7 +31,17 @@ const Footer = () => {
               fill="#39393B"
             />
           </svg>
-          {version() && <p class="text-fg-muted/50 font-mono text-xs">v{version()}</p>}
+          {version() && (
+            <p class="text-fg-muted/50 font-mono text-xs tracking-tighter">
+              v{version()}
+            </p>
+          )}
+          <button class="bg-card hover:bg-secondary/40 group -my-2 flex cursor-pointer items-center gap-2 rounded py-1.5 pr-3 pl-2 transition-colors">
+            <UpdateIcon />
+            <p class="text-xs font-medium text-white/40 group-hover:text-white">
+              Update Available!
+            </p>
+          </button>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -65,4 +76,19 @@ const Footer = () => {
     </>
   );
 };
+
+const UpdateIcon = (props: { class?: string }) => (
+  <svg
+    class={cn("aspect-square size-4", props.class)}
+    viewBox="0 0 12 12"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M7.5708 1.40918L6.5508 1.97412L6 1.65527L2.25 3.82617V3.8291L6 6V10.3448L9.75 8.17335V5.75L10.75 5.16455V8.75L6 11.5L1.25 8.75V3.25L6 0.5L7.5708 1.40918ZM9.26465 1.15967C9.35295 0.94675 9.64715 0.946745 9.73535 1.15967L9.8618 1.46533C10.0778 1.98673 10.4807 2.40309 10.9873 2.62842L11.3462 2.78808C11.5513 2.8795 11.5513 3.1781 11.3462 3.26953L10.9663 3.43847C10.4725 3.65812 10.0767 4.05972 9.85695 4.56396L9.7334 4.84668C9.6432 5.05375 9.35685 5.05375 9.2666 4.84668L9.14355 4.56396C8.9238 4.05964 8.5276 3.65814 8.0337 3.43847L7.6538 3.26953C7.4487 3.17811 7.4487 2.87949 7.6538 2.78808L8.0127 2.62842C8.51925 2.40309 8.92225 1.98674 9.1382 1.46533L9.26465 1.15967Z"
+      fill="#67FF90"
+    />
+  </svg>
+);
+
 export default Footer;

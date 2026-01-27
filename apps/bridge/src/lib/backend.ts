@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { check, Update } from "@tauri-apps/plugin-updater";
 
 // ============================================================================
 // Type Definitions (must match Rust config.rs)
@@ -622,4 +623,99 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     console.error("Failed to copy to clipboard:", e);
     return false;
   }
+};
+
+// ============================================================================
+// App Updates
+// ============================================================================
+
+/**
+ * Update channel is determined automatically based on current app version:
+ * - Version contains "beta" → checks latest-beta.json
+ * - Otherwise → checks latest-stable.json
+ */
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  body?: string;
+  date?: string;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+export type UpdateResult =
+  | { status: "upToDate" }
+  | { status: "available"; update: Update; info: UpdateInfo }
+  | { status: "error"; message: string };
+
+/**
+ * Check for application updates
+ * Channel is determined automatically based on current app version:
+ * - Beta versions (e.g., 1.0.0-beta.1) check latest-beta.json
+ * - Stable versions (e.g., 1.0.0) check latest-stable.json
+ */
+export const checkForUpdates = async (): Promise<UpdateResult> => {
+  try {
+    const update = await check();
+
+    if (!update) {
+      return { status: "upToDate" };
+    }
+
+    return {
+      status: "available",
+      update,
+      info: {
+        version: update.version,
+        currentVersion: update.currentVersion,
+        body: update.body ?? undefined,
+        date: update.date ?? undefined,
+      },
+    };
+  } catch (e) {
+    console.error("Failed to check for updates:", e);
+    return { status: "error", message: String(e) };
+  }
+};
+
+/**
+ * Download and install an update
+ * @param update - The update object from checkForUpdates
+ * @param onProgress - Optional callback for download progress
+ */
+export const installUpdate = async (
+  update: Update,
+  onProgress?: (progress: UpdateProgress) => void,
+): Promise<boolean> => {
+  try {
+    // Download with progress
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started" && onProgress) {
+        onProgress({ downloaded: 0, total: event.data.contentLength ?? null });
+      } else if (event.event === "Progress" && onProgress) {
+        onProgress({
+          downloaded: event.data.chunkLength,
+          total: null,
+        });
+      } else if (event.event === "Finished") {
+        console.log("Update download finished");
+      }
+    });
+
+    return true;
+  } catch (e) {
+    console.error("Failed to install update:", e);
+    return false;
+  }
+};
+
+/**
+ * Helper to determine if a version string is a beta version
+ */
+export const isBetaVersion = (version: string): boolean => {
+  return version.includes("beta") || version.includes("alpha") || version.includes("rc");
 };

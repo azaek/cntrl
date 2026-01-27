@@ -1,11 +1,11 @@
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSWindow, NSWindowStyleMask, NSView};
+use cocoa::appkit::{NSView, NSWindow, NSWindowStyleMask};
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, YES};
 #[cfg(target_os = "macos")]
 use cocoa::foundation::NSPoint;
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl, class};
+use objc::{class, msg_send, sel, sel_impl};
 
 #[cfg(target_os = "macos")]
 use tauri::{Runtime, WebviewWindow};

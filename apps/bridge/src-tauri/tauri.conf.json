@@ -29,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["msi", "nsis", "dmg", "app"],
     "publisher": "azaek",
     "copyright": "Copyright © 2026 azaek",
@@ -49,6 +50,14 @@
     },
     "macOS": {
       "minimumSystemVersion": "10.13"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-stable.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBMEQwQjJDNUVDQjRFMjAKUldRZ1RzdGVMQXNOMnZ5TkZUTHBTZFNTMzY4eHhodVVtb0VkaU9vbWw1QzdFSXhIeGN5blVGM3gK"
     }
   }
 }

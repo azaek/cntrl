@@ -16,12 +16,11 @@ use sysinfo::{Disks, Networks, Pid, System};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, IsWindowVisible, SetForegroundWindow, ShowWindow,
-    SwitchToThisWindow, SW_RESTORE,
+    EnumWindows, IsWindowVisible, SetForegroundWindow, ShowWindow, SwitchToThisWindow, SW_RESTORE,
 };
 
-use crate::server::types::*;
 use crate::config::AppConfig;
+use crate::server::types::*;
 
 /// Subscribe to topics - increments ref counts and starts loops if needed
 pub fn subscribe_topics(state: &Arc<AppState>, topics: &[&str]) {
@@ -39,7 +38,9 @@ pub fn subscribe_topics(state: &Arc<AppState>, topics: &[&str]) {
 
     // Start loops outside of lock
     for topic in topics_to_start {
-        state.loop_manager.ensure_loop_running(&topic, state.clone());
+        state
+            .loop_manager
+            .ensure_loop_running(&topic, state.clone());
     }
 }
 
@@ -116,14 +117,19 @@ pub async fn get_client_count(State(state): State<Arc<AppState>>) -> Json<Value>
     }))
 }
 
-pub async fn get_system_info(State(state): State<Arc<AppState>>) -> Result<Json<SystemInfo>, (StatusCode, Json<Value>)> {
+pub async fn get_system_info(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SystemInfo>, (StatusCode, Json<Value>)> {
     if !state.config.lock().unwrap().features.enable_system {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "System info disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "System info disabled"})),
+        ));
     }
 
     let mut sys = state.system.lock().unwrap();
-    sys.refresh_all(); 
-    
+    sys.refresh_all();
+
     let memory = MemoryInfo {
         total: sys.total_memory(),
         slots: crate::server::hardware::get_memory_slots(),
@@ -171,7 +177,7 @@ pub async fn get_system_info(State(state): State<Arc<AppState>>) -> Result<Json<
             if let Ok(ip) = local_ip_address::local_ip() {
                 ipv4 = ip.to_string();
             }
-            let ipv6 = String::new(); 
+            let ipv6 = String::new();
 
             net_info = Some(NetworkInfo {
                 name: name.clone(),
@@ -187,7 +193,11 @@ pub async fn get_system_info(State(state): State<Arc<AppState>>) -> Result<Json<
     let disks = disks_lock
         .iter()
         .map(|d| DiskInfo {
-            fs: d.mount_point().to_string_lossy().trim_end_matches('\\').into(),
+            fs: d
+                .mount_point()
+                .to_string_lossy()
+                .trim_end_matches('\\')
+                .into(),
             disk_type: d.file_system().to_string_lossy().into(),
             size: d.total_space(),
             mount: d.mount_point().to_string_lossy().into(),
@@ -213,15 +223,20 @@ pub async fn get_system_info(State(state): State<Arc<AppState>>) -> Result<Json<
     }))
 }
 
-pub async fn get_system_usage(State(state): State<Arc<AppState>>) -> Result<Json<SystemUsage>, (StatusCode, Json<Value>)> {
+pub async fn get_system_usage(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SystemUsage>, (StatusCode, Json<Value>)> {
     if !state.config.lock().unwrap().features.enable_usage {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Usage data disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Usage data disabled"})),
+        ));
     }
 
     let mut sys = state.system.lock().unwrap();
     sys.refresh_cpu();
     sys.refresh_memory();
-    
+
     let mut disks_lock = state.disks.lock().unwrap();
     disks_lock.refresh_list();
 
@@ -240,11 +255,14 @@ pub async fn get_system_usage(State(state): State<Arc<AppState>>) -> Result<Json
     let disks = disks_lock
         .iter()
         .map(|d| DiskUsage {
-            fs: d.mount_point().to_string_lossy().trim_end_matches('\\').into(),
+            fs: d
+                .mount_point()
+                .to_string_lossy()
+                .trim_end_matches('\\')
+                .into(),
             used: d.total_space() - d.available_space(),
             available: d.available_space(),
-            used_percent: ((d.total_space() - d.available_space()) as f64
-                / d.total_space() as f64)
+            used_percent: ((d.total_space() - d.available_space()) as f64 / d.total_space() as f64)
                 * 100.0,
         })
         .collect();
@@ -273,9 +291,15 @@ pub struct StreamParams {
 pub async fn handle_stream(
     State(state): State<Arc<AppState>>,
     Query(params): Query<StreamParams>,
-) -> Result<Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>>, (StatusCode, Json<Value>)> {
+) -> Result<
+    Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>>,
+    (StatusCode, Json<Value>),
+> {
     if !state.config.lock().unwrap().features.enable_stream {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Stream disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Stream disabled"})),
+        ));
     }
 
     let fields = params.fields.unwrap_or_default();
@@ -331,12 +355,20 @@ pub async fn handle_stream(
         }
     };
 
-    Ok(Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>).keep_alive(KeepAlive::default()))
+    Ok(
+        Sse::new(Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>)
+            .keep_alive(KeepAlive::default()),
+    )
 }
 
-pub async fn list_processes(State(state): State<Arc<AppState>>) -> Result<Json<Vec<ProcessInfo>>, (StatusCode, Json<Value>)> {
+pub async fn list_processes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ProcessInfo>>, (StatusCode, Json<Value>)> {
     if !state.config.lock().unwrap().features.enable_processes {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Process control disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Process control disabled"})),
+        ));
     }
     Ok(Json(crate::server::process::get_processes_list(&state)))
 }
@@ -346,7 +378,10 @@ pub async fn get_process_details(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> Result<Json<Vec<ProcessDetail>>, (StatusCode, Json<Value>)> {
     if !state.config.lock().unwrap().features.enable_processes {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Process control disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Process control disabled"})),
+        ));
     }
 
     let mut sys = state.system.lock().unwrap();
@@ -364,15 +399,16 @@ pub async fn get_process_details(
     for (pid, proc) in sys.processes() {
         if proc.name().to_lowercase().contains(&name_lower) {
             let pid_val = pid.to_string().parse::<u32>().unwrap_or(0);
-            
+
             #[cfg(target_os = "windows")]
-            let (title, has_window) = window_map.get(&pid_val)
+            let (title, has_window) = window_map
+                .get(&pid_val)
                 .map(|wi| (wi.title.clone(), wi.visible))
                 .unwrap_or((None, false));
-                
+
             #[cfg(target_os = "macos")]
             let (title, has_window) = (None, window_map.contains(&pid_val));
-                
+
             #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
             let (title, has_window) = (None, false);
 
@@ -392,20 +428,26 @@ pub async fn get_process_details(
 
 pub async fn launch_process(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<LaunchRequest>
+    Json(payload): Json<LaunchRequest>,
 ) -> (StatusCode, Json<Value>) {
     if !state.config.lock().unwrap().features.enable_processes {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "Process control disabled"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Process control disabled"})),
+        );
     }
 
     let mut cmd = std::process::Command::new(&payload.path);
     if let Some(args) = payload.args {
         cmd.args(args);
     }
-    
+
     match cmd.spawn() {
         Ok(_) => (StatusCode::OK, Json(json!({"status": "success"}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to launch: {}", e)}))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to launch: {}", e)})),
+        ),
     }
 }
 
@@ -414,7 +456,10 @@ pub async fn kill_process(
     Json(payload): Json<KillRequest>,
 ) -> (StatusCode, Json<Value>) {
     if !state.config.lock().unwrap().features.enable_processes {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "Process control disabled"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Process control disabled"})),
+        );
     }
 
     let mut sys = state.system.lock().unwrap();
@@ -442,18 +487,27 @@ pub async fn kill_process(
     }
 
     if killed || count > 0 {
-        (StatusCode::OK, Json(json!({"status": "success", "count": count})))
+        (
+            StatusCode::OK,
+            Json(json!({"status": "success", "count": count})),
+        )
     } else {
-        (StatusCode::NOT_FOUND, Json(json!({"error": "Process not found or could not be killed"})))
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Process not found or could not be killed"})),
+        )
     }
 }
 
 pub async fn focus_process(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<FocusRequest>
+    Json(payload): Json<FocusRequest>,
 ) -> (StatusCode, Json<Value>) {
     if !state.config.lock().unwrap().features.enable_processes {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "Process control disabled"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Process control disabled"})),
+        );
     }
     #[cfg(target_os = "windows")]
     {
@@ -468,7 +522,7 @@ pub async fn focus_process(
             }
         }
     }
-    
+
     #[cfg(target_os = "macos")]
     {
         let pid = payload.pid;
@@ -476,44 +530,63 @@ pub async fn focus_process(
             "tell application \"System Events\" to set frontmost of the first process whose unix id is {} to true",
             pid
         );
-        
+
         match std::process::Command::new("osascript")
             .arg("-e")
             .arg(script)
-            .output() 
+            .output()
         {
             Ok(output) => {
                 if output.status.success() {
                     return (StatusCode::OK, Json(json!({"status": "success"})));
                 } else {
                     // Try to be helpful if it fails
-                     let err = String::from_utf8_lossy(&output.stderr);
-                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to focus: {}", err)})));
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to focus: {}", err)})),
+                    );
                 }
-            },
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to execute osascript: {}", e)}))),
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to execute osascript: {}", e)})),
+                )
+            }
         }
     }
 
-    (StatusCode::BAD_REQUEST, Json(json!({"error": "Action not supported on this platform"})))
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": "Action not supported on this platform"})),
+    )
 }
-
-
 
 // Power Handler
 pub async fn power_action(
     State(state): State<Arc<AppState>>,
-    axum::extract::Path(action): axum::extract::Path<String>
+    axum::extract::Path(action): axum::extract::Path<String>,
 ) -> (StatusCode, Json<Value>) {
     let features = state.config.lock().unwrap().features.clone();
 
     match action.as_str() {
         "shutdown" => {
-            if !features.enable_shutdown { return (StatusCode::FORBIDDEN, Json(json!({"error": "Shutdown disabled"}))); }
+            if !features.enable_shutdown {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Shutdown disabled"})),
+                );
+            }
             #[cfg(target_os = "windows")]
             unsafe {
-                use windows::Win32::System::Shutdown::{ExitWindowsEx, EWX_SHUTDOWN, SHTDN_REASON_MAJOR_OTHER, EXIT_WINDOWS_FLAGS};
-                let _ = ExitWindowsEx(EXIT_WINDOWS_FLAGS(EWX_SHUTDOWN.0 | 0x00000004), SHTDN_REASON_MAJOR_OTHER);
+                use windows::Win32::System::Shutdown::{
+                    ExitWindowsEx, EWX_SHUTDOWN, EXIT_WINDOWS_FLAGS, SHTDN_REASON_MAJOR_OTHER,
+                };
+                let _ = ExitWindowsEx(
+                    EXIT_WINDOWS_FLAGS(EWX_SHUTDOWN.0 | 0x00000004),
+                    SHTDN_REASON_MAJOR_OTHER,
+                );
             }
             #[cfg(target_os = "macos")]
             {
@@ -523,13 +596,23 @@ pub async fn power_action(
                     .ok();
             }
             (StatusCode::OK, Json(json!({"status": "success"})))
-        },
+        }
         "restart" => {
-            if !features.enable_restart { return (StatusCode::FORBIDDEN, Json(json!({"error": "Restart disabled"}))); }
+            if !features.enable_restart {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Restart disabled"})),
+                );
+            }
             #[cfg(target_os = "windows")]
             unsafe {
-                use windows::Win32::System::Shutdown::{ExitWindowsEx, EWX_REBOOT, SHTDN_REASON_MAJOR_OTHER, EXIT_WINDOWS_FLAGS};
-                let _ = ExitWindowsEx(EXIT_WINDOWS_FLAGS(EWX_REBOOT.0 | 0x00000004), SHTDN_REASON_MAJOR_OTHER);
+                use windows::Win32::System::Shutdown::{
+                    ExitWindowsEx, EWX_REBOOT, EXIT_WINDOWS_FLAGS, SHTDN_REASON_MAJOR_OTHER,
+                };
+                let _ = ExitWindowsEx(
+                    EXIT_WINDOWS_FLAGS(EWX_REBOOT.0 | 0x00000004),
+                    SHTDN_REASON_MAJOR_OTHER,
+                );
             }
             #[cfg(target_os = "macos")]
             {
@@ -539,9 +622,14 @@ pub async fn power_action(
                     .ok();
             }
             (StatusCode::OK, Json(json!({"status": "success"})))
-        },
+        }
         "sleep" => {
-            if !features.enable_sleep { return (StatusCode::FORBIDDEN, Json(json!({"error": "Sleep disabled"}))); }
+            if !features.enable_sleep {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Sleep disabled"})),
+                );
+            }
             #[cfg(target_os = "windows")]
             {
                 std::process::Command::new("rundll32.exe")
@@ -557,9 +645,14 @@ pub async fn power_action(
                     .ok();
             }
             (StatusCode::OK, Json(json!({"status": "success"})))
-        },
+        }
         "hibernate" => {
-            if !features.enable_hibernate { return (StatusCode::FORBIDDEN, Json(json!({"error": "Hibernate disabled"}))); }
+            if !features.enable_hibernate {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "Hibernate disabled"})),
+                );
+            }
             #[cfg(target_os = "windows")]
             {
                 std::process::Command::new("shutdown")
@@ -576,16 +669,24 @@ pub async fn power_action(
                     .ok();
             }
             (StatusCode::OK, Json(json!({"status": "success"})))
-        },
-        _ => (StatusCode::BAD_REQUEST, Json(json!({"error": "Unsupported action"}))),
+        }
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Unsupported action"})),
+        ),
     }
 }
 
 // Media Handler
 
-pub async fn get_media_status(State(state): State<Arc<AppState>>) -> Result<Json<MediaStatus>, (StatusCode, Json<Value>)> {
+pub async fn get_media_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<MediaStatus>, (StatusCode, Json<Value>)> {
     if !state.config.lock().unwrap().features.enable_media {
-        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "Media control disabled"}))));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Media control disabled"})),
+        ));
     }
 
     if let Some(status) = crate::server::media::get_media_status().await {
@@ -605,10 +706,13 @@ pub async fn get_media_status(State(state): State<Arc<AppState>>) -> Result<Json
 
 pub async fn media_control(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<MediaControlRequest>
+    Json(payload): Json<MediaControlRequest>,
 ) -> (StatusCode, Json<Value>) {
     if !state.config.lock().unwrap().features.enable_media {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "Media control disabled"})));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Media control disabled"})),
+        );
     }
 
     let action = payload.action.as_str();
@@ -619,16 +723,25 @@ pub async fn media_control(
             if unsafe { crate::server::media::set_volume(vol) }.is_some() {
                 return (StatusCode::OK, Json(json!({"status": "success"})));
             }
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to set volume"})));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to set volume"})),
+            );
         }
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Value required for set_volume"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Value required for set_volume"})),
+        );
     }
 
     if action == "mute" || action == "unmute" || action == "toggle_mute" {
         #[cfg(target_os = "macos")]
         {
             if action == "toggle_mute" {
-                if crate::server::media::run_media_action("toggle_mute").await.is_some() {
+                if crate::server::media::run_media_action("toggle_mute")
+                    .await
+                    .is_some()
+                {
                     return (StatusCode::OK, Json(json!({"status": "success"})));
                 }
             } else {
@@ -638,7 +751,7 @@ pub async fn media_control(
                 }
             }
         }
-        
+
         #[cfg(target_os = "windows")]
         {
             if action != "toggle_mute" {
@@ -646,7 +759,10 @@ pub async fn media_control(
                 if unsafe { crate::server::media::set_mute(mute) }.is_some() {
                     return (StatusCode::OK, Json(json!({"status": "success"})));
                 }
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to set mute state"})));
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to set mute state"})),
+                );
             }
         }
     }
@@ -654,7 +770,10 @@ pub async fn media_control(
     // 2. Playback Control
     #[cfg(target_os = "macos")]
     {
-        if crate::server::media::run_media_action(action).await.is_some() {
+        if crate::server::media::run_media_action(action)
+            .await
+            .is_some()
+        {
             return (StatusCode::OK, Json(json!({"status": "success"})));
         }
     }
@@ -662,11 +781,10 @@ pub async fn media_control(
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::{
-            SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_VOLUME_MUTE, VK_VOLUME_DOWN, 
-            VK_VOLUME_UP, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PREV_TRACK, VK_MEDIA_PLAY_PAUSE, 
-            KEYEVENTF_KEYUP
+            SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_MEDIA_NEXT_TRACK,
+            VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
         };
-        
+
         let vk = match action {
             "volume_up" => Some(VK_VOLUME_UP),
             "volume_down" => Some(VK_VOLUME_DOWN),
@@ -704,7 +822,10 @@ pub async fn media_control(
         }
     }
 
-    (StatusCode::BAD_REQUEST, Json(json!({"error": format!("Unsupported action: {}", action)})))
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": format!("Unsupported action: {}", action)})),
+    )
 }
 
 // WIN32 Helpers
@@ -732,9 +853,9 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut pid));
     if pid == context.pid && IsWindowVisible(hwnd).as_bool() {
         context.hwnd = hwnd;
-        return BOOL(0); 
+        return BOOL(0);
     }
-    BOOL(1) 
+    BOOL(1)
 }
 
 #[cfg(target_os = "windows")]
@@ -767,9 +888,18 @@ unsafe extern "system" fn window_map_enum_proc(hwnd: HWND, lparam: LPARAM) -> BO
         use windows::Win32::UI::WindowsAndMessaging::GetWindowTextW;
         let mut buf = [0u16; 512];
         let len = GetWindowTextW(hwnd, &mut buf);
-        let title = if len > 0 { Some(String::from_utf16_lossy(&buf[..len as usize])) } else { None };
-        let entry = context.map.entry(pid).or_insert(WindowInfo { title: None, visible: true });
-        if entry.title.is_none() && title.is_some() { entry.title = title; }
+        let title = if len > 0 {
+            Some(String::from_utf16_lossy(&buf[..len as usize]))
+        } else {
+            None
+        };
+        let entry = context.map.entry(pid).or_insert(WindowInfo {
+            title: None,
+            visible: true,
+        });
+        if entry.title.is_none() && title.is_some() {
+            entry.title = title;
+        }
     }
-    BOOL(1) 
+    BOOL(1)
 }

@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "build:bridge": "pnpm --filter=@cntrl-pw/bridge tauri:build",
     "dev": "turbo run dev --parallel",
     "dev:web": "turbo run dev --filter=@cntrl-pw/web",
     "dev:hub": "turbo run dev --filter=@cntrl-pw/hub",
