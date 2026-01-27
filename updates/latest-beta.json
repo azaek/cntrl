@@ -1,31 +1,31 @@
 {
-  "version": "0.0.1-beta.4",
+  "version": "0.0.1-beta.5",
   "notes": "",
-  "pub_date": "2026-01-27T19:32:49.493Z",
+  "pub_date": "2026-01-27T20:00:37.262Z",
   "platforms": {
-    "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMml4QmVrU2t2MjZpWGZlYTI0Y2FEeUZQa1lXR2kydjlWVS8rdGlEZnpYNUR2eDVEQTJlcnRvaE05OFpTV244RSthREE0T0F6RFBsTWNnckZWbnE5NWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQxODE2CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKNWtlOXRINmgzT1lnUXczWnh2TlNzMFFPWUg5UzQ4ZkFtMzdTOFlPbmxFR1VZVkZCQzNOKzFHZVB3WFZTRXdqQlp1V0xlcXNnVjJvaElwam5pMWs3Qnc9PQo=",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_x64.app.tar.gz"
-    },
-    "darwin-x86_64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMml4QmVrU2t2MjZpWGZlYTI0Y2FEeUZQa1lXR2kydjlWVS8rdGlEZnpYNUR2eDVEQTJlcnRvaE05OFpTV244RSthREE0T0F6RFBsTWNnckZWbnE5NWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQxODE2CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKNWtlOXRINmgzT1lnUXczWnh2TlNzMFFPWUg5UzQ4ZkFtMzdTOFlPbmxFR1VZVkZCQzNOKzFHZVB3WFZTRXdqQlp1V0xlcXNnVjJvaElwam5pMWs3Qnc9PQo=",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_x64.app.tar.gz"
-    },
-    "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm9HOGRzOE1ERXR1bkRPQWswNkd2U3N0T0lpMVU3MmJoYTNVSE03RXA5NHB3cTVqa0F4V0F6eHUwQjhBdlZYQ3RJU2hrN2dDTG9ERWpvM1YvZi9oendZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQxOTgxCWZpbGU6Q250cmwgQnJpZGdlXzAuMC4xLWJldGEuNF94NjQtc2V0dXAuZXhlCm5IcWtHMHhIbWpSNmgrTk1LQ0dkM25MZFVBZ3g0YjdrRHdxanZMK3NyZ2k1ekp4WEVuczVrQzBxZ2lET20xK1dBcE1adWFwTGQ3eVNoZXhIM3FRb0F3PT0K",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_0.0.1-beta.4_x64-setup.exe"
-    },
-    "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm9HOGRzOE1ERXR1bkRPQWswNkd2U3N0T0lpMVU3MmJoYTNVSE03RXA5NHB3cTVqa0F4V0F6eHUwQjhBdlZYQ3RJU2hrN2dDTG9ERWpvM1YvZi9oendZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQxOTgxCWZpbGU6Q250cmwgQnJpZGdlXzAuMC4xLWJldGEuNF94NjQtc2V0dXAuZXhlCm5IcWtHMHhIbWpSNmgrTk1LQ0dkM25MZFVBZ3g0YjdrRHdxanZMK3NyZ2k1ekp4WEVuczVrQzBxZ2lET20xK1dBcE1adWFwTGQ3eVNoZXhIM3FRb0F3PT0K",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_0.0.1-beta.4_x64-setup.exe"
-    },
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMnZIOVRicjdFRDkrVkswdVRIcXUwUlZuelFKZEk1YVVPdmg2ekdlYzRac0ZjM1Rqa21zTzNRWGNMQUZHcmpTT2tXbjI0TnpqNllXUjZvZ3NFNDFKT3djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQyMzY1CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKZFZKSUlaL3NNT2tHTTdRN2tqOVZtYUNLTmVWS1g0WC9uUUtRbjRRK0U1LzFqdGV1cHhkM3Z4Tjh1Rlk0cmJDWGc3R0FkdWpuUTJBYlgvQktMMXhQQ3c9PQo=",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMmdralY0R1JmUE1uTmlnck1jOHh3U2ZtQmo4VEh0RURJZldnZVhMblpLd05IcWdyZ205NUNVUjgrenQ4VjFRWEJuWWYxNHp5TmdVcDNhU3h3MkdSa2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQzODY4CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKWlhvcldML01kaW1aWEErcHNaMWdXdkFRZ2N2c0tNZEViek1JYU9PUGQvZWd4R0o5OXVEbVU0SU9ic0phK1RrKzJPQ1pjWDdYaGVJSHpGVTNvZ1VoRFE9PQo=",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_aarch64.app.tar.gz"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMnZIOVRicjdFRDkrVkswdVRIcXUwUlZuelFKZEk1YVVPdmg2ekdlYzRac0ZjM1Rqa21zTzNRWGNMQUZHcmpTT2tXbjI0TnpqNllXUjZvZ3NFNDFKT3djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQyMzY1CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKZFZKSUlaL3NNT2tHTTdRN2tqOVZtYUNLTmVWS1g0WC9uUUtRbjRRK0U1LzFqdGV1cHhkM3Z4Tjh1Rlk0cmJDWGc3R0FkdWpuUTJBYlgvQktMMXhQQ3c9PQo=",
-      "url": "https://github.com/azaek/cntrl/releases/download/bridge-v0.0.1-beta.4/Cntrl.Bridge_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMmdralY0R1JmUE1uTmlnck1jOHh3U2ZtQmo4VEh0RURJZldnZVhMblpLd05IcWdyZ205NUNVUjgrenQ4VjFRWEJuWWYxNHp5TmdVcDNhU3h3MkdSa2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQzODY4CWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKWlhvcldML01kaW1aWEErcHNaMWdXdkFRZ2N2c0tNZEViek1JYU9PUGQvZWd4R0o5OXVEbVU0SU9ic0phK1RrKzJPQ1pjWDdYaGVJSHpGVTNvZ1VoRFE9PQo=",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm5XdkpueHFjcXRYVE1TMjV4emhXTFhuZDJGVUVDZVdtZitReHkzcitxaEl4Z1BWSmJkcHMvd2JCWUZIWEliNmpSdWkxYkF6dS9TaGs5OVJHUzZlNkEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQzODkwCWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKbmx2M1lRVVhMUUlwRC9OckEydGlrVFpqYlR0TWQwNVp0SytmcU5uWU82aUVSaHNqaGM4eXBpNWp6bXBtU0pEOVB6WEVSYkpieGRXaXBid1gwZ3pMQlE9PQo=",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_x64.app.tar.gz"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm5XdkpueHFjcXRYVE1TMjV4emhXTFhuZDJGVUVDZVdtZitReHkzcitxaEl4Z1BWSmJkcHMvd2JCWUZIWEliNmpSdWkxYkF6dS9TaGs5OVJHUzZlNkEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQzODkwCWZpbGU6Q250cmwgQnJpZGdlLmFwcC50YXIuZ3oKbmx2M1lRVVhMUUlwRC9OckEydGlrVFpqYlR0TWQwNVp0SytmcU5uWU82aUVSaHNqaGM4eXBpNWp6bXBtU0pEOVB6WEVSYkpieGRXaXBid1gwZ3pMQlE9PQo=",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_x64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm1LbG1FRWlQbkw5TkNXZ09EcitZQ2hKTThOOG4zMi9OdnN0bGVTWDdNY1gyYVpFNTZBeE8wRVQ1THNqa1RFT2JxYTBMK01mZnhZOW1oL0pQOVhzOHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQ0MDM1CWZpbGU6Q250cmwgQnJpZGdlXzAuMC4xLWJldGEuNV94NjQtc2V0dXAuZXhlCm5KZjY5NWVKbjFIdTY0cWxEZHBWMlVZYm44UmVtR2NMNHJrYTFTWnFtbExuaklNVFBHcE5nSFM4ejZjNzEvV25pWnhOWmViNjlNa2dHNUZrWldhaUNnPT0K",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_0.0.1-beta.5_x64-setup.exe"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1RzdGVMQXNOMm1LbG1FRWlQbkw5TkNXZ09EcitZQ2hKTThOOG4zMi9OdnN0bGVTWDdNY1gyYVpFNTZBeE8wRVQ1THNqa1RFT2JxYTBMK01mZnhZOW1oL0pQOVhzOHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzY5NTQ0MDM1CWZpbGU6Q250cmwgQnJpZGdlXzAuMC4xLWJldGEuNV94NjQtc2V0dXAuZXhlCm5KZjY5NWVKbjFIdTY0cWxEZHBWMlVZYm44UmVtR2NMNHJrYTFTWnFtbExuaklNVFBHcE5nSFM4ejZjNzEvV25pWnhOWmViNjlNa2dHNUZrWldhaUNnPT0K",
+      "url": "https://github.com/azaek/cntrl/releases/latest/download/Cntrl.Bridge_0.0.1-beta.5_x64-setup.exe"
     }
   }
 }
