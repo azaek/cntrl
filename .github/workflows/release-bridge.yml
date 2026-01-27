@@ -101,7 +101,7 @@ jobs:
           VERSION="${VERSION#bridge-v}"
           echo "Setting version to $VERSION"
 
-          # Update tauri.conf.json
+          # Update tauri.conf.json version
           cd apps/bridge/src-tauri
           node -e "
             const fs = require('fs');
@@ -156,9 +156,21 @@ jobs:
       - name: Create channel-specific update manifest
         run: |
           CHANNEL="${{ needs.create-release.outputs.channel }}"
+          TAG="${{ github.ref_name }}"
 
-          # Copy latest.json to channel-specific filename
-          cp ./release-assets/latest.json ./release-assets/latest-${CHANNEL}.json
+          # Rewrite download URLs from /releases/latest/download/ to /releases/download/<tag>/
+          # so beta releases point to the correct assets
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('./release-assets/latest.json', 'utf8'));
+            for (const platform of Object.values(manifest.platforms)) {
+              platform.url = platform.url.replace(
+                '/releases/latest/download/',
+                '/releases/download/${TAG}/'
+              );
+            }
+            fs.writeFileSync('./release-assets/latest-${CHANNEL}.json', JSON.stringify(manifest, null, 2));
+          "
 
           echo "Created latest-${CHANNEL}.json"
           cat ./release-assets/latest-${CHANNEL}.json
