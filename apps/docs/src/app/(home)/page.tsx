@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
-
 export default function HomePage() {
-  redirect("/docs");
+  return (
+    <main className="text-landing-foreground dark:text-landing-foreground-dark pt-4 pb-6 md:pb-12"></main>
+  );
 }

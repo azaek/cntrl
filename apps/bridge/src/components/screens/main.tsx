@@ -21,6 +21,7 @@ import { Button } from "../ui/button";
 import Container from "../ui/container";
 import Divider from "../ui/divider";
 import { cn } from "../utils";
+
 const MainScreen = () => {
   const [store, actions] = useApp();
 
@@ -148,7 +149,7 @@ const MainScreen = () => {
           <FeatureCard
             icon={<Cpu />}
             title="Processes Topic"
-            description="Real-time processes data with updates"
+            description="Real-time processes data"
             value={store.cfg!.websocket.processes.enabled}
             onValueChange={() => toggleWsTopic("processes")}
           />
@@ -162,20 +163,20 @@ const MainScreen = () => {
             onValueChange={() => toggle("system")}
           />
           <FeatureCard
-            id="usage"
-            icon={<ChartSpline />}
-            title="Usage Data"
-            description="Real-time usage data, like CPU, RAM, etc."
-            value={store.cfg!.features.enable_usage}
-            onValueChange={() => toggle("usage")}
-          />
-          <FeatureCard
             id="stream"
             icon={<Radio />}
             title="SSE Stream"
             description="Similar to Usage Data but efficient"
             value={store.cfg!.features.enable_stream}
             onValueChange={() => toggle("stream")}
+          />
+          <FeatureCard
+            id="usage"
+            icon={<ChartSpline />}
+            title="Usage Data"
+            description="Real-time usage data, like CPU, RAM, etc."
+            value={store.cfg!.features.enable_usage}
+            onValueChange={() => toggle("usage")}
           />
           <FeatureCard
             id="media"

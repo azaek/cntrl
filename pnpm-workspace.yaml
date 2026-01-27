@@ -20,7 +20,7 @@ catalog:
   '@tanstack/react-router-devtools': ^1.154.1
   '@tanstack/react-router-ssr-query': ^1.154.1
   '@tanstack/react-start': ^1.154.1
-  '@tauri-apps/plugin-updater': 'catalog:'
+  '@tauri-apps/plugin-updater': ^2.9.0
   '@types/node': ^24.10.9
   '@types/react': ^19.2.9
   '@types/react-dom': ^19.2.3

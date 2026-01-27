@@ -158,7 +158,6 @@ export function SidebarContent({
     return !collapsed || e.pointerType === "touch" || element.getAnimations().length > 0;
   }
 
-  // eslint-disable-next-line react-hooks/refs
   return children({
     ref,
     collapsed,
