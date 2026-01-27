@@ -30,7 +30,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["msi", "nsis", "dmg", "app"],
+    "targets": ["nsis", "dmg", "app"],
     "publisher": "azaek",
     "copyright": "Copyright © 2026 azaek",
     "icon": [

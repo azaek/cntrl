@@ -102,13 +102,23 @@ jobs:
 
           # Update tauri.conf.json
           cd apps/bridge/src-tauri
-          sed -i 's/"version": "[^"]*"/"version": "'"$VERSION"'"/' tauri.conf.json
-          cat tauri.conf.json | grep '"version"'
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
+            conf.version = '$VERSION';
+            fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+            console.log('tauri.conf.json version:', conf.version);
+          "
 
           # Update Cargo.toml (only supports semver, strip pre-release for Cargo)
           CARGO_VERSION=$(echo "$VERSION" | sed 's/-.*//')
-          sed -i 's/^version = "[^"]*"/version = "'"$CARGO_VERSION"'"/' Cargo.toml
-          grep '^version' Cargo.toml
+          node -e "
+            const fs = require('fs');
+            let cargo = fs.readFileSync('Cargo.toml', 'utf8');
+            cargo = cargo.replace(/^version = \"[^\"]*\"/m, 'version = \"$CARGO_VERSION\"');
+            fs.writeFileSync('Cargo.toml', cargo);
+            console.log('Cargo.toml version:', '$CARGO_VERSION');
+          "
         shell: bash
 
       - name: Install frontend dependencies
