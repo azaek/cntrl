@@ -6,8 +6,8 @@ name: Release Bridge
 on:
   push:
     tags:
-      - "v*" # Stable: v1.0.0, v1.0.1
-      - "v*-beta*" # Beta: v1.0.0-beta.1
+      - "bridge-v*" # Stable: v1.0.0, v1.0.1
+      - "bridge-v*-beta*" # Beta: v1.0.0-beta.1
 
 env:
   CARGO_TERM_COLOR: always
@@ -24,9 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine channel
+      - name: Determine channel and version
         id: check-channel
         run: |
+          # Strip "bridge-" prefix for display: bridge-v1.0.0 -> v1.0.0
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#bridge-}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
           if [[ "${{ github.ref_name }}" == *"beta"* ]]; then
             echo "channel=beta" >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
@@ -42,7 +47,7 @@ jobs:
           draft: true
           prerelease: ${{ steps.check-channel.outputs.prerelease }}
           generate_release_notes: true
-          name: Cntrl Bridge ${{ github.ref_name }}
+          name: Cntrl Bridge ${{ steps.check-channel.outputs.version }}
 
   build-tauri:
     needs: create-release
@@ -76,14 +81,19 @@ jobs:
           node-version: 20
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/bridge/src-tauri -> target
 
       - name: Install frontend dependencies
         run: pnpm install
