@@ -1,13 +1,13 @@
 # Builds and releases Cntrl Bridge for Windows and macOS
-# Channels: stable (v*), beta (v*-beta*)
+# Channels: stable (bridge-v*), beta (bridge-v*-beta*)
 # Generates latest-stable.json or latest-beta.json for updater
 name: Release Bridge
 
 on:
   push:
     tags:
-      - "bridge-v*" # Stable: v1.0.0, v1.0.1
-      - "bridge-v*-beta*" # Beta: v1.0.0-beta.1
+      - "bridge-v*" # Stable: bridge-v1.0.0
+      - "bridge-v*-beta*" # Beta: bridge-v1.0.0-beta.1
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +20,7 @@ jobs:
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
       channel: ${{ steps.check-channel.outputs.channel }}
+      version: ${{ steps.check-channel.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -110,7 +111,7 @@ jobs:
             console.log('tauri.conf.json version:', conf.version);
           "
 
-          # Update Cargo.toml (supports semver pre-release identifiers)
+          # Update Cargo.toml
           node -e "
             const fs = require('fs');
             let cargo = fs.readFileSync('Cargo.toml', 'utf8');
@@ -132,7 +133,7 @@ jobs:
         with:
           projectPath: apps/bridge
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          tagName: ${{ github.ref_name }}
+          tauriScript: pnpm tauri
           args: ${{ matrix.args }}
 
   publish-release:
