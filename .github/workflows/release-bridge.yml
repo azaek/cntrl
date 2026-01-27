@@ -110,14 +110,13 @@ jobs:
             console.log('tauri.conf.json version:', conf.version);
           "
 
-          # Update Cargo.toml (only supports semver, strip pre-release for Cargo)
-          CARGO_VERSION=$(echo "$VERSION" | sed 's/-.*//')
+          # Update Cargo.toml (supports semver pre-release identifiers)
           node -e "
             const fs = require('fs');
             let cargo = fs.readFileSync('Cargo.toml', 'utf8');
-            cargo = cargo.replace(/^version = \"[^\"]*\"/m, 'version = \"$CARGO_VERSION\"');
+            cargo = cargo.replace(/^version = \"[^\"]*\"/m, 'version = \"$VERSION\"');
             fs.writeFileSync('Cargo.toml', cargo);
-            console.log('Cargo.toml version:', '$CARGO_VERSION');
+            console.log('Cargo.toml version:', '$VERSION');
           "
         shell: bash
 
