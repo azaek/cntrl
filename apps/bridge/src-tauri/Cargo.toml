@@ -35,6 +35,7 @@ scopeguard = "1.2"
 async-stream = "0.3"
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
+url = "2.5.8"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

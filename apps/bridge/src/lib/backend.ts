@@ -647,10 +647,14 @@ export interface UpdateProgress {
   total: number | null;
 }
 
-export type UpdateResult =
-  | { status: "upToDate" }
-  | { status: "available"; update: Update; info: UpdateInfo }
-  | { status: "error"; message: string };
+export type UpdateStatus = "upToDate" | "available" | "error";
+
+export type UpdateResult = {
+  status: UpdateStatus;
+  update?: Update;
+  info?: UpdateInfo;
+  message?: string;
+};
 
 /**
  * Check for application updates

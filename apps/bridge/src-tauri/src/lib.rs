@@ -529,9 +529,10 @@ fn get_local_ips() -> Vec<String> {
     ips
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // Determine update channel based on current version
+#[tauri::command]
+async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
     let current_version = env!("CARGO_PKG_VERSION");
     let update_endpoint = if current_version.contains("beta") {
         "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-beta.json"
@@ -539,12 +540,23 @@ pub fn run() {
         "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-stable.json"
     };
 
+    let update = app
+        .updater_builder()
+        .endpoints(vec![url::Url::parse(update_endpoint).map_err(|e| e.to_string())?])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(update.map(|u| u.version))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_updater::Builder::new()
-                .endpoints(vec![update_endpoint.parse().unwrap()])
-                .build(),
-        )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let cfg = config::load_config(app.handle());
             let port = cfg.server.port;
@@ -599,6 +611,7 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .invoke_handler(tauri::generate_handler![
+            check_for_updates,
             greet,
             get_app_version,
             get_config,

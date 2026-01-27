@@ -1,7 +1,7 @@
 ![Cover](https://github.com/azaek/cntrl/blob/main/github.png)
 
 ![License](https://img.shields.io/github/license/azaek/cntrl)
-![Latest Release](https://img.shields.io/github/v/release/azaek/cntrl?include_prereleases)
+[![Release Bridge](https://github.com/azaek/cntrl/actions/workflows/release-bridge.yml/badge.svg)](https://github.com/azaek/cntrl/actions/workflows/release-bridge.yml)
 ![Ai-assisted](https://img.shields.io/badge/AI--assisted-262626)
 
 The missing API for your desktop. Control power, media, and monitor stats remotely.

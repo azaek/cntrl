@@ -1,16 +1,37 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { BookOpen } from "lucide-solid";
 import { createSignal, onMount } from "solid-js";
-import { getAppVersion } from "../lib/backend";
+import {
+  checkForUpdates,
+  getAppVersion,
+  installUpdate,
+  UpdateProgress,
+  UpdateResult,
+} from "../lib/backend";
 import Divider from "./ui/divider";
 import { cn } from "./utils";
 const Footer = () => {
   const [version, setVersion] = createSignal("");
+  const [update, setUpdate] = createSignal<UpdateResult>({ status: "upToDate" });
+  const [updating, setUpdating] = createSignal(false);
+  const [progress, setProgress] = createSignal<UpdateProgress | null>(null);
 
   onMount(async () => {
     const v = await getAppVersion();
     setVersion(v);
+    const update = await checkForUpdates();
+    setUpdate(update);
   });
+
+  const handleUpdate = async () => {
+    if (update().status === "available" && update().update) {
+      setUpdating(true);
+      await installUpdate(update()?.update!, (p) => {
+        setProgress(p);
+      });
+      setUpdating(false);
+    }
+  };
 
   return (
     <>
@@ -36,12 +57,29 @@ const Footer = () => {
               v{version()}
             </p>
           )}
-          <button class="bg-card hover:bg-secondary/40 group -my-2 flex cursor-pointer items-center gap-2 rounded py-1.5 pr-3 pl-2 transition-colors">
-            <UpdateIcon />
-            <p class="text-xs font-medium text-white/40 group-hover:text-white">
-              Update Available!
-            </p>
-          </button>
+          {update().status === "available" && (
+            <button
+              onClick={() => {
+                handleUpdate();
+              }}
+              class="bg-card hover:bg-secondary/40 group -my-2 flex cursor-pointer items-center gap-2 rounded py-1.5 pr-3 pl-2 transition-colors"
+            >
+              <UpdateIcon />
+              <p class="text-xs font-medium text-white/40 group-hover:text-white">
+                Update Available!
+              </p>
+            </button>
+          )}
+          {updating() && (
+            <div class="bg-bg-dark h-2 w-10 rounded-full">
+              <div
+                style={{
+                  width: `${((progress()?.downloaded || 0) / (progress()?.total || 1)) * 100}%`,
+                }}
+                class="bg-fg-muted h-full w-2 rounded-full"
+              ></div>
+            </div>
+          )}
         </div>
         <div class="flex items-center gap-2">
           <button
