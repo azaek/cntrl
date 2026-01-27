@@ -1,15 +1,16 @@
-# Cntrl
+![Cover](https://github.com/azaek/cntrl/blob/main/github.png)
 
-A monorepo for remote PC control and monitoring tools.
+![License](https://img.shields.io/github/license/azaek/cntrl)
+![Latest Release](https://img.shields.io/github/v/release/azaek/cntrl?include_prereleases)
+![Ai-assisted](https://img.shields.io/badge/AI--assisted-262626)
+
+The missing API for your desktop. Control power, media, and monitor stats remotely.
 
 ## Apps
 
 | App                         | Description                                                                  |
 | --------------------------- | ---------------------------------------------------------------------------- |
 | **[bridge](./apps/bridge)** | Tauri desktop app for Windows/macOS - runs a local server for remote control |
-| **[hub](./apps/hub)**       | Dashboard web app for managing remote instances                              |
-| **[docs](./apps/docs)**     | Documentation site                                                           |
-| **[web](./apps/web)**       | Main website                                                                 |
 
 ## Packages
 
@@ -96,7 +97,6 @@ GitHub Actions will automatically build and publish to the appropriate channel.
 - [SolidJS](https://solidjs.com/) - Bridge app frontend
 - [TanStack](https://tanstack.com/) - Router, Query, Form
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
-- [Drizzle ORM](https://orm.drizzle.team/) - Database
 
 ## License
 
