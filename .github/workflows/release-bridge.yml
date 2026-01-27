@@ -176,10 +176,12 @@ jobs:
           cat ./release-assets/latest-${CHANNEL}.json
 
       - name: Upload channel manifest to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: ./release-assets/latest-${{ needs.create-release.outputs.channel }}.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "./release-assets/latest-${{ needs.create-release.outputs.channel }}.json" \
+            --clobber
 
       - name: Update latest channel manifest in dedicated branch
         run: |
@@ -205,7 +207,6 @@ jobs:
           git push origin updates
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v1
-        with:
-          draft: false
-          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false
