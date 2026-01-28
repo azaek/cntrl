@@ -7,7 +7,8 @@ export function createMetadata(override: Metadata): Metadata {
     openGraph: {
       title: override.title ?? undefined,
       description: override.description ?? undefined,
-      url: "https://cntrl.azaek.dev",
+      url: "https://www.cntrl.pw",
+      images: "/bridge-banner.png",
       siteName: "Cntrl",
       ...override.openGraph,
     },
@@ -16,6 +17,7 @@ export function createMetadata(override: Metadata): Metadata {
       creator: "@datbugdied",
       title: override.title ?? undefined,
       description: override.description ?? undefined,
+      images: "/bridge-banner.png",
       ...override.twitter,
     },
     // alternates: {

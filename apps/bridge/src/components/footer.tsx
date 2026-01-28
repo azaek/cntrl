@@ -57,7 +57,7 @@ const Footer = () => {
               v{version()}
             </p>
           )}
-          {update().status === "available" && (
+          {update().status === "available" && !updating() && (
             <button
               onClick={() => {
                 handleUpdate();
@@ -76,7 +76,7 @@ const Footer = () => {
                 style={{
                   width: `${((progress()?.downloaded || 0) / (progress()?.total || 1)) * 100}%`,
                 }}
-                class="bg-fg-muted h-full w-2 rounded-full"
+                class="bg-accent h-full w-2 rounded-full transition-all duration-300 ease-in-out"
               ></div>
             </div>
           )}
