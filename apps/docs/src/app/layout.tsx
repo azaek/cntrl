@@ -22,7 +22,7 @@ export const metadata = createMetadata({
   metadataBase:
     process.env.NODE_ENV === "development"
       ? new URL("http://localhost:3001")
-      : new URL("https://cntrl.azaek.dev"),
+      : new URL("https://www.cntrl.pw"),
 });
 
 export default function Layout({ children }: LayoutProps<"/">) {

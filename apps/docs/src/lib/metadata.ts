@@ -25,7 +25,7 @@ export function createMetadata(override: Metadata): Metadata {
     //     'application/rss+xml': [
     //       {
     //         title: 'Cntrl Blog',
-    //         url: 'https://cntrl.azaek.dev/blog/rss.xml',
+    //         url: 'https://www.cntrl.pw/blog/rss.xml',
     //       },
     //     ],
     //   },
