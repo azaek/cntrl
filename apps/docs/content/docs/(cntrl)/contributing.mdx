@@ -20,6 +20,8 @@ To work on Cntrl Bridge locally, you'll need:
 
 - **Rust** (latest stable) - Install from [rustup.rs](https://rustup.rs)
 - **Node.js 18+** - For frontend and documentation
+- **pnpm** - Build tool and package manager
+- **Turbo** - Build system (optional but recommended)
 - **Platform-specific tools:**
   - **Windows**: Visual Studio Build Tools
   - **macOS**: Xcode Command Line Tools
@@ -30,35 +32,54 @@ To work on Cntrl Bridge locally, you'll need:
 
    ```bash
    git clone https://github.com/azaek/cntrl.git
-   cd cntrl/bridge
+   cd cntrl
    ```
 
 2. Install dependencies:
 
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. Run in development mode:
 
+   You can run all apps simultaneously:
    ```bash
-   npm run tauri dev
+   pnpm dev
+   ```
+
+   Or run a specific app:
+   ```bash
+   pnpm dev:bridge # for the desktop app
+   pnpm dev:web    # for the web dashboard
    ```
 
 4. Build for production:
    ```bash
-   npm run tauri build
+   pnpm build
    ```
 
-This will create platform-specific installers in `src-tauri/target/release/bundle/`
+   Or build a specific app:
+   ```bash
+   pnpm build:bridge
+   ```
+
+   This will create platform-specific installers in `apps/bridge/src-tauri/target/release/bundle/`
+
+## Project Structure
+
+This is a monorepo managed by [Turbo](https://turbo.build/) and [pnpm](https://pnpm.io/).
+
+- **apps/**: Contains the main applications (bridge, docs, web, hub, rhub).
+- **packages/**: Shared libraries and UI components.
+- **tooling/**: Build and configuration tools.
 
 ## Documentation
 
 The documentation is built with [Fuma Docs](https://fumadocs.dev). To run it locally:
 
 ```bash
-cd docs
-npm run dev
+pnpm dev:docs
 ```
 
 ## Pull Requests
