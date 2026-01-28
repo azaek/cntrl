@@ -1,10 +1,16 @@
 import { createMetadata } from "@/lib/metadata";
 import { RootProvider } from "fumadocs-ui/provider/next";
-import { Inter } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "./global.css";
 
 const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-inter",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-sg",
 });
 
 export const metadata = createMetadata({
@@ -16,12 +22,16 @@ export const metadata = createMetadata({
   metadataBase:
     process.env.NODE_ENV === "development"
       ? new URL("http://localhost:3001")
-      : new URL("https://cntrl.azaek.dev"),
+      : new URL("https://www.cntrl.pw"),
 });
 
 export default function Layout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={inter.className} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={spaceGrotesk.variable + " " + inter.className}
+      suppressHydrationWarning
+    >
       <body className="flex min-h-screen flex-col">
         <RootProvider>{children}</RootProvider>
       </body>

@@ -3,9 +3,6 @@ title: macOS
 description: Get Cntrl Bridge running on your Mac.
 icon: macos
 ---
-
-macOS is fully supported with menu bar integration.
-
 ## Installation
 
 <Steps>
@@ -14,15 +11,16 @@ macOS is fully supported with menu bar integration.
 
 Download the Universal DMG from the [GitHub Releases](https://github.com/azaek/cntrl/releases):
 
-**`Cntrl Bridge_vX.X.X_universal.dmg`** - Works on all Macs (Intel and Apple Silicon)
+**`Cntrl.Bridge_x.x.x_aarch64.dmg`** - Works on Apple Silicon Macs
 
-<Callout type="info">
-The universal build works on both Intel and Apple Silicon (M1/M2/M3/M4) Macs, providing native performance on both architectures.
-</Callout>
+**`Cntrl.Bridge_x.x.x_x64.dmg`** - Works on Intel Macs
+
 </Step>
 
 <Step>
-  ### Install 1. Open the DMG file 2. Drag **Cntrl Bridge** to your **Applications**
+  ### Install 
+  1. Open the DMG file 
+  2. Drag **Cntrl Bridge** to your **Applications**
   folder
 </Step>
 
@@ -34,8 +32,26 @@ The universal build works on both Intel and Apple Silicon (M1/M2/M3/M4) Macs, pr
 2. Double-click **Cntrl Bridge**
 3. The Cntrl Bridge icon will appear in your menu bar
 
-<Callout type="info">
-On first launch, macOS may show a security warning because the app is not notarized. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+<img
+  src="/mac-ins.png"
+  alt="Cover"
+  className="hidden dark:block mt-0"
+/>
+<img
+  src="/mac-ins-light.png"
+  alt="Cover"
+  className="mt-0 block dark:hidden"
+/>
+<Callout type="warn" title="macOS Security Warning">
+Since Cntrl Bridge is not notarized with Apple, macOS will block it on first launch with a message like **"Apple could not verify Cntrl Bridge is free of malware"**. This is normal for apps distributed outside the App Store.
+
+To open the app:
+1. Try opening **Cntrl Bridge** normally — macOS will block it
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down and click **Open Anyway** next to the Cntrl Bridge message
+4. Click **Open** in the confirmation dialog
+
+You only need to do this once — macOS will remember your choice for future launches.
 </Callout>
 </Step>
 </Steps>

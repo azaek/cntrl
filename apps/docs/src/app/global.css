@@ -1,3 +1,12 @@
 @import "tailwindcss";
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
+
+@theme inline {
+  --font-sg: var(--font-sg);
+  --font-sans: var(--font-inter);
+}
+
+body {
+  font-family: "Inter", sans-serif;
+}

@@ -1,13 +1,13 @@
 # Builds and releases Cntrl Bridge for Windows and macOS
-# Channels: stable (v*), beta (v*-beta*)
+# Channels: stable (bridge-v*), beta (bridge-v*-beta*)
 # Generates latest-stable.json or latest-beta.json for updater
 name: Release Bridge
 
 on:
   push:
     tags:
-      - "bridge-v*" # Stable: v1.0.0, v1.0.1
-      - "bridge-v*-beta*" # Beta: v1.0.0-beta.1
+      - "bridge-v*" # Stable: bridge-v1.0.0
+      - "bridge-v*-beta*" # Beta: bridge-v1.0.0-beta.1
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +20,7 @@ jobs:
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
       channel: ${{ steps.check-channel.outputs.channel }}
+      version: ${{ steps.check-channel.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,8 +83,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -94,6 +93,33 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: apps/bridge/src-tauri -> target
+
+      - name: Sync version from tag
+        run: |
+          # Extract version from tag: bridge-v0.1.0-beta.1 -> 0.1.0-beta.1
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#bridge-v}"
+          echo "Setting version to $VERSION"
+
+          # Update tauri.conf.json version
+          cd apps/bridge/src-tauri
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
+            conf.version = '$VERSION';
+            fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+            console.log('tauri.conf.json version:', conf.version);
+          "
+
+          # Update Cargo.toml
+          node -e "
+            const fs = require('fs');
+            let cargo = fs.readFileSync('Cargo.toml', 'utf8');
+            cargo = cargo.replace(/^version = \"[^\"]*\"/m, 'version = \"$VERSION\"');
+            fs.writeFileSync('Cargo.toml', cargo);
+            console.log('Cargo.toml version:', '$VERSION');
+          "
+        shell: bash
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -107,7 +133,7 @@ jobs:
         with:
           projectPath: apps/bridge
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          tagName: ${{ github.ref_name }}
+          tauriScript: pnpm tauri
           args: ${{ matrix.args }}
 
   publish-release:
@@ -130,18 +156,32 @@ jobs:
       - name: Create channel-specific update manifest
         run: |
           CHANNEL="${{ needs.create-release.outputs.channel }}"
+          TAG="${{ github.ref_name }}"
 
-          # Copy latest.json to channel-specific filename
-          cp ./release-assets/latest.json ./release-assets/latest-${CHANNEL}.json
+          # Rewrite download URLs from /releases/latest/download/ to /releases/download/<tag>/
+          # so beta releases point to the correct assets
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('./release-assets/latest.json', 'utf8'));
+            for (const platform of Object.values(manifest.platforms)) {
+              platform.url = platform.url.replace(
+                '/releases/latest/download/',
+                '/releases/download/${TAG}/'
+              );
+            }
+            fs.writeFileSync('./release-assets/latest-${CHANNEL}.json', JSON.stringify(manifest, null, 2));
+          "
 
           echo "Created latest-${CHANNEL}.json"
           cat ./release-assets/latest-${CHANNEL}.json
 
       - name: Upload channel manifest to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: ./release-assets/latest-${{ needs.create-release.outputs.channel }}.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "./release-assets/latest-${{ needs.create-release.outputs.channel }}.json" \
+            --clobber
 
       - name: Update latest channel manifest in dedicated branch
         run: |
@@ -167,7 +207,6 @@ jobs:
           git push origin updates
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v1
-        with:
-          draft: false
-          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false

@@ -1,6 +1,6 @@
 [package]
 name = "cntrl-bridge"
-version = "0.0.1"
+version = "0.1.0"
 description = "Cntrl Bridge"
 authors = ["azaek"]
 edition = "2021"
