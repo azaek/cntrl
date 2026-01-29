@@ -1,3 +1,4 @@
+import { createSoftwareAppJsonLd } from "@/lib/metadata";
 import Link from "fumadocs-core/link";
 import {
   Activity,
@@ -15,6 +16,12 @@ import CopyBtn from "./copybtn";
 export default function HomePage() {
   return (
     <main className="font-sg flex min-h-[calc(100vh-57px)] flex-1 flex-col items-center">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(createSoftwareAppJsonLd()),
+        }}
+      />
       <div className="bg-fd-background relative flex h-10 w-full max-w-350 flex-1 items-stretch overflow-hidden min-[1400px]:border-x">
         <div
           className="pointer-events-none absolute top-20 left-0 hidden aspect-656/792 w-full max-w-164 xl:block"
