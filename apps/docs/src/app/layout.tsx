@@ -1,3 +1,4 @@
+import { PostHogProvider } from "@/components/posthog-provider";
 import { createMetadata } from "@/lib/metadata";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { Inter, Space_Grotesk } from "next/font/google";
@@ -21,8 +22,18 @@ export const metadata = createMetadata({
   description: "Cntrl is a remote management bridge for your local machines.",
   metadataBase:
     process.env.NODE_ENV === "development"
-      ? new URL("http://localhost:3001")
+      ? new URL("http://localhost:3003")
       : new URL("https://www.cntrl.pw"),
+  keywords: [
+    "cntrl",
+    "remote desktop",
+    "system monitoring",
+    "REST API",
+    "WebSocket",
+    "React SDK",
+    "local network",
+    "desktop bridge",
+  ],
 });
 
 export default function Layout({ children }: LayoutProps<"/">) {
@@ -33,7 +44,9 @@ export default function Layout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <body className="flex min-h-screen flex-col">
-        <RootProvider>{children}</RootProvider>
+        <PostHogProvider>
+          <RootProvider>{children}</RootProvider>
+        </PostHogProvider>
       </body>
     </html>
   );

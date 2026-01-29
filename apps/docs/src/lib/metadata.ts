@@ -20,17 +20,43 @@ export function createMetadata(override: Metadata): Metadata {
       images: "/bridge-banner.png",
       ...override.twitter,
     },
-    // alternates: {
-    //   types: {
-    //     'application/rss+xml': [
-    //       {
-    //         title: 'Cntrl Blog',
-    //         url: 'https://www.cntrl.pw/blog/rss.xml',
-    //       },
-    //     ],
-    //   },
-    //   ...override.alternates,
-    // },
+    alternates: {
+      canonical: override.alternates?.canonical ?? undefined,
+      ...override.alternates,
+    },
+  };
+}
+
+export function createSoftwareAppJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Cntrl Bridge",
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Windows, macOS",
+    description:
+      "Native desktop app that exposes your system controls and real-time data through a REST API.",
+    url: "https://www.cntrl.pw",
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+    },
+  };
+}
+
+export function createArticleJsonLd(page: Page) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: page.data.title,
+    description: page.data.description ?? "",
+    url: `https://www.cntrl.pw${page.url}`,
+    publisher: {
+      "@type": "Organization",
+      name: "Cntrl",
+      url: "https://www.cntrl.pw",
+    },
   };
 }
 
