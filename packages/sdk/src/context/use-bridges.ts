@@ -43,6 +43,12 @@ export function useBridges() {
 
       /** Disconnect from a bridge */
       disconnect: context.disconnect,
+
+      /** Whether the store has been hydrated / loaded */
+      ready: context.ready,
+
+      /** Re-load bridges from persistence */
+      refresh: context.refresh,
     }),
     [context],
   );

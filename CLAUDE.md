@@ -137,3 +137,13 @@ All SDK types in `packages/sdk/src/types/api.ts` must match the Rust types exact
 | `ProcessListPayload` | `ProcessListPayload` | WS process_list event                 |
 
 When updating SDK types, always verify against the Rust source.
+
+## Post-Plan Execution
+
+After every plan execution, generate a changelog summarizing:
+
+- Features added
+- Breaking changes (if any)
+- Files modified
+
+Include a suggested commit message. Output the changelog in the response.

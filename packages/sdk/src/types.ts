@@ -84,3 +84,24 @@ export type BridgeError =
  * - "eager": Connect once on mount. Won't reconnect if manually disconnected.
  */
 export type ConnectionMode = "auto" | "passive" | "eager";
+
+/**
+ * Pluggable persistence layer for bridge storage.
+ *
+ * When provided to `BridgesProvider`, replaces the default
+ * localStorage/Zustand persistence with a custom data layer
+ * (SQLite, Postgres, REST API, etc.).
+ */
+export interface BridgePersistence {
+  /** Load all bridges on mount (hydration) */
+  load: () => Promise<StoredBridge[]>;
+  /** Persist a new bridge. Must succeed before bridge is considered added. */
+  onBridgeAdd: (bridge: StoredBridge) => Promise<void>;
+  /** Remove a bridge from persistence. Must succeed before bridge is considered removed. */
+  onBridgeRemove: (id: string) => Promise<void>;
+  /** Update a bridge in persistence. Must succeed before bridge is considered updated. */
+  onBridgeUpdate: (
+    id: string,
+    updates: Partial<Omit<StoredBridge, "id">>,
+  ) => Promise<void>;
+}
