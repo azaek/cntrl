@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useBridgesStore } from "../store/bridges-store";
+import { useBridgesContext } from "../context/bridges-provider";
 import type { PingResult } from "../types/api";
 
 interface UseBridgeStatusOptions {
@@ -43,7 +43,8 @@ export type BridgeStatusState = "checking" | "online" | "offline" | "unknown";
  * ```
  */
 export function useBridgeStatus(bridgeId: string, options?: UseBridgeStatusOptions) {
-  const bridge = useBridgesStore((state) => state.bridges[bridgeId]);
+  const { bridges } = useBridgesContext();
+  const bridge = bridges.get(bridgeId);
   const interval = options?.interval ?? 30000;
   const enabled = options?.enabled ?? true;
 
@@ -146,7 +147,7 @@ export function useBridgeStatus(bridgeId: string, options?: UseBridgeStatusOptio
  * ```
  */
 export function useBridgesStatus(bridgeIds: string[], options?: UseBridgeStatusOptions) {
-  const bridges = useBridgesStore((state) => state.bridges);
+  const { bridges } = useBridgesContext();
   const interval = options?.interval ?? 30000;
   const enabled = options?.enabled ?? true;
 
@@ -157,7 +158,7 @@ export function useBridgesStatus(bridgeIds: string[], options?: UseBridgeStatusO
 
       await Promise.all(
         bridgeIds.map(async (bridgeId) => {
-          const bridge = bridges[bridgeId];
+          const bridge = bridges.get(bridgeId);
           if (!bridge) {
             statuses[bridgeId] = {
               online: false,
