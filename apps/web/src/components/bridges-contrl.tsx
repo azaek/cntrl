@@ -21,7 +21,7 @@ import MemoryStat from "./memory-stat";
 import SystemInfo from "./system-info";
 
 const BridgesControl = () => {
-  const { bridges, addBridge } = useBridges();
+  const { bridges, addBridge, ready } = useBridges();
 
   const { statuses } = useBridgesStatus(Array.from(bridges.keys()), { interval: 10000 });
 
@@ -29,7 +29,7 @@ const BridgesControl = () => {
     <div className="w-full max-w-sm rounded-md border p-2">
       <div className="flex w-full items-center justify-between">
         <p className="text-muted-foreground text-sm font-semibold">
-          Total: {bridges.size}
+          Total: {!ready ? "Loading..." : bridges.size}
         </p>
         <Button
           variant={"outline"}
@@ -84,6 +84,7 @@ const BridgeItem = ({
           <p className="text-muted-foreground/50 pl-3 text-xs font-medium">
             {bridge.config.host}:{bridge.config.port}
           </p>
+          <p className="text-muted-foreground/50 pl-3 text-xs font-medium">{bridge.id}</p>
         </div>
         <div className="flex items-center justify-end gap-3 pr-2">
           <Button

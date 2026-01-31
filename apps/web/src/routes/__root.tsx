@@ -15,7 +15,6 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
 import appCss from "~/styles.css?url";
 
-import { BridgesProvider } from "@cntrl-pw/sdk";
 import { Toaster } from "@cntrl-pw/ui/components/sonner";
 import { ThemeProvider } from "@cntrl-pw/ui/lib/theme-provider";
 
@@ -47,9 +46,7 @@ export const Route = createRootRouteWithContext<{
 function RootComponent() {
   return (
     <RootDocument>
-      <BridgesProvider autoConnect={false}>
-        <Outlet />
-      </BridgesProvider>
+      <Outlet />
     </RootDocument>
   );
 }

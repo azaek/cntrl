@@ -37,7 +37,7 @@ interface UseProcessesOptions {
  * ```
  */
 export function useProcesses(bridgeId: string, options?: UseProcessesOptions) {
-  const { bridges, getWsManager, connect } = useBridgesContext();
+  const { bridges, getWsManager, _hookConnect: connect } = useBridgesContext();
   const bridge = bridges.get(bridgeId);
   const connectionMode = options?.connectionMode ?? "auto";
   const hasConnectedOnce = useRef(false);

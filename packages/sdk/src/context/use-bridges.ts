@@ -43,6 +43,21 @@ export function useBridges() {
 
       /** Disconnect from a bridge */
       disconnect: context.disconnect,
+
+      /** Whether the store has been hydrated / loaded */
+      ready: context.ready,
+
+      /** Re-load bridges from persistence */
+      refresh: context.refresh,
+
+      /** Whether a custom persistence layer is in use (vs default localStorage) */
+      isCustomStorage: context.isCustomStorage,
+
+      /** Status of the initial data load ("idle" | "loading" | "error") */
+      persistenceStatus: context.persistenceStatus,
+
+      /** Error message from the initial load (null when no error) */
+      persistenceError: context.persistenceError,
     }),
     [context],
   );

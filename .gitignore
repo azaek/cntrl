@@ -40,3 +40,4 @@ yarn-error.log*
 .tanstack
 # Packages/Apps specific TODOs
 __*.md
+*.tgz

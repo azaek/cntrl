@@ -34,28 +34,18 @@ function App() {
 ### Provider Options
 
 ```tsx
-import { BridgesProvider, type BridgeError } from "@cntrl-pw/sdk";
+import { BridgesProvider, type SdkError } from "@cntrl-pw/sdk";
 import { toast } from "sonner"; // or your toast library
 
 <BridgesProvider
   autoConnect={true}  // Auto-connect to all saved bridges on mount (default: true)
-  onError={(error: BridgeError) => {
-    // Handle errors from the bridge (useful for toasts)
-    toast.error(`Bridge error: ${error.message}`);
-    console.error(`[${error.bridgeId}] ${error.code}: ${error.message}`);
+  onError={(error: SdkError) => {
+    toast.error(error.message);
   }}
 >
 ```
 
-The `onError` callback receives a `BridgeError` object:
-
-```tsx
-interface BridgeError {
-  code?: string;    // Error code (e.g., "PARSE_ERROR")
-  message: string;  // Human-readable error message
-  bridgeId: string; // Which bridge sent the error
-}
-```
+By default, bridges are persisted to localStorage via Zustand. To use a different storage backend (IndexedDB, SQLite, REST API), see [Custom Storage](/docs/sdk/custom-persistence).
 
 ## Adding Your First Bridge
 
@@ -138,6 +128,52 @@ import type {
   MediaState,
   Process,
 } from "@cntrl-pw/sdk";
+```
+
+## Error Types
+
+The `onError` callback receives an `SdkError` — a discriminated union you can narrow with the `source` field:
+
+```tsx
+import type { SdkError, BridgeWsError, PersistenceOperationError } from "@cntrl-pw/sdk";
+```
+
+### `BridgeWsError`
+
+Emitted when the bridge server sends an error over WebSocket.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | `"bridge"` | Discriminator |
+| `message` | `string` | Human-readable error message |
+| `code` | `string \| undefined` | Error code (e.g., `"PARSE_ERROR"`) |
+| `bridgeId` | `string` | Which bridge sent the error |
+
+### `PersistenceOperationError`
+
+Emitted when a custom storage operation fails (`add`, `remove`, `update`, or `refresh`). Not emitted for the initial `load()` — use `persistenceStatus` and `persistenceError` from `useBridges()` for that.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source` | `"persistence"` | Discriminator |
+| `message` | `string` | Error message from the storage layer |
+| `operation` | `"add" \| "remove" \| "update" \| "refresh"` | Which operation failed |
+
+### Example
+
+```tsx
+<BridgesProvider
+  onError={(error) => {
+    switch (error.source) {
+      case "bridge":
+        toast.error(`[${error.bridgeId}] ${error.code}: ${error.message}`);
+        break;
+      case "persistence":
+        toast.error(`Storage ${error.operation} failed: ${error.message}`);
+        break;
+    }
+  }}
+>
 ```
 
 ## Next Steps

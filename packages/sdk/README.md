@@ -2,6 +2,13 @@
 
 SDK for [Cntrl Bridge](https://cntrl.pw) devices. REST/WebSocket client and React hooks for controlling your PC over the local network.
 
+## Documentation
+
+- [Getting Started](https://cntrl.pw/docs/sdk/getting-started)
+- [Hooks Reference](https://cntrl.pw/docs/sdk/hooks)
+- [Custom Storage](https://cntrl.pw/docs/sdk/custom-persistence)
+- [Changelog](https://cntrl.pw/docs/sdk/changelog)
+
 ## Install
 
 ```bash
@@ -72,10 +79,6 @@ Import types separately:
 ```ts
 import type { SystemInfo, MediaStatus, ProcessInfo } from "@cntrl-pw/sdk/types";
 ```
-
-## Documentation
-
-Full documentation at [cntrl.pw/docs](https://cntrl.pw/docs).
 
 ## License
 

@@ -40,7 +40,7 @@ interface UseSystemStatsOptions {
  * ```
  */
 export function useSystemStats(bridgeId: string, options?: UseSystemStatsOptions) {
-  const { bridges, getWsManager, connect } = useBridgesContext();
+  const { bridges, getWsManager, _hookConnect: connect } = useBridgesContext();
   const bridge = bridges.get(bridgeId);
   const connectionMode = options?.connectionMode ?? "auto";
   const hasConnectedOnce = useRef(false);

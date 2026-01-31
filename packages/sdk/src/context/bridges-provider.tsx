@@ -9,24 +9,41 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useBridgesStore } from "../store/bridges-store";
-import type { BridgeConnection, ConnectionStatus, StoredBridge } from "../types";
-import { WebSocketManager, type ErrorCallback } from "../ws/ws-manager";
+import { useStore, type StoreApi } from "zustand";
+import {
+  createPlainBridgesStore,
+  useBridgesStore,
+  type BridgesState,
+} from "../store/bridges-store";
+import type {
+  BridgeConnection,
+  BridgePersistence,
+  ConnectionStatus,
+  StoredBridge,
+} from "../types";
+import {
+  WebSocketManager,
+  type ErrorCallback,
+  type PersistenceOperationError,
+} from "../ws/ws-manager";
+
+/** Storage layer status for the initial load */
+export type PersistenceStatus = "idle" | "loading" | "error";
 
 interface BridgesContextValue {
   /** All bridges with runtime state */
   bridges: Map<string, BridgeConnection>;
 
   /** Add a new bridge and return its ID */
-  addBridge: (bridge: Omit<StoredBridge, "id">) => string;
+  addBridge: (bridge: Omit<StoredBridge, "id">) => Promise<string>;
 
   /** Remove a bridge by ID */
-  removeBridge: (id: string) => void;
+  removeBridge: (id: string) => Promise<void>;
 
   /** Update a bridge's configuration */
-  updateBridge: (id: string, updates: Partial<Omit<StoredBridge, "id">>) => void;
+  updateBridge: (id: string, updates: Partial<Omit<StoredBridge, "id">>) => Promise<void>;
 
-  /** Connect to a bridge */
+  /** Connect to a bridge (resets intentional-close flag) */
   connect: (id: string) => void;
 
   /** Disconnect from a bridge */
@@ -34,6 +51,28 @@ interface BridgesContextValue {
 
   /** Get WebSocket manager for a bridge (for hooks to use) */
   getWsManager: (id: string) => WebSocketManager | undefined;
+
+  /** Whether the store has been hydrated / loaded */
+  ready: boolean;
+
+  /** Re-load bridges from persistence (no-op for default localStorage path) */
+  refresh: () => Promise<void>;
+
+  /** Whether a custom persistence layer is in use (vs default localStorage) */
+  isCustomStorage: boolean;
+
+  /** Status of the initial data load ("idle" | "loading" | "error") */
+  persistenceStatus: PersistenceStatus;
+
+  /** Error message from the initial load (null when no error) */
+  persistenceError: string | null;
+
+  /**
+   * @internal Connect without resetting intentional-close flag.
+   * Used by hooks for auto/eager connection modes so that manual disconnect
+   * is respected and hooks don't create reconnect loops.
+   */
+  _hookConnect: (id: string) => void;
 }
 
 const BridgesContext = createContext<BridgesContextValue | null>(null);
@@ -44,26 +83,67 @@ interface BridgesProviderProps {
   autoConnect?: boolean;
   /** Callback for error messages from bridges (useful for toasts) */
   onError?: ErrorCallback;
+  /** Custom persistence layer. When omitted, uses localStorage via Zustand persist. */
+  persistence?: BridgePersistence;
 }
 
 export function BridgesProvider({
   children,
   autoConnect = true,
   onError,
+  persistence,
 }: BridgesProviderProps) {
   const queryClient = useQueryClient();
 
-  // Zustand store for persistence
-  const storedBridges = useBridgesStore((state) => state.bridges);
-  const storeAddBridge = useBridgesStore((state) => state.addBridge);
-  const storeRemoveBridge = useBridgesStore((state) => state.removeBridge);
-  const storeUpdateBridge = useBridgesStore((state) => state.updateBridge);
+  // --- Store selection ---
+  // Default path: use the global persisted store
+  // Custom path: create a plain (non-persisted) store
+  const plainStoreRef = useRef<StoreApi<BridgesState> | null>(null);
+  if (persistence && !plainStoreRef.current) {
+    plainStoreRef.current = createPlainBridgesStore();
+  }
 
-  // Runtime state: connection statuses
+  const useCustomStore = plainStoreRef.current;
+
+  // Subscribe to stored bridges from the appropriate store
+  const storedBridgesDefault = useBridgesStore((s) => s.bridges);
+  const storedBridgesCustom = useStore(
+    useCustomStore ?? useBridgesStore,
+    (s) => s.bridges,
+  );
+  const storedBridges = persistence ? storedBridgesCustom : storedBridgesDefault;
+
+  const hasHydratedDefault = useBridgesStore((s) => s._hasHydrated);
+
+  // Runtime state
   const [statuses, setStatuses] = useState<Record<string, ConnectionStatus>>({});
-
-  // WebSocket managers (one per bridge)
+  const [ready, setReady] = useState(!persistence ? hasHydratedDefault : false);
   const wsManagersRef = useRef<Map<string, WebSocketManager>>(new Map());
+  const persistenceRef = useRef(persistence);
+  persistenceRef.current = persistence;
+
+  // Persistence status tracking (only for initial load)
+  const isCustomStorage = !!persistence;
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
+    persistence ? "loading" : "idle",
+  );
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
+
+  // Fire onError for persistence operation failures (add/remove/update/refresh)
+  const emitPersistenceError = useCallback(
+    (operation: PersistenceOperationError["operation"], err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.({ source: "persistence", message, operation });
+    },
+    [onError],
+  );
+
+  // Update ready for default path when hydration completes
+  useEffect(() => {
+    if (!persistence && hasHydratedDefault) {
+      setReady(true);
+    }
+  }, [persistence, hasHydratedDefault]);
 
   // Build bridge URL
   const buildWsUrl = useCallback((bridge: StoredBridge): string => {
@@ -95,19 +175,32 @@ export function BridgesProvider({
     [buildWsUrl, queryClient, onError],
   );
 
-  // Connect to a bridge
-  const connect = useCallback(
-    (id: string) => {
-      const bridge = storedBridges[id];
+  // Internal connect helper
+  const connectInternal = useCallback(
+    (id: string, explicit: boolean) => {
+      const store = persistence ? useCustomStore : useBridgesStore;
+      const bridge = store?.getState().bridges[id];
       if (!bridge) {
         console.warn(`[BridgesProvider] Bridge not found: ${id}`);
         return;
       }
 
       const manager = getOrCreateWsManager(bridge);
-      manager.connect();
+      manager.connect(explicit);
     },
-    [storedBridges, getOrCreateWsManager],
+    [persistence, useCustomStore, getOrCreateWsManager],
+  );
+
+  // Connect to a bridge (user-facing, resets intentional-close flag)
+  const connect = useCallback(
+    (id: string) => connectInternal(id, true),
+    [connectInternal],
+  );
+
+  // Hook connect (non-explicit, respects intentional-close flag)
+  const _hookConnect = useCallback(
+    (id: string) => connectInternal(id, false),
+    [connectInternal],
   );
 
   // Disconnect from a bridge
@@ -118,47 +211,92 @@ export function BridgesProvider({
     }
   }, []);
 
-  // Add bridge (wraps store + auto-connect if enabled)
-  const addBridge = useCallback(
-    (bridge: Omit<StoredBridge, "id">) => {
-      const id = storeAddBridge(bridge);
-      setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
-
-      if (autoConnect) {
-        // Defer connection to next tick to allow state to update
-        setTimeout(() => connect(id), 0);
-      }
-
-      return id;
-    },
-    [storeAddBridge, autoConnect, connect],
-  );
-
-  // Remove bridge (disconnect + cleanup)
-  const removeBridge = useCallback(
+  // Cleanup helper for removing a bridge's WS + cache
+  const cleanupBridge = useCallback(
     (id: string) => {
       disconnect(id);
       wsManagersRef.current.delete(id);
-      storeRemoveBridge(id);
       setStatuses((prev) => {
         const { [id]: _removed, ...rest } = prev;
-        void _removed; // Silence unused variable warning
+        void _removed;
         return rest;
       });
-
-      // Clear React Query cache for this bridge
       queryClient.removeQueries({ queryKey: ["stats", id] });
       queryClient.removeQueries({ queryKey: ["media", id] });
       queryClient.removeQueries({ queryKey: ["processes", id] });
       queryClient.removeQueries({ queryKey: ["system-info", id] });
     },
-    [disconnect, storeRemoveBridge, queryClient],
+    [disconnect, queryClient],
+  );
+
+  // Add bridge
+  const addBridge = useCallback(
+    async (bridge: Omit<StoredBridge, "id">): Promise<string> => {
+      if (persistence && useCustomStore) {
+        const id = crypto.randomUUID();
+        const storedBridge: StoredBridge = { ...bridge, id };
+        try {
+          await persistence.onBridgeAdd(storedBridge);
+        } catch (err) {
+          emitPersistenceError("add", err);
+          throw err;
+        }
+        useCustomStore.setState((state) => ({
+          bridges: { ...state.bridges, [id]: storedBridge },
+        }));
+        setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
+        if (autoConnect) {
+          setTimeout(() => connect(id), 0);
+        }
+        return id;
+      }
+
+      // Default path
+      const id = useBridgesStore.getState().addBridge(bridge);
+      setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
+      if (autoConnect) {
+        setTimeout(() => connect(id), 0);
+      }
+      return id;
+    },
+    [persistence, useCustomStore, autoConnect, connect, emitPersistenceError],
+  );
+
+  // Remove bridge
+  const removeBridge = useCallback(
+    async (id: string): Promise<void> => {
+      if (persistence && useCustomStore) {
+        try {
+          await persistence.onBridgeRemove(id);
+        } catch (err) {
+          emitPersistenceError("remove", err);
+          throw err;
+        }
+        useCustomStore.getState().removeBridge(id);
+        cleanupBridge(id);
+        return;
+      }
+
+      useBridgesStore.getState().removeBridge(id);
+      cleanupBridge(id);
+    },
+    [persistence, useCustomStore, cleanupBridge, emitPersistenceError],
   );
 
   // Update bridge
   const updateBridge = useCallback(
-    (id: string, updates: Partial<Omit<StoredBridge, "id">>) => {
-      storeUpdateBridge(id, updates);
+    async (id: string, updates: Partial<Omit<StoredBridge, "id">>): Promise<void> => {
+      if (persistence && useCustomStore) {
+        try {
+          await persistence.onBridgeUpdate(id, updates);
+        } catch (err) {
+          emitPersistenceError("update", err);
+          throw err;
+        }
+        useCustomStore.getState().updateBridge(id, updates);
+      } else {
+        useBridgesStore.getState().updateBridge(id, updates);
+      }
 
       // If config changed, reconnect
       if (updates.config) {
@@ -170,7 +308,7 @@ export function BridgesProvider({
         }
       }
     },
-    [storeUpdateBridge, disconnect, connect],
+    [persistence, useCustomStore, disconnect, connect, emitPersistenceError],
   );
 
   // Get WebSocket manager (for hooks)
@@ -178,25 +316,103 @@ export function BridgesProvider({
     return wsManagersRef.current.get(id);
   }, []);
 
-  // Track if store has hydrated
-  const hasHydrated = useBridgesStore((state) => state._hasHydrated);
+  // Refresh: reload from persistence
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!persistence || !useCustomStore) return;
 
-  // Auto-connect to all bridges after hydration
+    let loaded: StoredBridge[];
+    try {
+      loaded = await persistence.load();
+    } catch (err) {
+      emitPersistenceError("refresh", err);
+      throw err;
+    }
+
+    const store = useCustomStore.getState();
+    const currentIds = new Set(Object.keys(store.bridges));
+    const loadedMap: Record<string, StoredBridge> = {};
+    const loadedIds = new Set<string>();
+
+    for (const bridge of loaded) {
+      loadedMap[bridge.id] = bridge;
+      loadedIds.add(bridge.id);
+    }
+
+    // Remove bridges no longer in persistence
+    for (const id of currentIds) {
+      if (!loadedIds.has(id)) {
+        cleanupBridge(id);
+      }
+    }
+
+    // Set full state
+    useCustomStore.setState({ bridges: loadedMap });
+
+    // Connect new bridges
+    if (autoConnect) {
+      for (const id of loadedIds) {
+        if (!currentIds.has(id)) {
+          setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
+          setTimeout(() => connect(id), 0);
+        }
+      }
+    }
+  }, [
+    persistence,
+    useCustomStore,
+    cleanupBridge,
+    autoConnect,
+    connect,
+    emitPersistenceError,
+  ]);
+
+  // Initial load for custom persistence
   useEffect(() => {
-    if (!autoConnect || !hasHydrated) return;
+    if (!persistence || !useCustomStore) return;
+
+    let cancelled = false;
+    setPersistenceStatus("loading");
+    setPersistenceError(null);
+    persistence
+      .load()
+      .then((loaded) => {
+        if (cancelled) return;
+        const bridgesMap: Record<string, StoredBridge> = {};
+        for (const bridge of loaded) {
+          bridgesMap[bridge.id] = bridge;
+        }
+        useCustomStore.setState({ bridges: bridgesMap, _hasHydrated: true });
+        setPersistenceStatus("idle");
+        setReady(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setPersistenceStatus("error");
+        setPersistenceError(message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // Only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-connect to all bridges after ready
+  useEffect(() => {
+    if (!autoConnect || !ready) return;
 
     Object.keys(storedBridges).forEach((id) => {
-      // Initialize status if not already set
       if (!statuses[id]) {
         setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
       }
-      // Only connect if not already connected/connecting
       const currentStatus = statuses[id];
       if (currentStatus !== "connected" && currentStatus !== "connecting") {
         connect(id);
       }
     });
-  }, [hasHydrated, autoConnect, storedBridges, statuses, connect]);
+  }, [ready, autoConnect, storedBridges, statuses, connect]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -231,8 +447,28 @@ export function BridgesProvider({
       connect,
       disconnect,
       getWsManager,
+      ready,
+      refresh,
+      isCustomStorage,
+      persistenceStatus,
+      persistenceError,
+      _hookConnect,
     }),
-    [bridges, addBridge, removeBridge, updateBridge, connect, disconnect, getWsManager],
+    [
+      bridges,
+      addBridge,
+      removeBridge,
+      updateBridge,
+      connect,
+      disconnect,
+      getWsManager,
+      ready,
+      refresh,
+      isCustomStorage,
+      persistenceStatus,
+      persistenceError,
+      _hookConnect,
+    ],
   );
 
   return <BridgesContext.Provider value={value}>{children}</BridgesContext.Provider>;

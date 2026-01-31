@@ -1,0 +1,252 @@
+---
+title: Custom Storage
+description: Replace the default localStorage with IndexedDB, SQLite, a REST API, or any custom backend.
+icon: Database
+badge: New
+---
+
+By default, `BridgesProvider` persists bridge configurations to **localStorage** via Zustand. You can replace this with any storage backend by implementing the `BridgePersistence` interface and passing it to the provider.
+
+## Why Custom Persistence?
+
+- **IndexedDB** — Larger storage limits, works in Web Workers
+- **SQLite / Turso** — Server-side or edge persistence
+- **REST API / Database** — Store bridges in a shared backend (multi-device sync)
+- **Encrypted storage** — Wrap any backend with encryption for API keys
+
+## The BridgePersistence Interface
+
+```tsx
+import type { BridgePersistence, StoredBridge } from "@cntrl-pw/sdk";
+
+interface BridgePersistence {
+  /** Load all bridges on mount (hydration) */
+  load: () => Promise<StoredBridge[]>;
+  /** Persist a new bridge */
+  onBridgeAdd: (bridge: StoredBridge) => Promise<void>;
+  /** Remove a bridge from persistence */
+  onBridgeRemove: (id: string) => Promise<void>;
+  /** Update a bridge in persistence */
+  onBridgeUpdate: (
+    id: string,
+    updates: Partial<Omit<StoredBridge, "id">>,
+  ) => Promise<void>;
+}
+```
+
+All methods are **async**. The SDK waits for each operation to succeed before updating the in-memory store — if `onBridgeAdd` throws, the bridge won't be added.
+
+## Usage
+
+Pass your implementation to `BridgesProvider`:
+
+```tsx
+import { BridgesProvider } from "@cntrl-pw/sdk";
+
+const persistence = createMyPersistence();
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BridgesProvider persistence={persistence}>
+        {/* All hooks work exactly the same */}
+        <MyApp />
+      </BridgesProvider>
+    </QueryClientProvider>
+  );
+}
+```
+
+When `persistence` is provided:
+- The default Zustand/localStorage store is **not used**
+- `persistence.load()` is called once on mount to hydrate bridges
+- `addBridge`, `removeBridge`, `updateBridge` call the persistence methods before updating state
+- The `ready` flag is `false` until `load()` resolves
+
+## Examples
+
+### IndexedDB
+
+```tsx
+import type { BridgePersistence, StoredBridge } from "@cntrl-pw/sdk";
+
+const DB_NAME = "cntrl-bridges";
+const STORE_NAME = "bridges";
+
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export function createIndexedDbPersistence(): BridgePersistence {
+  return {
+    async load() {
+      const db = await openDb();
+      return new Promise<StoredBridge[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const request = tx.objectStore(STORE_NAME).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    },
+
+    async onBridgeAdd(bridge) {
+      const db = await openDb();
+      return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const request = tx.objectStore(STORE_NAME).put(bridge);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    },
+
+    async onBridgeRemove(id) {
+      const db = await openDb();
+      return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const request = tx.objectStore(STORE_NAME).delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    },
+
+    async onBridgeUpdate(id, updates) {
+      const db = await openDb();
+      const store = db.transaction(STORE_NAME, "readwrite").objectStore(STORE_NAME);
+      return new Promise<void>((resolve, reject) => {
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+          if (!getReq.result) return reject(new Error(`Bridge ${id} not found`));
+          const putReq = store.put({ ...getReq.result, ...updates, id });
+          putReq.onsuccess = () => resolve();
+          putReq.onerror = () => reject(putReq.error);
+        };
+        getReq.onerror = () => reject(getReq.error);
+      });
+    },
+  };
+}
+```
+
+### REST API
+
+```tsx
+import type { BridgePersistence } from "@cntrl-pw/sdk";
+
+export function createApiPersistence(baseUrl: string): BridgePersistence {
+  const headers = { "Content-Type": "application/json" };
+
+  return {
+    async load() {
+      const res = await fetch(`${baseUrl}/bridges`);
+      if (!res.ok) throw new Error("Failed to load bridges");
+      return res.json();
+    },
+
+    async onBridgeAdd(bridge) {
+      const res = await fetch(`${baseUrl}/bridges`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(bridge),
+      });
+      if (!res.ok) throw new Error("Failed to add bridge");
+    },
+
+    async onBridgeRemove(id) {
+      const res = await fetch(`${baseUrl}/bridges/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to remove bridge");
+    },
+
+    async onBridgeUpdate(id, updates) {
+      const res = await fetch(`${baseUrl}/bridges/${id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error("Failed to update bridge");
+    },
+  };
+}
+```
+
+## Status and Error Handling
+
+### Load status
+
+`useBridges()` exposes the initial load state for building loading/error UI:
+
+```tsx
+const { isCustomStorage, persistenceStatus, persistenceError } = useBridges();
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isCustomStorage` | `boolean` | `true` when a `persistence` prop is provided |
+| `persistenceStatus` | `"idle" \| "loading" \| "error"` | Status of the initial `load()` call |
+| `persistenceError` | `string \| null` | Error message if `load()` failed |
+
+```tsx
+function BridgeList() {
+  const { bridges, persistenceStatus, persistenceError } = useBridges();
+
+  if (persistenceStatus === "loading") return <Spinner />;
+  if (persistenceStatus === "error") return <p>Load failed: {persistenceError}</p>;
+
+  return <ul>{/* render bridges */}</ul>;
+}
+```
+
+For the default localStorage path, `persistenceStatus` is always `"idle"` and `isCustomStorage` is `false`.
+
+### Operation errors
+
+Errors from `onBridgeAdd`, `onBridgeRemove`, `onBridgeUpdate`, and `refresh` are emitted through the `onError` callback on `BridgesProvider` — the same callback that handles bridge WebSocket errors. You can distinguish them using the `source` field:
+
+```tsx
+<BridgesProvider
+  persistence={persistence}
+  onError={(error) => {
+    if (error.source === "persistence") {
+      // error.operation: "add" | "remove" | "update" | "refresh"
+      toast.error(`Storage ${error.operation} failed: ${error.message}`);
+    }
+
+    if (error.source === "bridge") {
+      // error.bridgeId, error.code, error.message
+      toast.error(`Bridge error: ${error.message}`);
+    }
+  }}
+>
+```
+
+See [Error Types](#error-types) on the Getting Started page for the full reference.
+
+The error is also re-thrown to the caller, so you can handle it inline with try/catch if needed.
+
+## Refreshing from Persistence
+
+If your backend can change externally (e.g., another tab or device updates bridges), use the `refresh` function to reload:
+
+```tsx
+const { refresh } = useBridges();
+
+// Re-read all bridges from the persistence layer
+await refresh();
+```
+
+This calls `persistence.load()` again, reconciles the state, cleans up removed bridges, and auto-connects new ones (if `autoConnect` is enabled).
+
+## Notes
+
+- All hooks (`useSystemStats`, `useMedia`, `useBridgeStatus`, etc.) work identically regardless of which persistence layer is used.
+- The `useBridgesStore` export is the **default** global Zustand store. When using custom persistence, bridges are managed in a separate internal store — use `useBridges()` instead of `useBridgesStore` to ensure compatibility.
+- You can use different persistence layers on different pages by rendering separate `BridgesProvider` instances.

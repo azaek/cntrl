@@ -1,6 +1,6 @@
 {
   "name": "@cntrl-pw/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SDK for Cntrl Bridge devices — REST/WebSocket client and React hooks for controlling your PC over the local network.",
   "type": "module",
   "license": "MIT",

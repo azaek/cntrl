@@ -5,15 +5,29 @@ import type { WSIncomingEvent, WSOutgoingMessage } from "../types/ws";
 /** Callback for connection status changes */
 export type StatusChangeCallback = (status: ConnectionStatus) => void;
 
-/** Error info received from the bridge */
-export interface BridgeError {
+/** Error from the bridge WebSocket server */
+export interface BridgeWsError {
+  source: "bridge";
   code?: string;
   message: string;
   bridgeId: string;
 }
 
-/** Callback for error messages from the bridge */
-export type ErrorCallback = (error: BridgeError) => void;
+/** Error from the custom persistence/storage layer */
+export interface PersistenceOperationError {
+  source: "persistence";
+  message: string;
+  operation: "add" | "remove" | "update" | "refresh";
+}
+
+/** All error types the SDK can emit via onError */
+export type SdkError = BridgeWsError | PersistenceOperationError;
+
+/** @deprecated Use SdkError instead */
+export type BridgeError = BridgeWsError;
+
+/** Callback for errors from the SDK (bridge WS + persistence) */
+export type ErrorCallback = (error: SdkError) => void;
 
 /**
  * WebSocket connection manager for a single bridge.
@@ -21,6 +35,11 @@ export type ErrorCallback = (error: BridgeError) => void;
  * - Connection/reconnection with exponential backoff
  * - Topic subscription with reference counting
  * - Routing messages to React Query cache
+ *
+ * NOTE: The bridge server **replaces** the entire subscription set on each
+ * `subscribe` message. To handle multiple hooks subscribing independently,
+ * we batch subscription syncs via microtask so all hooks within a single
+ * render commit accumulate before we send one message with the full topic set.
  */
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -29,6 +48,7 @@ export class WebSocketManager {
   private maxReconnectAttempts = 5;
   private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private isIntentionalClose = false;
+  private syncPending = false;
 
   constructor(
     private bridgeId: string,
@@ -40,10 +60,19 @@ export class WebSocketManager {
   ) {}
 
   /**
-   * Connect to the WebSocket server
+   * Connect to the WebSocket server.
+   * @param explicit - If true, resets intentional-close flag (used by user-facing connect actions)
    */
-  connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+  connect(explicit = false): void {
+    if (
+      this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+
+    // After an intentional disconnect, only an explicit connect should reconnect
+    if (this.isIntentionalClose && !explicit) {
       return;
     }
 
@@ -85,14 +114,18 @@ export class WebSocketManager {
   /**
    * Subscribe to a topic. Returns an unsubscribe function.
    * Uses reference counting to avoid duplicate subscriptions.
+   *
+   * The bridge server replaces the entire subscription set on each
+   * subscribe message, so we batch changes via microtask and send
+   * the full accumulated topic list once per tick.
    */
   subscribe(topic: string): () => void {
     const currentCount = this.subscriptions.get(topic) ?? 0;
     this.subscriptions.set(topic, currentCount + 1);
 
-    // Only send subscribe message if this is the first subscriber
+    // Schedule a batched sync (coalesces all subscribes within the same microtask)
     if (currentCount === 0) {
-      this.sendSubscribe([topic]);
+      this.scheduleSyncSubscriptions();
     }
 
     // Return unsubscribe function
@@ -100,9 +133,13 @@ export class WebSocketManager {
       const count = this.subscriptions.get(topic) ?? 0;
       if (count <= 1) {
         this.subscriptions.delete(topic);
-        this.sendUnsubscribe([topic]);
       } else {
         this.subscriptions.set(topic, count - 1);
+      }
+
+      // Schedule re-sync after topic removal
+      if (count <= 1) {
+        this.scheduleSyncSubscriptions();
       }
     };
   }
@@ -134,11 +171,8 @@ export class WebSocketManager {
       this.reconnectAttempts = 0;
       this.onStatusChange("connected");
 
-      // Resubscribe to all active topics
-      const topics = Array.from(this.subscriptions.keys());
-      if (topics.length > 0) {
-        this.sendSubscribe(topics);
-      }
+      // Resubscribe to all active topics (flush immediately, don't batch)
+      this.flushSyncSubscriptions();
     };
 
     this.ws.onmessage = (event) => {
@@ -199,6 +233,7 @@ export class WebSocketManager {
         console.error(`[WS ${this.bridgeId}] Server error:`, message.data);
         // Call error callback for DX (toasts, etc.)
         this.onError?.({
+          source: "bridge",
           code: message.data.code,
           message: message.data.message,
           bridgeId: this.bridgeId,
@@ -210,23 +245,33 @@ export class WebSocketManager {
     }
   }
 
-  private sendSubscribe(topics: string[]): void {
-    if (this.ws?.readyState !== WebSocket.OPEN || topics.length === 0) return;
+  /**
+   * Schedule a subscription sync via microtask.
+   * All subscribe/unsubscribe calls within the same tick are batched
+   * into a single message with the full topic set.
+   */
+  private scheduleSyncSubscriptions(): void {
+    if (this.syncPending) return;
+    this.syncPending = true;
+    queueMicrotask(() => {
+      this.syncPending = false;
+      this.flushSyncSubscriptions();
+    });
+  }
+
+  /**
+   * Send the full accumulated topic set to the server immediately.
+   * If no topics remain, sends an unsubscribe for all.
+   */
+  private flushSyncSubscriptions(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+
+    const topics = Array.from(this.subscriptions.keys());
+    if (topics.length === 0) return;
 
     this.ws.send(
       JSON.stringify({
         op: "subscribe",
-        data: { topics },
-      }),
-    );
-  }
-
-  private sendUnsubscribe(topics: string[]): void {
-    if (this.ws?.readyState !== WebSocket.OPEN || topics.length === 0) return;
-
-    this.ws.send(
-      JSON.stringify({
-        op: "unsubscribe",
         data: { topics },
       }),
     );

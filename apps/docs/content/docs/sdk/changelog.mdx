@@ -1,0 +1,32 @@
+---
+title: Changelog
+description: Release notes and breaking changes for the React SDK.
+icon: FileText
+---
+
+## 0.1.1
+
+### Bug Fixes
+
+- Fixed WebSocket subscriptions being overridden when multiple hooks subscribe to different topics.
+- Fixed duplicate WebSocket connections when multiple hooks trigger connect in the same render.
+- Fixed manual disconnect causing reconnect loop from hooks with `auto` connection mode.
+
+### Features
+
+- Added pluggable storage layer via `BridgesProvider` `persistence` prop. See [Custom Storage](/docs/sdk/custom-persistence).
+- Added `persistenceStatus` (`"idle"` | `"loading"` | `"error"`) and `persistenceError` to `useBridges()` for tracking custom storage layer state.
+- Added `isCustomStorage` boolean to `useBridges()` to detect whether a custom storage layer is active.
+- Unified error handling: `onError` callback now receives `SdkError` — a discriminated union (`BridgeWsError | PersistenceOperationError`) with a `source` field. See [Error Types](/docs/sdk/getting-started#error-types).
+
+## 0.1.0
+
+Initial release.
+
+- React hooks for real-time system stats, media control, process management, and power control.
+- WebSocket-first architecture with automatic reconnection and exponential backoff.
+- Zustand store with localStorage persistence.
+- Multi-bridge support with per-bridge WebSocket connections.
+- TanStack Query integration for caching and deduplication.
+- Connection modes: `auto`, `passive`, `eager`.
+- Low-level `BridgeClient` for non-React usage.

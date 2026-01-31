@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { StoredBridge } from "../types";
 
-interface BridgesState {
+export interface BridgesState {
   /** Persisted bridge configurations */
   bridges: Record<string, StoredBridge>;
 
@@ -80,3 +80,52 @@ export const useBridgesStore = create<BridgesState>()(
     },
   ),
 );
+
+/**
+ * Create a plain Zustand store without persist middleware.
+ * Used by BridgesProvider when custom persistence is provided.
+ */
+export function createPlainBridgesStore() {
+  return create<BridgesState>()((set, get) => ({
+    bridges: {},
+    _hasHydrated: false,
+
+    _setHasHydrated: (state) => {
+      set({ _hasHydrated: state });
+    },
+
+    addBridge: (bridge) => {
+      const id = crypto.randomUUID();
+      const storedBridge: StoredBridge = { ...bridge, id };
+      set((state) => ({
+        bridges: { ...state.bridges, [id]: storedBridge },
+      }));
+      return id;
+    },
+
+    removeBridge: (id) => {
+      set((state) => {
+        const { [id]: _removed, ...rest } = state.bridges;
+        void _removed;
+        return { bridges: rest };
+      });
+    },
+
+    updateBridge: (id, updates) => {
+      set((state) => {
+        const existing = state.bridges[id];
+        if (!existing) return state;
+        return {
+          bridges: {
+            ...state.bridges,
+            [id]: { ...existing, ...updates },
+          },
+        };
+      });
+    },
+
+    getBridge: (id) => get().bridges[id],
+
+    getAllBridges: () => Object.values(get().bridges),
+  }));
+}
