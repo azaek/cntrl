@@ -14,6 +14,8 @@
     "...hooks",
     "---Low-level---",
     "client",
-    "utils"
+    "utils",
+    "---",
+    "changelog"
   ]
 }

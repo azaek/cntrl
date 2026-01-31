@@ -21,7 +21,14 @@ import type {
   ConnectionStatus,
   StoredBridge,
 } from "../types";
-import { WebSocketManager, type ErrorCallback } from "../ws/ws-manager";
+import {
+  WebSocketManager,
+  type ErrorCallback,
+  type PersistenceOperationError,
+} from "../ws/ws-manager";
+
+/** Storage layer status for the initial load */
+export type PersistenceStatus = "idle" | "loading" | "error";
 
 interface BridgesContextValue {
   /** All bridges with runtime state */
@@ -50,6 +57,15 @@ interface BridgesContextValue {
 
   /** Re-load bridges from persistence (no-op for default localStorage path) */
   refresh: () => Promise<void>;
+
+  /** Whether a custom persistence layer is in use (vs default localStorage) */
+  isCustomStorage: boolean;
+
+  /** Status of the initial data load ("idle" | "loading" | "error") */
+  persistenceStatus: PersistenceStatus;
+
+  /** Error message from the initial load (null when no error) */
+  persistenceError: string | null;
 
   /**
    * @internal Connect without resetting intentional-close flag.
@@ -105,6 +121,22 @@ export function BridgesProvider({
   const wsManagersRef = useRef<Map<string, WebSocketManager>>(new Map());
   const persistenceRef = useRef(persistence);
   persistenceRef.current = persistence;
+
+  // Persistence status tracking (only for initial load)
+  const isCustomStorage = !!persistence;
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
+    persistence ? "loading" : "idle",
+  );
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
+
+  // Fire onError for persistence operation failures (add/remove/update/refresh)
+  const emitPersistenceError = useCallback(
+    (operation: PersistenceOperationError["operation"], err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.({ source: "persistence", message, operation });
+    },
+    [onError],
+  );
 
   // Update ready for default path when hydration completes
   useEffect(() => {
@@ -203,7 +235,12 @@ export function BridgesProvider({
       if (persistence && useCustomStore) {
         const id = crypto.randomUUID();
         const storedBridge: StoredBridge = { ...bridge, id };
-        await persistence.onBridgeAdd(storedBridge);
+        try {
+          await persistence.onBridgeAdd(storedBridge);
+        } catch (err) {
+          emitPersistenceError("add", err);
+          throw err;
+        }
         useCustomStore.setState((state) => ({
           bridges: { ...state.bridges, [id]: storedBridge },
         }));
@@ -222,14 +259,19 @@ export function BridgesProvider({
       }
       return id;
     },
-    [persistence, useCustomStore, autoConnect, connect],
+    [persistence, useCustomStore, autoConnect, connect, emitPersistenceError],
   );
 
   // Remove bridge
   const removeBridge = useCallback(
     async (id: string): Promise<void> => {
       if (persistence && useCustomStore) {
-        await persistence.onBridgeRemove(id);
+        try {
+          await persistence.onBridgeRemove(id);
+        } catch (err) {
+          emitPersistenceError("remove", err);
+          throw err;
+        }
         useCustomStore.getState().removeBridge(id);
         cleanupBridge(id);
         return;
@@ -238,14 +280,19 @@ export function BridgesProvider({
       useBridgesStore.getState().removeBridge(id);
       cleanupBridge(id);
     },
-    [persistence, useCustomStore, cleanupBridge],
+    [persistence, useCustomStore, cleanupBridge, emitPersistenceError],
   );
 
   // Update bridge
   const updateBridge = useCallback(
     async (id: string, updates: Partial<Omit<StoredBridge, "id">>): Promise<void> => {
       if (persistence && useCustomStore) {
-        await persistence.onBridgeUpdate(id, updates);
+        try {
+          await persistence.onBridgeUpdate(id, updates);
+        } catch (err) {
+          emitPersistenceError("update", err);
+          throw err;
+        }
         useCustomStore.getState().updateBridge(id, updates);
       } else {
         useBridgesStore.getState().updateBridge(id, updates);
@@ -261,7 +308,7 @@ export function BridgesProvider({
         }
       }
     },
-    [persistence, useCustomStore, disconnect, connect],
+    [persistence, useCustomStore, disconnect, connect, emitPersistenceError],
   );
 
   // Get WebSocket manager (for hooks)
@@ -273,7 +320,14 @@ export function BridgesProvider({
   const refresh = useCallback(async (): Promise<void> => {
     if (!persistence || !useCustomStore) return;
 
-    const loaded = await persistence.load();
+    let loaded: StoredBridge[];
+    try {
+      loaded = await persistence.load();
+    } catch (err) {
+      emitPersistenceError("refresh", err);
+      throw err;
+    }
+
     const store = useCustomStore.getState();
     const currentIds = new Set(Object.keys(store.bridges));
     const loadedMap: Record<string, StoredBridge> = {};
@@ -303,22 +357,40 @@ export function BridgesProvider({
         }
       }
     }
-  }, [persistence, useCustomStore, cleanupBridge, autoConnect, connect]);
+  }, [
+    persistence,
+    useCustomStore,
+    cleanupBridge,
+    autoConnect,
+    connect,
+    emitPersistenceError,
+  ]);
 
   // Initial load for custom persistence
   useEffect(() => {
     if (!persistence || !useCustomStore) return;
 
     let cancelled = false;
-    persistence.load().then((loaded) => {
-      if (cancelled) return;
-      const bridgesMap: Record<string, StoredBridge> = {};
-      for (const bridge of loaded) {
-        bridgesMap[bridge.id] = bridge;
-      }
-      useCustomStore.setState({ bridges: bridgesMap, _hasHydrated: true });
-      setReady(true);
-    });
+    setPersistenceStatus("loading");
+    setPersistenceError(null);
+    persistence
+      .load()
+      .then((loaded) => {
+        if (cancelled) return;
+        const bridgesMap: Record<string, StoredBridge> = {};
+        for (const bridge of loaded) {
+          bridgesMap[bridge.id] = bridge;
+        }
+        useCustomStore.setState({ bridges: bridgesMap, _hasHydrated: true });
+        setPersistenceStatus("idle");
+        setReady(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setPersistenceStatus("error");
+        setPersistenceError(message);
+      });
 
     return () => {
       cancelled = true;
@@ -377,6 +449,9 @@ export function BridgesProvider({
       getWsManager,
       ready,
       refresh,
+      isCustomStorage,
+      persistenceStatus,
+      persistenceError,
       _hookConnect,
     }),
     [
@@ -389,6 +464,9 @@ export function BridgesProvider({
       getWsManager,
       ready,
       refresh,
+      isCustomStorage,
+      persistenceStatus,
+      persistenceError,
       _hookConnect,
     ],
   );

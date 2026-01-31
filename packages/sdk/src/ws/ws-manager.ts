@@ -5,15 +5,29 @@ import type { WSIncomingEvent, WSOutgoingMessage } from "../types/ws";
 /** Callback for connection status changes */
 export type StatusChangeCallback = (status: ConnectionStatus) => void;
 
-/** Error info received from the bridge */
-export interface BridgeError {
+/** Error from the bridge WebSocket server */
+export interface BridgeWsError {
+  source: "bridge";
   code?: string;
   message: string;
   bridgeId: string;
 }
 
-/** Callback for error messages from the bridge */
-export type ErrorCallback = (error: BridgeError) => void;
+/** Error from the custom persistence/storage layer */
+export interface PersistenceOperationError {
+  source: "persistence";
+  message: string;
+  operation: "add" | "remove" | "update" | "refresh";
+}
+
+/** All error types the SDK can emit via onError */
+export type SdkError = BridgeWsError | PersistenceOperationError;
+
+/** @deprecated Use SdkError instead */
+export type BridgeError = BridgeWsError;
+
+/** Callback for errors from the SDK (bridge WS + persistence) */
+export type ErrorCallback = (error: SdkError) => void;
 
 /**
  * WebSocket connection manager for a single bridge.
@@ -219,6 +233,7 @@ export class WebSocketManager {
         console.error(`[WS ${this.bridgeId}] Server error:`, message.data);
         // Call error callback for DX (toasts, etc.)
         this.onError?.({
+          source: "bridge",
           code: message.data.code,
           message: message.data.message,
           bridgeId: this.bridgeId,

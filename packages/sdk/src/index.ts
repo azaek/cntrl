@@ -8,7 +8,11 @@
 export { useBridgesStore } from "./store/bridges-store";
 
 // Context (runtime connections)
-export { BridgesProvider, useBridgesContext } from "./context/bridges-provider";
+export {
+  BridgesProvider,
+  useBridgesContext,
+  type PersistenceStatus,
+} from "./context/bridges-provider";
 export { useBridge, useBridges } from "./context/use-bridges";
 
 // Hooks (all take bridgeId)
@@ -27,7 +31,13 @@ export { useSystemStats } from "./hooks/use-system-stats";
 export * from "./types";
 export * from "./types/api";
 export * from "./types/ws";
-export type { BridgeError, ErrorCallback } from "./ws/ws-manager";
+export type {
+  BridgeError,
+  BridgeWsError,
+  ErrorCallback,
+  PersistenceOperationError,
+  SdkError,
+} from "./ws/ws-manager";
 
 // Client (low-level) - keep for direct usage
 export { BridgeClient, createBridgeClient } from "./client";

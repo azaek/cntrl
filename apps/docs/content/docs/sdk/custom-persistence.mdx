@@ -178,6 +178,60 @@ export function createApiPersistence(baseUrl: string): BridgePersistence {
 }
 ```
 
+## Status and Error Handling
+
+### Load status
+
+`useBridges()` exposes the initial load state for building loading/error UI:
+
+```tsx
+const { isCustomStorage, persistenceStatus, persistenceError } = useBridges();
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isCustomStorage` | `boolean` | `true` when a `persistence` prop is provided |
+| `persistenceStatus` | `"idle" \| "loading" \| "error"` | Status of the initial `load()` call |
+| `persistenceError` | `string \| null` | Error message if `load()` failed |
+
+```tsx
+function BridgeList() {
+  const { bridges, persistenceStatus, persistenceError } = useBridges();
+
+  if (persistenceStatus === "loading") return <Spinner />;
+  if (persistenceStatus === "error") return <p>Load failed: {persistenceError}</p>;
+
+  return <ul>{/* render bridges */}</ul>;
+}
+```
+
+For the default localStorage path, `persistenceStatus` is always `"idle"` and `isCustomStorage` is `false`.
+
+### Operation errors
+
+Errors from `onBridgeAdd`, `onBridgeRemove`, `onBridgeUpdate`, and `refresh` are emitted through the `onError` callback on `BridgesProvider` — the same callback that handles bridge WebSocket errors. You can distinguish them using the `source` field:
+
+```tsx
+<BridgesProvider
+  persistence={persistence}
+  onError={(error) => {
+    if (error.source === "persistence") {
+      // error.operation: "add" | "remove" | "update" | "refresh"
+      toast.error(`Storage ${error.operation} failed: ${error.message}`);
+    }
+
+    if (error.source === "bridge") {
+      // error.bridgeId, error.code, error.message
+      toast.error(`Bridge error: ${error.message}`);
+    }
+  }}
+>
+```
+
+See [Error Types](#error-types) on the Getting Started page for the full reference.
+
+The error is also re-thrown to the caller, so you can handle it inline with try/catch if needed.
+
 ## Refreshing from Persistence
 
 If your backend can change externally (e.g., another tab or device updates bridges), use the `refresh` function to reload:

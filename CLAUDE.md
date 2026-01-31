@@ -138,6 +138,18 @@ All SDK types in `packages/sdk/src/types/api.ts` must match the Rust types exact
 
 When updating SDK types, always verify against the Rust source.
 
+## Changelogs
+
+Docs changelogs live at:
+
+- **SDK**: `apps/docs/content/docs/sdk/changelog.mdx`
+- **Bridge**: `apps/docs/content/docs/(cntrl)/changelog.mdx`
+
+Keep entries short and direct. Describe what was broken or added, not how it was fixed internally.
+
+Good: `Fixed WebSocket subscriptions being overridden when multiple hooks subscribe to different topics.`
+Bad: `Fixed by batching subscription syncs via queueMicrotask so all hooks within a single render commit accumulate their topics before we send one message with the full topic set to the bridge server which replaces subscriptions on each message.`
+
 ## Post-Plan Execution
 
 After every plan execution, generate a changelog summarizing:
