@@ -143,7 +143,6 @@ export type MediaActionType =
   | "next"
   | "prev"
   | "previous"
-  | "stop"
   | "set_volume"
   | "volume_up"
   | "volume_down"

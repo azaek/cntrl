@@ -35,7 +35,7 @@ interface UseMediaOptions {
  */
 export function useMedia(bridgeId: string, options?: UseMediaOptions) {
   const queryClient = useQueryClient();
-  const { bridges, getWsManager, connect } = useBridgesContext();
+  const { bridges, getWsManager, _hookConnect: connect } = useBridgesContext();
   const bridge = bridges.get(bridgeId);
   const connectionMode = options?.connectionMode ?? "auto";
   const hasConnectedOnce = useRef(false);

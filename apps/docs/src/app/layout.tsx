@@ -19,6 +19,21 @@ export const metadata = createMetadata({
     template: "%s | Cntrl",
     default: "Cntrl",
   },
+  icons: {
+    icon: [
+      {
+        url: "/favicon-light.png",
+        rel: "icon",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/favicon.png",
+        rel: "icon",
+        media: "(prefers-color-scheme: dark)",
+        sizes: "16x16",
+      },
+    ],
+  },
   description: "Cntrl is a remote management bridge for your local machines.",
   metadataBase:
     process.env.NODE_ENV === "development"

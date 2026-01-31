@@ -36,7 +36,7 @@ interface BridgesContextValue {
   /** Update a bridge's configuration */
   updateBridge: (id: string, updates: Partial<Omit<StoredBridge, "id">>) => Promise<void>;
 
-  /** Connect to a bridge */
+  /** Connect to a bridge (resets intentional-close flag) */
   connect: (id: string) => void;
 
   /** Disconnect from a bridge */
@@ -50,6 +50,13 @@ interface BridgesContextValue {
 
   /** Re-load bridges from persistence (no-op for default localStorage path) */
   refresh: () => Promise<void>;
+
+  /**
+   * @internal Connect without resetting intentional-close flag.
+   * Used by hooks for auto/eager connection modes so that manual disconnect
+   * is respected and hooks don't create reconnect loops.
+   */
+  _hookConnect: (id: string) => void;
 }
 
 const BridgesContext = createContext<BridgesContextValue | null>(null);
@@ -136,9 +143,9 @@ export function BridgesProvider({
     [buildWsUrl, queryClient, onError],
   );
 
-  // Connect to a bridge
-  const connect = useCallback(
-    (id: string) => {
+  // Internal connect helper
+  const connectInternal = useCallback(
+    (id: string, explicit: boolean) => {
       const store = persistence ? useCustomStore : useBridgesStore;
       const bridge = store?.getState().bridges[id];
       if (!bridge) {
@@ -147,9 +154,21 @@ export function BridgesProvider({
       }
 
       const manager = getOrCreateWsManager(bridge);
-      manager.connect();
+      manager.connect(explicit);
     },
     [persistence, useCustomStore, getOrCreateWsManager],
+  );
+
+  // Connect to a bridge (user-facing, resets intentional-close flag)
+  const connect = useCallback(
+    (id: string) => connectInternal(id, true),
+    [connectInternal],
+  );
+
+  // Hook connect (non-explicit, respects intentional-close flag)
+  const _hookConnect = useCallback(
+    (id: string) => connectInternal(id, false),
+    [connectInternal],
   );
 
   // Disconnect from a bridge
@@ -358,6 +377,7 @@ export function BridgesProvider({
       getWsManager,
       ready,
       refresh,
+      _hookConnect,
     }),
     [
       bridges,
@@ -369,6 +389,7 @@ export function BridgesProvider({
       getWsManager,
       ready,
       refresh,
+      _hookConnect,
     ],
   );
 
