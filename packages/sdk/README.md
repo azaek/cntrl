@@ -12,7 +12,13 @@ SDK for [Cntrl Bridge](https://cntrl.pw) devices. REST/WebSocket client and Reac
 ## Install
 
 ```bash
-npm install @cntrl-pw/sdk
+npm install @cntrl-pw/sdk @tanstack/react-query
+# or
+pnpm add @cntrl-pw/sdk @tanstack/react-query
+# or
+yarn add @cntrl-pw/sdk @tanstack/react-query
+# or
+bun add @cntrl-pw/sdk @tanstack/react-query
 ```
 
 ## Quick Start

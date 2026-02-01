@@ -27,14 +27,33 @@ The `@cntrl-pw/sdk` package provides React hooks and utilities for connecting to
 - **TypeScript** - Full type safety for all API responses
 
 <Callout title="Storage Support">
-  Currently, the SDK only supports local storage via Zustand for persistence. Database adapters are planned for future releases.
+  By default, bridges are persisted to localStorage via Zustand. You can plug in a custom storage backend (IndexedDB, SQLite, REST API) — see [Custom Storage](/docs/sdk/custom-persistence).
 </Callout>
 
 ## Installation
 
+<Tabs items={["npm", "pnpm", "yarn", "bun"]}>
+<Tab value="npm">
 ```bash
-pnpm add @cntrl-pw/sdk @tanstack/react-query zustand
+npm install @cntrl-pw/sdk @tanstack/react-query
 ```
+</Tab>
+<Tab value="pnpm">
+```bash
+pnpm add @cntrl-pw/sdk @tanstack/react-query
+```
+</Tab>
+<Tab value="yarn">
+```bash
+yarn add @cntrl-pw/sdk @tanstack/react-query
+```
+</Tab>
+<Tab value="bun">
+```bash
+bun add @cntrl-pw/sdk @tanstack/react-query
+```
+</Tab>
+</Tabs>
 
 ## Quick Start
 

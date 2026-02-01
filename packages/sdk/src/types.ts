@@ -1,20 +1,30 @@
-import { z } from "zod";
-
 /**
  * Bridge device connection configuration
  */
-export const BridgeConfigSchema = z.object({
+export interface BridgeConfig {
   /** Bridge hostname or IP address */
-  host: z.string(),
+  host: string;
   /** Bridge port (default: 9990) */
-  port: z.number().default(9990),
+  port: number;
   /** Use secure connection (https/wss) */
-  secure: z.boolean().default(false),
+  secure: boolean;
   /** API key for authentication (optional) */
-  apiKey: z.string().optional(),
-});
+  apiKey?: string;
+}
 
-export type BridgeConfig = z.infer<typeof BridgeConfigSchema>;
+/**
+ * Apply defaults to a partial bridge config.
+ */
+export function parseBridgeConfig(
+  input: Partial<BridgeConfig> & { host: string },
+): BridgeConfig {
+  return {
+    host: input.host,
+    port: input.port ?? 9990,
+    secure: input.secure ?? false,
+    apiKey: input.apiKey,
+  };
+}
 
 /**
  * Bridge connection status
