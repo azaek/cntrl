@@ -88,12 +88,12 @@ export default function HomePage() {
             </div>
             <div className="flex-1">
               <h1 className="text-fd-foreground/80 text-2xl leading-[1] font-bold text-balance sm:text-3xl md:text-[40px] xl:text-5xl">
-                Bridge the gap between your desktop & web apps
+                The Programmable API for your Desktop
               </h1>
               <p className="text-fd-foreground/60 mt-10 text-sm text-balance sm:text-sm md:text-base">
-                Native desktop app that exposes your Windows or Mac system controls, and
-                real-time data through a REST API. Build control dashboards with our React
-                SDK.
+                A lightweight agent that turns your PC into a scriptable IoT device.
+                Monitor stats, control media, and trigger automation from any device on
+                your local network.
               </p>
               <div className="mt-10 flex flex-wrap items-center gap-3">
                 <Link href="https://github.com/azaek/cntrl/releases" external>

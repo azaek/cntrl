@@ -535,9 +535,9 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, Stri
 
     let current_version = env!("CARGO_PKG_VERSION");
     let update_endpoint = if current_version.contains("beta") {
-        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-beta.json"
+        "https://api.cntrl.pw/updates/bridge/beta"
     } else {
-        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-stable.json"
+        "https://api.cntrl.pw/updates/bridge/stable"
     };
 
     let update = app

@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Cntrl Bridge turns your PC into a controllable API. This monorepo contains the bridge app, SDK, UI components, and consumer apps.
+Cntrl Bridge: The programmable API for multi-OS desktop control.
+
+This monorepo contains the bridge app, SDK, UI components, and consumer apps.
 
 ## Commands
 
