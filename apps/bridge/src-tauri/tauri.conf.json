@@ -56,8 +56,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-stable.json",
-        "https://raw.githubusercontent.com/azaek/cntrl/updates/updates/latest-beta.json"
+        "https://api.cntrl.pw/updates/bridge/stable?target={{target}}&version={{current_version}}",
+        "https://api.cntrl.pw/updates/bridge/beta?target={{target}}&version={{current_version}}"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBMEQwQjJDNUVDQjRFMjAKUldRZ1RzdGVMQXNOMnZ5TkZUTHBTZFNTMzY4eHhodVVtb0VkaU9vbWw1QzdFSXhIeGN5blVGM3gK"
     }

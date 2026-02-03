@@ -4,13 +4,13 @@
 [![Release Bridge](https://github.com/azaek/cntrl/actions/workflows/release-bridge.yml/badge.svg)](https://github.com/azaek/cntrl/actions/workflows/release-bridge.yml)
 ![Ai-assisted](https://img.shields.io/badge/AI--assisted-262626)
 
-The missing API for your desktop. Control power, media, and monitor stats remotely.
+The programmable API for your desktop. Script your workspace with standard HTTP/WebSockets.
 
 ## Apps
 
-| App                         | Description                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| **[bridge](./apps/bridge)** | Tauri desktop app for Windows/macOS - runs a local server for remote control |
+| App                         | Description                                                     |
+| --------------------------- | --------------------------------------------------------------- |
+| **[bridge](./apps/bridge)** | Tauri desktop agent for Windows/macOS - runs a local API server |
 
 ## Packages
 
@@ -57,7 +57,7 @@ pnpm build:bridge
 
 The Bridge app is a Tauri 2 desktop application that:
 
-- Runs a local HTTP/WebSocket server for remote control
+- Runs a local HTTP/WebSocket agent for programmable control
 - Provides system stats, media control, and power management APIs
 - Supports auto-updates with **stable** and **beta** channels
 
