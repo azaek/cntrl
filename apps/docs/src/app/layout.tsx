@@ -34,18 +34,29 @@ export const metadata = createMetadata({
       },
     ],
   },
-  description: "Cntrl is a remote management bridge for your local machines.",
+  description:
+    "A lightweight agent that turns your PC into a scriptable IoT device. Monitor stats, control media, and trigger automation from any device on your local network.",
   metadataBase:
     process.env.NODE_ENV === "development"
       ? new URL("http://localhost:3003")
       : new URL("https://www.cntrl.pw"),
   keywords: [
     "cntrl",
-    "remote desktop",
     "system monitoring",
     "REST API",
     "WebSocket",
     "React SDK",
+    "remote management",
+    "system control",
+    "media control",
+    "process management",
+    "power management",
+    "cross-platform",
+    "tray app",
+    "native performance",
+    "scriptable",
+    "IoT device",
+    "automation",
     "local network",
     "desktop bridge",
   ],
