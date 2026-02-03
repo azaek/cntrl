@@ -558,6 +558,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // Hide dock icon on macOS (tray-only app)
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             let cfg = config::load_config(app.handle());
             let port = cfg.server.port;
             let autostart_enabled = cfg.features.enable_autostart;
