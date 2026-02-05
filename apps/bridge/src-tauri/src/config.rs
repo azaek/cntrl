@@ -159,7 +159,9 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) {
     if let Some(parent) = config_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(content) = serde_json::to_string_pretty(config) {
+    let mut safe_config = config.clone();
+    safe_config.auth.api_key = None;
+    if let Ok(content) = serde_json::to_string_pretty(&safe_config) {
         let _ = fs::write(config_path, content);
     }
 }

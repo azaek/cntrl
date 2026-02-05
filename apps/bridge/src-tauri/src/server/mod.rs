@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::AppConfig;
+use crate::auth_store::{self, AuthMode};
 
 pub mod gpu;
 pub mod handlers;
@@ -455,6 +456,7 @@ use ws::ws_handler;
 pub async fn start_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
+    auth_state: Arc<Mutex<auth_store::AuthState>>,
     status_handle: Arc<Mutex<ServerStatus>>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
@@ -479,6 +481,7 @@ pub async fn start_server(
         },
         active_topics: Arc::new(Mutex::new(std::collections::HashMap::new())),
         config: config,
+        auth_state: auth_state,
         loop_manager: loop_manager,
     });
 
@@ -560,15 +563,14 @@ async fn auth_middleware(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let (auth_enabled, api_key, allowed_ips, blocked_ips) = {
+    let (allowed_ips, blocked_ips) = {
         let config = state.config.lock().unwrap();
         (
-            config.auth.enabled,
-            config.auth.api_key.clone(),
             config.auth.allowed_ips.clone(),
             config.auth.blocked_ips.clone(),
         )
     };
+    let auth_state = { state.auth_state.lock().unwrap().clone() };
 
     let client_ip = addr.ip().to_string();
 
@@ -577,8 +579,11 @@ async fn auth_middleware(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // If auth is disabled, allow the request
-    if !auth_enabled {
+    // If auth is disabled/public, allow the request (local-only guard)
+    if matches!(auth_state.mode, AuthMode::Public) {
+        if !is_local_network(addr.ip()) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
         return next.run(req).await;
     }
 
@@ -587,37 +592,19 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // Check API key (if configured)
-    let required_key = match api_key {
-        Some(k) => k,
-        None => return next.run(req).await, // No key configured, allow
-    };
+    let required_scope = required_scope_for_request(&req);
+    let token = extract_token(&req);
 
-    // Check Authorization header first
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "));
-
-    if let Some(token) = auth_header {
-        if token == required_key {
-            return next.run(req).await;
-        }
-    }
-
-    // For WebSocket endpoint only, also check query param
-    let is_ws_endpoint = req.uri().path() == "/api/ws";
-    if is_ws_endpoint {
-        if let Some(query) = req.uri().query() {
-            for param in query.split('&') {
-                if let Some(key) = param.strip_prefix("api_key=") {
-                    if key == required_key {
-                        return next.run(req).await;
-                    }
+    if let Some(token) = token {
+        if let Some(record) = auth_store::find_active_record(&auth_state, &token) {
+            if let Some(scope) = required_scope {
+                if !auth_store::has_scope(&record, scope) {
+                    return StatusCode::FORBIDDEN.into_response();
                 }
             }
+            return next.run(req).await;
         }
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
     StatusCode::UNAUTHORIZED.into_response()
@@ -684,5 +671,74 @@ fn ip_matches_cidr(client: &std::net::IpAddr, network: &std::net::IpAddr, prefix
             (c_bits & mask) == (n_bits & mask)
         }
         _ => false, // IPv4/IPv6 mismatch
+    }
+}
+
+fn extract_token(req: &axum::extract::Request) -> Option<String> {
+    if let Some(token) = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        return Some(token.to_string());
+    }
+
+    // WebSocket fallback for compatibility (deprecated)
+    if req.uri().path() == "/api/ws" {
+        if let Some(query) = req.uri().query() {
+            for param in query.split('&') {
+                if let Some(key) = param.strip_prefix("api_key=") {
+                    println!("[auth] Deprecated api_key query param used for /api/ws");
+                    return Some(key.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn required_scope_for_request(req: &axum::extract::Request) -> Option<&'static str> {
+    let path = req.uri().path();
+    let method = req.method().as_str();
+
+    match (method, path) {
+        ("GET", "/api/status") => Some("system:read"),
+        ("GET", "/api/system") => Some("system:read"),
+        ("GET", "/api/usage") => Some("usage:read"),
+        ("GET", "/api/clients") => Some("admin"),
+        ("GET", "/api/media/status") => Some("media:read"),
+        ("POST", "/api/media/control") => Some("media:control"),
+        ("GET", "/api/stream") => Some("stream:read"),
+        ("GET", "/api/ws") => Some("ws:connect"),
+        ("POST", "/api/processes/kill") => Some("processes:control"),
+        ("POST", "/api/processes/focus") => Some("processes:control"),
+        ("POST", "/api/processes/launch") => Some("processes:control"),
+        ("POST", "/api/pw/shutdown") => Some("power:control"),
+        ("POST", "/api/pw/restart") => Some("power:control"),
+        ("POST", "/api/pw/sleep") => Some("power:control"),
+        ("POST", "/api/pw/hibernate") => Some("power:control"),
+        ("GET", "/api/processes") => Some("processes:read"),
+        _ => {
+            if path.starts_with("/api/processes/") && method == "GET" {
+                return Some("processes:read");
+            }
+            if path.starts_with("/api/") {
+                return Some("admin");
+            }
+            None
+        }
+    }
+}
+
+fn is_local_network(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+        }
     }
 }

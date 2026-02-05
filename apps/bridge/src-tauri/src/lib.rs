@@ -9,12 +9,15 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+mod auth_store;
 mod config;
 mod mac_rounded_corners;
 mod server;
 mod tray;
 
+use auth_store::{ApiKeyRecord, ApiKeySource, AuthMode, AuthState};
 use config::AppConfig;
+use serde::Serialize;
 use server::types::{ServerState, ServerStatus};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -28,6 +31,7 @@ struct ServerControl {
 fn spawn_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
+    auth_state: Arc<Mutex<AuthState>>,
     status: Arc<Mutex<ServerStatus>>,
     control: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
 ) {
@@ -38,7 +42,7 @@ fn spawn_server(
     *c = Some(tx);
 
     tauri::async_runtime::spawn(async move {
-        server::start_server(port, config, status, rx).await;
+        server::start_server(port, config, auth_state, status, rx).await;
     });
 }
 
@@ -98,11 +102,13 @@ fn stop_service(control_state: tauri::State<ServerControl>) -> Result<(), String
 #[tauri::command]
 fn reload_config(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     status_state: tauri::State<Arc<Mutex<ServerStatus>>>,
     control_state: tauri::State<ServerControl>,
     app: tauri::AppHandle,
 ) -> Result<AppConfig, String> {
-    let new_config = config::load_config(&app);
+    let mut new_config = config::load_config(&app);
+    new_config.auth.api_key = None;
 
     // 1. Update config state
     {
@@ -125,6 +131,7 @@ fn reload_config(
     spawn_server(
         new_config.server.port,
         state.inner().clone(),
+        auth_state.inner().clone(),
         status_state.inner().clone(),
         control_state.tx.clone(),
     );
@@ -270,10 +277,18 @@ fn update_hostname(
 #[tauri::command]
 fn toggle_auth(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
 ) -> Result<AppConfig, String> {
+    let mut auth = auth_state.lock().unwrap();
+    auth.mode = match auth.mode {
+        AuthMode::Public => AuthMode::Protected,
+        AuthMode::Protected => AuthMode::Public,
+    };
+    auth_store::save_auth_state(&auth)?;
+
     let mut config = state.lock().unwrap();
-    config.auth.enabled = !config.auth.enabled;
+    config.auth.enabled = matches!(auth.mode, AuthMode::Protected);
     config::save_config(&app, &config);
     Ok(config.clone())
 }
@@ -281,34 +296,62 @@ fn toggle_auth(
 #[tauri::command]
 fn update_api_key(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
     api_key: Option<String>,
 ) -> Result<AppConfig, String> {
+    let mut auth = auth_state.lock().unwrap();
+    auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
+
+    let mut response_key: Option<String> = None;
+    if let Some(token) = api_key.as_ref().map(|s| s.trim().to_string()) {
+        if !token.is_empty() {
+            let record = auth_store::create_key_record_from_token(
+                &token,
+                "Legacy Key",
+                vec!["admin".to_string()],
+                ApiKeySource::Legacy,
+                None,
+            )?;
+            auth.keys.push(record);
+            response_key = Some(token);
+        }
+    }
+
+    auth_store::save_auth_state(&auth)?;
+
     let mut config = state.lock().unwrap();
-    config.auth.api_key = api_key;
+    config.auth.api_key = response_key;
+    let response = config.clone();
+    config.auth.api_key = None;
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(response)
 }
 
 #[tauri::command]
 fn generate_api_key(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
 ) -> Result<AppConfig, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    let mut auth = auth_state.lock().unwrap();
+    auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
 
-    // Generate a random-ish key using timestamp and random bytes
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    let key = format!("ck_{:x}_{:x}", timestamp, rand::random::<u64>());
+    let (record, token) = auth_store::create_api_key(
+        "Legacy Key".to_string(),
+        vec!["admin".to_string()],
+        None,
+        ApiKeySource::Legacy,
+    )?;
+    auth.keys.push(record);
+    auth_store::save_auth_state(&auth)?;
 
     let mut config = state.lock().unwrap();
-    config.auth.api_key = Some(key);
+    config.auth.api_key = Some(token);
+    let response = config.clone();
+    config.auth.api_key = None;
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(response)
 }
 
 #[tauri::command]
@@ -382,6 +425,132 @@ fn clear_blocked_ips(
     config.auth.blocked_ips.clear();
     config::save_config(&app, &config);
     Ok(config.clone())
+}
+
+// ============================================================================
+// Auth Key Management Commands
+// ============================================================================
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+struct ApiKeySummary {
+    id: String,
+    name: String,
+    hint: String,
+    scopes: Vec<String>,
+    created_at: i64,
+    expires_at: Option<i64>,
+    revoked_at: Option<i64>,
+    source: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+struct CreateApiKeyResponse {
+    key: String,
+    record: ApiKeySummary,
+}
+
+fn summarize_key(record: &ApiKeyRecord) -> ApiKeySummary {
+    ApiKeySummary {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        hint: record.hint.clone(),
+        scopes: record.scopes.clone(),
+        created_at: record.created_at,
+        expires_at: record.expires_at,
+        revoked_at: record.revoked_at,
+        source: match record.source {
+            ApiKeySource::Legacy => "legacy".to_string(),
+            ApiKeySource::User => "user".to_string(),
+        },
+    }
+}
+
+#[tauri::command]
+fn set_auth_mode(
+    state: tauri::State<Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    app: tauri::AppHandle,
+    mode: String,
+) -> Result<AppConfig, String> {
+    let mode = match mode.as_str() {
+        "public" => AuthMode::Public,
+        "protected" => AuthMode::Protected,
+        _ => return Err("Invalid auth mode".to_string()),
+    };
+
+    let mut auth = auth_state.lock().unwrap();
+    auth.mode = mode;
+    auth_store::save_auth_state(&auth)?;
+
+    let mut config = state.lock().unwrap();
+    config.auth.enabled = matches!(auth.mode, AuthMode::Protected);
+    config::save_config(&app, &config);
+    Ok(config.clone())
+}
+
+#[tauri::command]
+fn list_api_keys(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+) -> Result<Vec<ApiKeySummary>, String> {
+    let auth = auth_state.lock().unwrap();
+    Ok(auth.keys.iter().map(summarize_key).collect())
+}
+
+#[tauri::command]
+fn create_api_key(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    name: Option<String>,
+    scopes: Vec<String>,
+    expires_at: Option<i64>,
+) -> Result<CreateApiKeyResponse, String> {
+    let name = name.unwrap_or_else(|| "API Key".to_string());
+    let (record, key) = auth_store::create_api_key(name, scopes, expires_at, ApiKeySource::User)?;
+
+    let mut auth = auth_state.lock().unwrap();
+    auth.keys.push(record.clone());
+    auth_store::save_auth_state(&auth)?;
+
+    Ok(CreateApiKeyResponse {
+        key,
+        record: summarize_key(&record),
+    })
+}
+
+#[tauri::command]
+fn revoke_api_key(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    id: String,
+) -> Result<bool, String> {
+    let mut auth = auth_state.lock().unwrap();
+    let updated = auth_store::revoke_key(&mut auth, &id);
+    auth_store::save_auth_state(&auth)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn update_api_key_scopes(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    id: String,
+    scopes: Vec<String>,
+) -> Result<bool, String> {
+    let mut auth = auth_state.lock().unwrap();
+    let updated = auth_store::update_key_scopes(&mut auth, &id, scopes);
+    auth_store::save_auth_state(&auth)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn update_api_key_expiration(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    id: String,
+    expires_at: Option<i64>,
+) -> Result<bool, String> {
+    let mut auth = auth_state.lock().unwrap();
+    let updated = auth_store::update_key_expiration(&mut auth, &id, expires_at);
+    auth_store::save_auth_state(&auth)?;
+    Ok(updated)
 }
 
 // ============================================================================
@@ -542,7 +711,9 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, Stri
 
     let update = app
         .updater_builder()
-        .endpoints(vec![url::Url::parse(update_endpoint).map_err(|e| e.to_string())?])
+        .endpoints(vec![
+            url::Url::parse(update_endpoint).map_err(|e| e.to_string())?,
+        ])
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?
@@ -563,10 +734,14 @@ pub fn run() {
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
-
-            let cfg = config::load_config(app.handle());
+            let mut cfg = config::load_config(app.handle());
             let port = cfg.server.port;
             let autostart_enabled = cfg.features.enable_autostart;
+
+            let auth_state = auth_store::load_or_migrate(&cfg);
+            cfg.auth.api_key = None;
+            let shared_auth = Arc::new(Mutex::new(auth_state));
+            app.manage(shared_auth.clone());
 
             // Share config state
             let shared_config = Arc::new(Mutex::new(cfg));
@@ -583,7 +758,8 @@ pub fn run() {
             });
 
             // Start initial server
-            spawn_server(port, shared_config, server_status, control_tx);
+            let auth_state = app.state::<Arc<Mutex<AuthState>>>().inner().clone();
+            spawn_server(port, shared_config, auth_state, server_status, control_tx);
 
             // Sync Autostart
             // let autostart_enabled is extracted above
@@ -637,6 +813,12 @@ pub fn run() {
             toggle_auth,
             update_api_key,
             generate_api_key,
+            set_auth_mode,
+            list_api_keys,
+            create_api_key,
+            revoke_api_key,
+            update_api_key_scopes,
+            update_api_key_expiration,
             add_allowed_ip,
             remove_allowed_ip,
             add_blocked_ip,
