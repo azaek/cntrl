@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::AppConfig;
+use crate::auth_scopes::{self, AuthContext, SCOPE_ADMIN};
 use crate::auth_store::{self, AuthMode};
 
 pub mod gpu;
@@ -560,7 +561,7 @@ pub async fn start_server(
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     let (allowed_ips, blocked_ips) = {
@@ -584,15 +585,24 @@ async fn auth_middleware(
         if !is_local_network(addr.ip()) {
             return StatusCode::FORBIDDEN.into_response();
         }
+        req.extensions_mut().insert(AuthContext {
+            mode: AuthMode::Public,
+            scopes: vec![SCOPE_ADMIN.to_string()],
+        });
         return next.run(req).await;
     }
 
     // Check IP in allowlist, if found bypass auth
     if is_ip_in_list(&client_ip, &allowed_ips) {
+        req.extensions_mut().insert(AuthContext {
+            mode: AuthMode::Protected,
+            scopes: vec![SCOPE_ADMIN.to_string()],
+        });
         return next.run(req).await;
     }
 
-    let required_scope = required_scope_for_request(&req);
+    let required_scope =
+        auth_scopes::required_scope_for_request(req.method().as_str(), req.uri().path());
     let token = extract_token(&req);
 
     if let Some(token) = token {
@@ -602,6 +612,10 @@ async fn auth_middleware(
                     return StatusCode::FORBIDDEN.into_response();
                 }
             }
+            req.extensions_mut().insert(AuthContext {
+                mode: AuthMode::Protected,
+                scopes: record.scopes.clone(),
+            });
             return next.run(req).await;
         }
         return StatusCode::UNAUTHORIZED.into_response();
@@ -697,39 +711,6 @@ fn extract_token(req: &axum::extract::Request) -> Option<String> {
     }
 
     None
-}
-
-fn required_scope_for_request(req: &axum::extract::Request) -> Option<&'static str> {
-    let path = req.uri().path();
-    let method = req.method().as_str();
-
-    match (method, path) {
-        ("GET", "/api/status") => Some("system:read"),
-        ("GET", "/api/system") => Some("system:read"),
-        ("GET", "/api/usage") => Some("usage:read"),
-        ("GET", "/api/clients") => Some("admin"),
-        ("GET", "/api/media/status") => Some("media:read"),
-        ("POST", "/api/media/control") => Some("media:control"),
-        ("GET", "/api/stream") => Some("stream:read"),
-        ("GET", "/api/ws") => Some("ws:connect"),
-        ("POST", "/api/processes/kill") => Some("processes:control"),
-        ("POST", "/api/processes/focus") => Some("processes:control"),
-        ("POST", "/api/processes/launch") => Some("processes:control"),
-        ("POST", "/api/pw/shutdown") => Some("power:control"),
-        ("POST", "/api/pw/restart") => Some("power:control"),
-        ("POST", "/api/pw/sleep") => Some("power:control"),
-        ("POST", "/api/pw/hibernate") => Some("power:control"),
-        ("GET", "/api/processes") => Some("processes:read"),
-        _ => {
-            if path.starts_with("/api/processes/") && method == "GET" {
-                return Some("processes:read");
-            }
-            if path.starts_with("/api/") {
-                return Some("admin");
-            }
-            None
-        }
-    }
 }
 
 fn is_local_network(ip: std::net::IpAddr) -> bool {

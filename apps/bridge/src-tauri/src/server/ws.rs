@@ -2,10 +2,12 @@ use crate::server::{
     handlers::{subscribe_topics, unsubscribe_topics, AppState},
     types::{BroadcastEvent, OperationFeedback, WebSocketMessage},
 };
+use crate::auth_scopes::{self, AuthContext};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        Extension,
     },
     response::Response,
 };
@@ -42,11 +44,15 @@ fn expand_topic(topic: &str) -> Vec<String> {
     }
 }
 
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    Extension(auth_ctx): Extension<AuthContext>,
+) -> Response {
+    ws.on_upgrade(|socket| handle_socket(socket, state, auth_ctx))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_ctx: AuthContext) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.broadcast_tx.subscribe();
 
@@ -169,6 +175,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         let state = state.clone();
         let subs = subscriptions.clone();
         let tx = outgoing_tx;
+        let auth_ctx = auth_ctx.clone();
         async move {
             while let Some(result) = receiver.next().await {
                 match result {
@@ -176,8 +183,54 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         if let Message::Text(text) = msg {
                             match serde_json::from_str::<WebSocketMessage>(&text) {
                                 Ok(cmd) => {
+                                    if !auth_ctx.is_public() {
+                                        if let Some(scope) =
+                                            auth_scopes::required_scope_for_ws_message(&cmd)
+                                        {
+                                            if !auth_ctx.has_scope(scope) {
+                                                let error_msg = serde_json::json!({
+                                                    "type": "error",
+                                                    "data": {
+                                                        "code": "FORBIDDEN",
+                                                        "message": "Insufficient scope for command"
+                                                    }
+                                                });
+                                                if let Ok(text) = serde_json::to_string(&error_msg)
+                                                {
+                                                    let _ = tx.send(text).await;
+                                                }
+                                                continue;
+                                            }
+                                        }
+                                    }
+
                                     match cmd {
                                         WebSocketMessage::Subscribe(req) => {
+                                            if !auth_ctx.is_public() {
+                                                let required_scopes =
+                                                    auth_scopes::required_scopes_for_topics(
+                                                        &req.topics,
+                                                    );
+                                                let allowed = required_scopes
+                                                    .iter()
+                                                    .all(|s| auth_ctx.has_scope(s));
+                                                if !allowed {
+                                                    let error_msg = serde_json::json!({
+                                                        "type": "error",
+                                                        "data": {
+                                                            "code": "FORBIDDEN",
+                                                            "message": "Insufficient scope for topics"
+                                                        }
+                                                    });
+                                                    if let Ok(text) =
+                                                        serde_json::to_string(&error_msg)
+                                                    {
+                                                        let _ = tx.send(text).await;
+                                                    }
+                                                    continue;
+                                                }
+                                            }
+
                                             // Get old subscriptions
                                             let old_subs = {
                                                 let lock = subs.lock().unwrap();

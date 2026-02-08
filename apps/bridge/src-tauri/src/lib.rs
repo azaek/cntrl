@@ -9,6 +9,7 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+mod auth_scopes;
 mod auth_store;
 mod config;
 mod mac_rounded_corners;
