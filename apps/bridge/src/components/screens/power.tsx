@@ -3,7 +3,6 @@ import { useApp } from "../../context/app-context";
 import { Feature, loadConfig, toggleFeature } from "../../lib/backend";
 import FeatureCard from "../feature-card";
 import { Button } from "../ui/button";
-import Container from "../ui/container";
 import Divider from "../ui/divider";
 
 const PowerScreen = () => {
@@ -24,7 +23,7 @@ const PowerScreen = () => {
 
   return (
     <>
-      <Container className="max-h-80">
+      <>
         <div class="bg-bg sticky top-0 z-10 flex w-full flex-col gap-0.5">
           <div class="flex w-full items-center gap-2 rounded px-2 py-1.5">
             <Button
@@ -83,7 +82,7 @@ const PowerScreen = () => {
             onValueChange={() => toggle("shutdown")}
           />
         </div>
-      </Container>
+      </>
     </>
   );
 };

@@ -34,8 +34,7 @@ const Header = () => {
           top: "0",
           "z-index": "10",
         }}
-        data-tauri-drag-region
-        class="bg-bg flex min-h-9 items-center gap-2 p-2"
+        class="bg-bg pointer-events-none flex min-h-9 items-center gap-2 p-2"
       >
         <EthernetPort class={cn("size-5", getStatusColor())} stroke-width={2.2} />
         <Show when={store.status?.status.status === "Stopped"}>
@@ -63,7 +62,7 @@ const Header = () => {
         <div class="flex-1"></div>
         <button
           onClick={closeWindow}
-          class="text-fg-muted -m-1 rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
+          class="text-fg-muted pointer-events-auto -m-1 rounded p-1 transition-colors hover:bg-white/10 hover:text-white"
         >
           <X class="size-4" />
         </button>

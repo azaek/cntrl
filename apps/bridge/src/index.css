@@ -9,7 +9,7 @@
   --color-card: #28292b;
   --color-secondary: #79797a;
   --color-toggle-bg: #3c3c41;
-  --color-border: rgba(255, 255, 255, 0.05);
+  --color-border: #232323;
   --font-sans: "Space Grotesk", sans-serif;
   --font-mono: "Geist Mono", monospace;
 }
@@ -39,11 +39,11 @@
 }
 
 body {
-  background: #202022;
+  background: #171717;
   color: #ffffff;
   user-select: none;
   width: 100vw;
-  overflow-x: hidden;
+  overflow: hidden;
   height: 100vh;
-  overflow-y: auto;
+  border-radius: 1rem;
 }

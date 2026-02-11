@@ -23,6 +23,7 @@
     "@tauri-apps/plugin-updater": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
+    "gsap": "catalog:",
     "lucide-solid": "^0.562.0",
     "solid-js": "^1.9.3",
     "tailwind-merge": "catalog:",

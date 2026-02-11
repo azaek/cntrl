@@ -25,7 +25,6 @@ import {
 import { Label } from "../label";
 import { Switch } from "../switch";
 import { Button } from "../ui/button";
-import Container from "../ui/container";
 import Divider from "../ui/divider";
 import { cn } from "../utils";
 
@@ -137,7 +136,7 @@ const AuthScreen = () => {
 
   return (
     <>
-      <Container className="max-h-106.5">
+      <>
         <div class="bg-bg sticky top-0 z-10 flex w-full flex-col gap-0.5">
           <div class="flex w-full items-center gap-2 rounded px-2 py-1.5">
             <Button
@@ -353,7 +352,7 @@ const AuthScreen = () => {
             </div>
           )}
         </div>
-      </Container>
+      </>
     </>
   );
 };

@@ -18,7 +18,6 @@ import { Feature, loadConfig } from "../../lib/backend";
 import FeatureCard from "../feature-card";
 import { LabelBlock } from "../label";
 import { Button } from "../ui/button";
-import Container from "../ui/container";
 import Divider from "../ui/divider";
 import { cn } from "../utils";
 
@@ -53,7 +52,7 @@ const MainScreen = () => {
 
   return (
     <>
-      <Container className="max-h-130">
+      <>
         <div class="flex w-full items-center gap-0.5">
           <Button
             onClick={() => {
@@ -204,7 +203,7 @@ const MainScreen = () => {
             onValueChange={() => toggle("autostart")}
           />
         </div>
-      </Container>
+      </>
     </>
   );
 };
