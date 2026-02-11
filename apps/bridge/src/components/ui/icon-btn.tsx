@@ -17,7 +17,7 @@ export const IconButton = ({
       onClick={onClick}
       disabled={disabled}
       class={cn(
-        "size-6 rounded border bg-neutral-950/5 text-xs font-medium text-white shadow-xs ring-0 transition-colors outline-none",
+        "pointer-events-auto size-8 rounded-lg border bg-neutral-950/5 text-xs font-medium text-white shadow-xs ring-0 transition-colors outline-none",
         "flex cursor-pointer items-center justify-center backdrop-blur-xs enabled:hover:bg-neutral-800/50",
         "disabled:cursor-not-allowed disabled:opacity-40 [&_svg:not([class*='size-'])]:size-4",
         className,

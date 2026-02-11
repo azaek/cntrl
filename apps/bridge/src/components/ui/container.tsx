@@ -5,7 +5,7 @@ const Container = (props: {
   className?: string;
 }) => {
   return (
-    <ScrollArea class="min-h-0 w-full flex-1">
+    <ScrollArea class="min-h-0 w-full flex-1 px-3" scrollHideDelay={2000}>
       <div
         class={`flex w-full flex-1 flex-col items-center gap-0.5 ${props.className || ""}`}
       >

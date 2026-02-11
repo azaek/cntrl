@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import gsap from "gsap";
-import { X } from "lucide-solid";
+import { Flip } from "gsap/Flip";
+import { EthernetPort, HouseWifi, QrCode, X } from "lucide-solid";
 import { createEffect, createSignal, onMount } from "solid-js";
 import { useApp } from "../context/app-context";
 import { getAppVersion } from "../lib/backend";
@@ -8,12 +9,17 @@ import { Logo } from "./svgs";
 import { IconButton } from "./ui/icon-btn";
 import PixelBlast from "./ui/pixel-blast";
 
+gsap.registerPlugin(Flip);
+
 const Hero = () => {
   const [version, setVersion] = createSignal("");
 
   let containerRef!: HTMLDivElement;
   let bannerWrapperRef!: HTMLDivElement;
   let bannerRef!: HTMLDivElement;
+  let homeBtnRef!: HTMLDivElement;
+  let btnGroupRef!: HTMLDivElement;
+  let dockTrayRef!: HTMLDivElement;
 
   const [store, actions] = useApp();
 
@@ -29,8 +35,109 @@ const Hero = () => {
   onMount(async () => {
     const v = await getAppVersion();
     setVersion(v);
+
+    // Set initial state
+    if (store.page === "main") {
+      homeBtnRef.style.display = "none";
+    } else {
+      dockTrayRef.style.display = "none";
+    }
   });
 
+  // Home button enter/exit with FLIP
+  createEffect(() => {
+    const isMain = store.page === "main";
+
+    // Only capture sibling buttons for reflow — exclude home button
+    const siblings = Array.from(btnGroupRef.children).filter((el) => el !== homeBtnRef);
+    const state = Flip.getState(siblings);
+
+    // Toggle display to add/remove from flow
+    const wasHidden = homeBtnRef.style.display === "none";
+    homeBtnRef.style.display = isMain ? "none" : "";
+
+    // Animate siblings reflow
+    Flip.from(state, {
+      duration: 0.25,
+      ease: "circ.inOut",
+    });
+
+    // Animate home button enter/exit separately
+    if (!isMain && wasHidden) {
+      // Enter: slide in from right with blur
+      gsap.fromTo(
+        homeBtnRef,
+        { opacity: 0, x: 20, filter: "blur(4px)" },
+        {
+          opacity: 1,
+          x: 0,
+          filter: "blur(0px)",
+          duration: 0.25,
+          ease: "circ.out",
+          clearProps: "filter",
+        },
+      );
+    } else if (isMain && !wasHidden) {
+      // Exit: slide out to right with blur
+      homeBtnRef.style.display = "";
+      gsap.fromTo(
+        homeBtnRef,
+        { opacity: 1, x: 0, filter: "blur(0px)" },
+        {
+          opacity: 0,
+          x: 20,
+          filter: "blur(4px)",
+          duration: 0.25,
+          ease: "circ.in",
+          onComplete: () => {
+            homeBtnRef.style.display = "none";
+          },
+        },
+      );
+    }
+  });
+
+  // Dock Tray enter/exit — opposite of home button (visible on main, hidden otherwise)
+  createEffect(() => {
+    const isMain = store.page === "main";
+    const wasHidden = dockTrayRef.style.display === "none";
+
+    if (isMain && wasHidden) {
+      // Enter: slide up from below
+      dockTrayRef.style.display = "";
+      gsap.fromTo(
+        dockTrayRef,
+        { opacity: 0, y: 20, filter: "blur(4px)" },
+        {
+          opacity: 1,
+          y: 0,
+          filter: "blur(0px)",
+          duration: 0.25,
+          ease: "circ.out",
+          delay: 0.2,
+          clearProps: "filter",
+        },
+      );
+    } else if (!isMain && !wasHidden) {
+      // Exit: slide down and hide
+      gsap.fromTo(
+        dockTrayRef,
+        { opacity: 1, y: 0, filter: "blur(0px)" },
+        {
+          opacity: 0,
+          y: 40,
+          filter: "blur(4px)",
+          duration: 0.2,
+          ease: "circ.in",
+          onComplete: () => {
+            dockTrayRef.style.display = "none";
+          },
+        },
+      );
+    }
+  });
+
+  // Banner/card height animation
   createEffect(() => {
     const isAuth = store.page === "auth";
     const tl = gsap.timeline();
@@ -58,12 +165,12 @@ const Hero = () => {
 
   return (
     <>
-      <div class="relative flex w-full flex-col items-center">
+      <div class="pointer-events-none relative flex w-full flex-col items-center">
         <div
           ref={containerRef}
-          class="relative z-5 flex h-40 w-full flex-col overflow-hidden rounded-lg border bg-neutral-900"
+          class="relative z-5 flex h-40 w-full flex-col items-center justify-between overflow-hidden rounded-lg border bg-neutral-900"
         >
-          <div class="z-1 flex h-12 w-full items-center justify-between px-3">
+          <div class="pointer-events-none z-1 flex h-11.5 w-full items-center justify-between pr-2 pl-3">
             <div class="flex items-center gap-2">
               <Logo className="size-5 text-neutral-600" />
               <div class="flex flex-col gap-0.5">
@@ -75,26 +182,61 @@ const Hero = () => {
                 </p>
               </div>
             </div>
-            <div class="flex items-center justify-end gap-2">
+            <div
+              ref={btnGroupRef}
+              class="pointer-events-none flex items-center justify-end gap-2"
+            >
+              {/* Home Button - animated with FLIP */}
+              <div ref={homeBtnRef} data-flip-id="home-btn" class="overflow-hidden">
+                <IconButton
+                  onClick={() => {
+                    actions.setPage("main");
+                  }}
+                >
+                  <HouseWifi class="text-neutral-500" />
+                </IconButton>
+              </div>
               <IconButton
                 onClick={() => {
                   closeWindow();
                 }}
               >
-                <X class="text-fg-muted size-4.5" />
+                <QrCode class="text-neutral-500" />
+              </IconButton>
+              <IconButton
+                onClick={() => {
+                  closeWindow();
+                }}
+              >
+                <X class="text-neutral-600" />
               </IconButton>
             </div>
           </div>
           <div class="absolute inset-0 z-0 h-40 w-full">
             <PixelBlast
-              pixelSize={3}
+              pixelSize={2}
               edgeFade={0}
-              patternDensity={1.2}
+              patternDensity={1}
               variant="diamond"
               color="#262626"
               autoPauseOffscreen={false}
               speed={6}
             />
+          </div>
+          {/* Dock Tray */}
+          <div
+            ref={dockTrayRef}
+            class="absolute inset-x-0 bottom-3 mx-auto flex h-9 w-max items-center gap-3 overflow-hidden rounded-lg border bg-neutral-950/25 px-3 backdrop-blur-sm"
+          >
+            <div class="flex items-center gap-2">
+              <div class="bg-accent absolute inset-y-0 left-0 my-auto h-4 w-2 translate-x-[-25%] blur-sm" />
+              <EthernetPort class="text-accent size-4" />
+              <p class="text-xs font-medium text-neutral-500">9990</p>
+            </div>
+            {/* <div class="h-3 border-r border-neutral-700" />
+                        <div class="flex items-center justify-end">
+
+                        </div> */}
           </div>
         </div>
         <div ref={bannerWrapperRef} class="z-0 -mt-1 w-full overflow-hidden">
@@ -102,7 +244,7 @@ const Hero = () => {
             ref={bannerRef}
             class="bg-border flex w-full items-center justify-between rounded-b-lg px-3 pt-2 pb-1"
           >
-            <p class="text-sm font-medium text-white">Bridge</p>
+            <p class="text-sm font-medium text-neutral-700">URL</p>
           </div>
         </div>
       </div>

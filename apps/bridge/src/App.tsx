@@ -1,7 +1,6 @@
 import type { Component } from "solid-js";
 import { Show } from "solid-js";
 import Footer from "./components/footer";
-import Header from "./components/header";
 import Hero from "./components/hero";
 import MainLoadingScreen from "./components/loading.main";
 import AuthScreen from "./components/screens/auth";
@@ -43,17 +42,21 @@ const Screen = () => {
   return (
     <>
       <div data-tauri-drag-region class="fixed z-5 h-13 w-screen" />
-      <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 p-3 font-sans text-white select-none">
+      <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-white select-none">
         <Show when={!store.loading} fallback={<MainLoadingScreen />}>
-          <Hero />
-          <Header />
+          <div class="flex w-full flex-col items-center px-3">
+            <Hero />
+          </div>
+          {/* <Header /> */}
           <Container>
             {store.page === "auth" && <AuthScreen />}
             {store.page === "main" && <MainScreen />}
             {store.page === "power" && <PowerScreen />}
             {store.page === "ws" && <WsScreen />}
           </Container>
-          <Footer />
+          <div class="flex w-full flex-col items-center px-3">
+            <Footer />
+          </div>
         </Show>
       </div>
     </>

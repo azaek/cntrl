@@ -23,8 +23,6 @@ export default function ScrollArea(props: ScrollAreaProps) {
   const [dragging, setDragging] = createSignal(false);
 
   const hideDelay = () => props.scrollHideDelay ?? 800;
-  const trackWidth = () => props.trackWidth ?? 6;
-  const thumbColor = () => props.thumbColor ?? "rgba(255,255,255,0.35)";
 
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let dragStartY = 0;
@@ -41,7 +39,7 @@ export default function ScrollArea(props: ScrollAreaProps) {
       return;
     }
     const trackH = el.clientHeight;
-    const tH = Math.max(ratio * trackH, 24); // min 24px thumb
+    const tH = Math.max(ratio * trackH, 12); // min 24px thumb
     const scrollFraction = el.scrollTop / (el.scrollHeight - el.clientHeight);
     const maxTop = trackH - tH;
     setThumbHeight(tH);
@@ -149,13 +147,12 @@ export default function ScrollArea(props: ScrollAreaProps) {
       <div
         ref={trackEl!}
         onClick={onTrackClick}
+        class="w-1 overflow-hidden rounded-full"
         style={{
           position: "absolute",
           top: "2px",
-          right: "2px",
+          right: "4px",
           bottom: "2px",
-          width: `${trackWidth()}px`,
-          "border-radius": `${trackWidth()}px`,
           opacity: visible() ? 1 : 0,
           transition: "opacity 200ms ease",
           "pointer-events": visible() ? "auto" : "none",
@@ -168,14 +165,13 @@ export default function ScrollArea(props: ScrollAreaProps) {
           onPointerDown={onThumbPointerDown}
           onPointerMove={onThumbPointerMove}
           onPointerUp={onThumbPointerUp}
+          class="bg-border rounded-full"
           style={{
             position: "absolute",
             top: `${thumbTop()}px`,
             left: 0,
             width: "100%",
             height: `${thumbHeight()}px`,
-            "border-radius": `${trackWidth()}px`,
-            background: thumbColor(),
             cursor: "pointer",
             "touch-action": "none",
             transition: dragging() ? "none" : "opacity 150ms ease",
