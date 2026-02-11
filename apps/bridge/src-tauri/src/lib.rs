@@ -773,17 +773,10 @@ pub fn run() {
 
             tray::create_tray(app.handle())?;
 
-            // Handle window close event to hide instead of exit
-            if let Some(window) = app.get_webview_window("main") {
-                let window_clone = window.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        // Prevent the window from closing
-                        api.prevent_close();
-                        // Hide the window instead
-                        let _ = window_clone.hide();
-                    }
-                });
+            // Only create the window when NOT launched minimized (e.g. autostart)
+            let minimized = std::env::args().any(|a| a == "--minimized");
+            if !minimized {
+                tray::show_or_create_window(app.handle());
             }
 
             Ok(())
@@ -838,6 +831,11 @@ pub fn run() {
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }

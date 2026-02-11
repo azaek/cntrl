@@ -285,6 +285,7 @@ export default function PixelBlast(props: PixelBlastProps) {
 
     // visibility for auto-pause
     let visible = true;
+    let focused = document.visibilityState === "visible";
     let io: IntersectionObserver | undefined;
     if (autoPause) {
       io = new IntersectionObserver(
@@ -296,12 +297,22 @@ export default function PixelBlast(props: PixelBlastProps) {
       io.observe(containerEl);
     }
 
+    const onVisChange = () => {
+      focused = document.visibilityState === "visible";
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+
     const [r, g, b] = hexToLinearRGB(color);
 
     let raf = 0;
-    const animate = () => {
+    const TARGET_INTERVAL = 1000 / 15; // ~15fps
+    let lastFrame = 0;
+    const animate = (now: number) => {
       raf = requestAnimationFrame(animate);
+      if (!focused) return;
       if (autoPause && !visible) return;
+      if (now - lastFrame < TARGET_INTERVAL) return;
+      lastFrame = now;
 
       const elapsed = (performance.now() - startTime) / 1000;
       const t = timeOffset + elapsed * speed;
@@ -327,6 +338,7 @@ export default function PixelBlast(props: PixelBlastProps) {
 
     onCleanup(() => {
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisChange);
       ro.disconnect();
       io?.disconnect();
       gl.deleteBuffer(buf);

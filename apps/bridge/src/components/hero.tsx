@@ -25,10 +25,10 @@ const Hero = () => {
 
   const closeWindow = async () => {
     try {
-      await getCurrentWindow().hide();
       actions.setPage("main");
+      await getCurrentWindow().close();
     } catch (e) {
-      console.error("Failed to hide window:", e);
+      console.error("Failed to close window:", e);
     }
   };
 
