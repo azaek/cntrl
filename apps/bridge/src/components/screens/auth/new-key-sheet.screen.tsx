@@ -9,7 +9,7 @@ import {
   Radio,
   ShieldAlert,
 } from "lucide-solid";
-import { createMemo, createSignal, Match, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, Match, Switch } from "solid-js";
 import { useApp } from "../../../context/app-context";
 import {
   createApiKey,
@@ -30,7 +30,6 @@ type ExpTime = "1d" | "2w" | "1m" | "never";
 
 const NewKeySheetScreen = () => {
   const [screen, setScreen] = createSignal<"new" | "success">("new");
-
   const [store, actions] = useApp();
   const [name, setName] = createSignal(
     store.auth.keys.length > 0 ? `Key ${store.auth.keys.length + 1}` : "Key 1",
@@ -76,6 +75,10 @@ const NewKeySheetScreen = () => {
     }
   };
 
+  createEffect(() => {
+    setName(store.auth.keys.length > 0 ? `Key ${store.auth.keys.length + 1}` : "Key 1");
+  });
+
   return (
     <Switch>
       <Match when={screen() === "new"}>
@@ -85,14 +88,14 @@ const NewKeySheetScreen = () => {
               <Key class="size-4" />
               <p class="text-sm font-semibold">New API Key</p>
             </div>
-            <TextField>
+            <TextField data-corvu-no-drag>
               <TextFieldLabel class="text-neutral-500">Name</TextFieldLabel>
               <TextFieldInput
                 value={name()}
                 onInput={(e) => setName(e.currentTarget.value)}
               />
             </TextField>
-            <div class="flex flex-col">
+            <div data-corvu-no-drag class="flex flex-col">
               <p class="text-sm font-medium text-neutral-500">Permissions</p>
               <div class="flex w-full flex-col items-start gap-2 p-2">
                 <div
@@ -366,14 +369,18 @@ const NewKeySheetScreen = () => {
                     </Label>
                   </div>
                 </div>
-                <p class="text-xs text-neutral-500">
-                  * Admin access overrides all other scopes.
-                </p>
-                {!isAdmin() && (
-                  <p class="text-xs text-blue-400">
-                    {scopes().length}/{SCOPES.length - 2} scopes selected.
-                  </p>
-                )}
+                <Switch>
+                  <Match when={isAdmin()}>
+                    <p class="text-xs text-red-400">
+                      Admin access overrides all other scopes.
+                    </p>
+                  </Match>
+                  <Match when={!isAdmin()}>
+                    <p class="text-xs text-blue-400">
+                      {scopes().length}/{SCOPES.length - 2} scopes selected.
+                    </p>
+                  </Match>
+                </Switch>
               </div>
               {/* <p class="text-sm font-medium text-neutral-500">Expiration</p> */}
               <div class="mt-2 flex w-full flex-col items-start justify-between gap-2 border-y px-2 pt-2 pb-3">
@@ -446,7 +453,7 @@ const NewKeySheetScreen = () => {
               </div>
             </div>
           </div>
-          <div class="flex w-full items-center justify-between p-2">
+          <div data-corvu-no-drag class="flex w-full items-center justify-between p-2">
             <DrawerClose>
               <Button variant="ghost">Cancel</Button>
             </DrawerClose>

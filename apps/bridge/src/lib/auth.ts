@@ -118,13 +118,25 @@ export const createApiKey = async (
 };
 
 /**
- * Revoke an API key by ID.
+ * Revoke an API key by ID (soft-delete, keeps record for audit).
  */
 export const revokeApiKey = async (id: string): Promise<boolean> => {
   try {
     return await invoke<boolean>("revoke_api_key", { id });
   } catch (e) {
     console.error("Failed to revoke API key:", e);
+    return false;
+  }
+};
+
+/**
+ * Remove an API key by ID (hard-delete, removes record entirely).
+ */
+export const removeApiKey = async (id: string): Promise<boolean> => {
+  try {
+    return await invoke<boolean>("remove_api_key", { id });
+  } catch (e) {
+    console.error("Failed to remove API key:", e);
     return false;
   }
 };

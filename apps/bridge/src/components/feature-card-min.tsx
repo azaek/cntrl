@@ -16,7 +16,7 @@ const FeatureCardMin = (props: {
     <div
       class={cn(
         "flex w-full items-center gap-2 rounded px-2 py-1.5 transition-all [&_svg:not([class*='size-'])]:size-3.5",
-        props.value ? "text-white" : "text-fg-muted",
+        props.value ? "text-neutral-300" : "text-neutral-500",
       )}
     >
       {props.icon}

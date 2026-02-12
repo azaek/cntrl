@@ -1,13 +1,26 @@
-import { Key } from "lucide-solid";
-import { createMemo, Show } from "solid-js";
+import { Ellipsis, Key, Trash2 } from "lucide-solid";
+import { createMemo, createSignal, Show } from "solid-js";
 import { sanitizeScopes } from "../../../helper/data-helper";
 import { ApiKeySummary } from "../../../lib/auth";
 import ContentTip from "../../ui/content-tip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown";
+import { IconButtonGhost } from "../../ui/icon-btn";
 import { Label } from "../../ui/label";
+import RemoveKeySheet from "./remove-key-sheet";
+import UpdateKeySheet from "./update-key-sheet";
 
-const ApiKeyItem = ({ apiKey: key }: { apiKey: ApiKeySummary }) => {
+const ApiKeyItem = (props: { apiKey: ApiKeySummary }) => {
+  const [openUpdate, setOpenUpdate] = createSignal(false);
+  const [openRemove, setOpenRemove] = createSignal(false);
+
   const scopes = createMemo(() => {
-    return sanitizeScopes(key.scopes);
+    return sanitizeScopes(props.apiKey.scopes);
   });
 
   const isAdmin = createMemo(() => {
@@ -15,14 +28,14 @@ const ApiKeyItem = ({ apiKey: key }: { apiKey: ApiKeySummary }) => {
   });
 
   const expires = createMemo(() => {
-    if (!key.expires_at) return "Never Expires";
-    const date = new Date(key.expires_at);
+    if (!props.apiKey.expires_at) return "Never Expires";
+    const date = new Date(props.apiKey.expires_at);
     return date.toLocaleDateString();
   });
 
   const isExpired = createMemo(() => {
-    if (!key.expires_at) return false;
-    const date = new Date(key.expires_at);
+    if (!props.apiKey.expires_at) return false;
+    const date = new Date(props.apiKey.expires_at);
     return date.getTime() < new Date().getTime();
   });
 
@@ -32,7 +45,8 @@ const ApiKeyItem = ({ apiKey: key }: { apiKey: ApiKeySummary }) => {
         <Key class="size-3.5 text-neutral-600" />
         <div class="flex flex-col">
           <p class="text-sm">
-            {key.name} <span class="font-mono text-neutral-600">...{key.hint}</span>
+            {props.apiKey.name}{" "}
+            <span class="font-mono text-neutral-600">...{props.apiKey.hint}</span>
           </p>
           <div class="flex items-center gap-1.5 text-xs font-bold text-neutral-500">
             <Show
@@ -63,7 +77,35 @@ const ApiKeyItem = ({ apiKey: key }: { apiKey: ApiKeySummary }) => {
           </div>
         </div>
       </div>
-      <p class="text-sm">{key.hint}</p>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger as={IconButtonGhost}>
+          <Ellipsis class="size-4 text-neutral-500" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          {/* <DropdownMenuItem onSelect={() => {
+                        setTimeout(() => setOpenUpdate(true), 10);
+                    }}><KeyRound class="size-3.5" /> Update</DropdownMenuItem> */}
+          <DropdownMenuItem
+            onSelect={() => {
+              setTimeout(() => setOpenRemove(true), 10);
+            }}
+            class="text-red-400 focus:text-red-400"
+          >
+            <Trash2 class="size-3.5" /> Remove Key
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <UpdateKeySheet
+        open={openUpdate()}
+        onOpenChange={setOpenUpdate}
+        apiKey={props.apiKey}
+      />
+      <RemoveKeySheet
+        open={openRemove()}
+        onOpenChange={setOpenRemove}
+        apiKey={props.apiKey}
+      />
     </div>
   );
 };

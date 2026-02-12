@@ -628,6 +628,17 @@ fn revoke_api_key(
 }
 
 #[tauri::command]
+fn remove_api_key(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+    id: String,
+) -> Result<bool, String> {
+    let mut auth = auth_state.lock().unwrap();
+    let removed = auth_store::remove_key(&mut auth, &id);
+    auth_store::save_auth_state(&auth)?;
+    Ok(removed)
+}
+
+#[tauri::command]
 fn update_api_key_scopes(
     auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     id: String,
@@ -909,6 +920,7 @@ pub fn run() {
             list_api_keys,
             create_api_key,
             revoke_api_key,
+            remove_api_key,
             update_api_key_scopes,
             update_api_key_expiration,
             add_allowed_ip,

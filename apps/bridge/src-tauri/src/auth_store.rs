@@ -219,6 +219,12 @@ pub fn revoke_key(state: &mut AuthState, id: &str) -> bool {
     false
 }
 
+pub fn remove_key(state: &mut AuthState, id: &str) -> bool {
+    let before = state.keys.len();
+    state.keys.retain(|r| r.id != id);
+    state.keys.len() < before
+}
+
 pub fn update_key_scopes(state: &mut AuthState, id: &str, scopes: Vec<String>) -> bool {
     for record in &mut state.keys {
         if record.id == id {

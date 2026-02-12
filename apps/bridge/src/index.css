@@ -2,8 +2,9 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #202022;
+  --color-bg: #171717;
   --color-bg-dark: #18181a;
+  --color-background: #171717;
   --color-accent: #67ff90;
   --color-fg-muted: #808080;
   --color-card: #1f1f1f;
@@ -31,6 +32,7 @@
   ::file-selector-button {
     border-color: var(--color-border, currentcolor);
     font-family: var(--font-sans);
+    outline-color: var(--color-border, currentcolor);
   }
 }
 

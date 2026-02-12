@@ -23,7 +23,7 @@ const NewKeySuccessScreen = ({ apiKey: key }: { apiKey: CreateApiKeyResponse }) 
       <p class="mt-3 text-center text-sm text-balance text-neutral-500">
         Copy this key and keep it safe. You won't be able to see it again.
       </p>
-      <div class="mt-3 flex w-full flex-col items-start">
+      <div data-corvu-no-drag class="mt-3 flex w-full flex-col items-start">
         <LabelSm class="mb-2 ml-1 uppercase">Key</LabelSm>
         <div class="bg-input flex w-full items-center gap-5 rounded-lg border p-1 px-2 select-text selection:bg-white/20">
           <p class="flex-1 font-mono text-sm break-all text-ellipsis">{key.key}</p>
