@@ -2,6 +2,7 @@ import { Shield, TriangleAlert } from "lucide-solid";
 import { useApp } from "../../../context/app-context";
 import { getAuthInfo, setAuthMode } from "../../../lib/auth";
 import { Switch } from "../../switch";
+import ApiKeyItem from "./api-key.item";
 import NewKeySheet from "./new-key-sheet";
 const AuthScreen = () => {
   const [store, actions] = useApp();
@@ -33,6 +34,11 @@ const AuthScreen = () => {
       <div class="flex w-full items-center justify-between px-2">
         <p class="text-sm">API Keys</p>
         <NewKeySheet />
+      </div>
+      <div class="flex w-full flex-col gap-2">
+        {store.auth.keys.map((key) => (
+          <ApiKeyItem apiKey={key} />
+        ))}
       </div>
     </div>
   );

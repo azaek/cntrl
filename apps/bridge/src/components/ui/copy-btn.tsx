@@ -25,7 +25,7 @@ const CopyBtn = ({
   };
 
   return (
-    <TextTip content={tip || "Copy"} side="top">
+    <TextTip content={copied() ? "Copied!" : tip || "Copy"} side="top">
       <button
         onClick={copy}
         disabled={disabled}
