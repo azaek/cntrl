@@ -26,8 +26,8 @@ const MainScreen = () => {
 
   const reloadConfig = async () => {
     actions.setReloadingConfig(true);
-    await backend.reloadConfig();
-    actions.pollStatus();
+    const s = await backend.restartServer();
+    if (s) actions.setStatus(s);
     actions.setReloadingConfig(false);
   };
 
@@ -59,7 +59,7 @@ const MainScreen = () => {
               reloadConfig();
             }}
             disabled={store.reloadingConfig}
-            className={cn(
+            class={cn(
               "flex-1",
               store.reloadingConfig ? "cursor-not-allowed opacity-40" : "",
             )}
@@ -77,7 +77,7 @@ const MainScreen = () => {
             onClick={() => {
               backend.openConfig();
             }}
-            className="flex-1"
+            class="flex-1"
           >
             <SquareArrowOutUpRight />
             <p>Open Config</p>

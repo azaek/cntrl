@@ -26,25 +26,39 @@ use tauri_plugin_autostart::ManagerExt;
 
 // Server Control State
 struct ServerControl {
-    tx: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
+    shutdown_tx: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
+    status_tx: Arc<tokio::sync::watch::Sender<ServerStatus>>,
 }
 
 fn spawn_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
     auth_state: Arc<Mutex<AuthState>>,
-    status: Arc<Mutex<ServerStatus>>,
-    control: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
+    status_tx: Arc<tokio::sync::watch::Sender<ServerStatus>>,
+    shutdown_holder: Arc<Mutex<Option<tokio::sync::broadcast::Sender<()>>>>,
 ) {
-    let (tx, rx) = tokio::sync::broadcast::channel(1);
+    status_tx.send_modify(|s| *s = ServerStatus::Starting);
 
-    // Store sender
-    let mut c = control.lock().unwrap();
-    *c = Some(tx);
+    let (tx, rx) = tokio::sync::broadcast::channel(1);
+    {
+        let mut c = shutdown_holder.lock().unwrap();
+        *c = Some(tx);
+    }
 
     tauri::async_runtime::spawn(async move {
-        server::start_server(port, config, auth_state, status, rx).await;
+        server::start_server(port, config, auth_state, status_tx, rx).await;
     });
+}
+
+/// Await until the watch channel value satisfies `pred`, with a timeout.
+async fn wait_for_status(
+    status_tx: &tokio::sync::watch::Sender<ServerStatus>,
+    mut pred: impl FnMut(&ServerStatus) -> bool,
+) {
+    let mut rx = status_tx.subscribe();
+    rx.mark_changed(); // Ensure current value is checked immediately
+    let timeout = tokio::time::Duration::from_secs(10);
+    let _ = tokio::time::timeout(timeout, rx.wait_for(|s| pred(s))).await;
 }
 
 #[tauri::command]
@@ -54,10 +68,10 @@ fn get_config(state: tauri::State<Arc<Mutex<AppConfig>>>) -> AppConfig {
 
 #[tauri::command]
 fn get_server_status(
-    state: tauri::State<Arc<Mutex<ServerStatus>>>,
+    control_state: tauri::State<ServerControl>,
     config: tauri::State<Arc<Mutex<AppConfig>>>,
 ) -> ServerState {
-    let status = state.lock().unwrap().clone();
+    let status = control_state.status_tx.borrow().clone();
     let port = config.lock().unwrap().server.port;
     ServerState { status, port }
 }
@@ -92,52 +106,135 @@ fn open_config_dir(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn stop_service(control_state: tauri::State<ServerControl>) -> Result<(), String> {
-    let control = control_state.tx.lock().unwrap();
-    if let Some(tx) = &*control {
-        let _ = tx.send(()); // Send shutdown signal to active server
-    }
-    Ok(())
-}
+async fn stop_service(
+    control_state: tauri::State<'_, ServerControl>,
+    config: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+) -> Result<ServerState, String> {
+    // Extract Arc clones upfront so State borrows don't cross await points
+    let status_tx = control_state.status_tx.clone();
+    let shutdown_tx = control_state.shutdown_tx.clone();
+    let config_arc = config.inner().clone();
 
-#[tauri::command]
-fn reload_config(
-    state: tauri::State<Arc<Mutex<AppConfig>>>,
-    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
-    status_state: tauri::State<Arc<Mutex<ServerStatus>>>,
-    control_state: tauri::State<ServerControl>,
-    app: tauri::AppHandle,
-) -> Result<AppConfig, String> {
-    let mut new_config = config::load_config(&app);
-    new_config.auth.api_key = None;
-
-    // 1. Update config state
     {
-        let mut config = state.lock().unwrap();
-        *config = new_config.clone();
-    }
-
-    // 2. Stop existing server
-    {
-        let control = control_state.tx.lock().unwrap();
+        let control = shutdown_tx.lock().unwrap();
         if let Some(tx) = &*control {
-            let _ = tx.send(()); // Send shutdown signal
+            let _ = tx.send(());
         }
     }
 
-    // 3. Wait a bit for port release (simple delay)
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    wait_for_status(&status_tx, |s| {
+        matches!(s, ServerStatus::Stopped | ServerStatus::Error(_))
+    })
+    .await;
+
+    let status = status_tx.borrow().clone();
+    let port = config_arc.lock().unwrap().server.port;
+    Ok(ServerState { status, port })
+}
+
+#[tauri::command]
+async fn restart_service(
+    state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<'_, Arc<Mutex<AuthState>>>,
+    control_state: tauri::State<'_, ServerControl>,
+    app: tauri::AppHandle,
+) -> Result<ServerState, String> {
+    // Extract Arc clones upfront so State borrows don't cross await points
+    let status_tx = control_state.status_tx.clone();
+    let shutdown_tx = control_state.shutdown_tx.clone();
+    let config_arc = state.inner().clone();
+    let auth_arc = auth_state.inner().clone();
+
+    // 1. Stop existing server
+    {
+        let control = shutdown_tx.lock().unwrap();
+        if let Some(tx) = &*control {
+            let _ = tx.send(());
+        }
+    }
+
+    // 2. Wait for server to actually stop
+    wait_for_status(&status_tx, |s| {
+        matches!(s, ServerStatus::Stopped | ServerStatus::Error(_))
+    })
+    .await;
+
+    // 3. Reload config from disk
+    let mut new_config = config::load_config(&app);
+    new_config.auth.api_key = None;
+    {
+        let mut config = config_arc.lock().unwrap();
+        *config = new_config.clone();
+    }
 
     // 4. Start new server
     spawn_server(
         new_config.server.port,
-        state.inner().clone(),
-        auth_state.inner().clone(),
-        status_state.inner().clone(),
-        control_state.tx.clone(),
+        config_arc.clone(),
+        auth_arc,
+        status_tx.clone(),
+        shutdown_tx,
     );
 
-    Ok(new_config)
+    // 5. Wait for server to finish starting
+    wait_for_status(&status_tx, |s| {
+        !matches!(s, ServerStatus::Starting)
+    })
+    .await;
+
+    let status = status_tx.borrow().clone();
+    let port = config_arc.lock().unwrap().server.port;
+    Ok(ServerState { status, port })
+}
+
+#[tauri::command]
+async fn start_service(
+    state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+    auth_state: tauri::State<'_, Arc<Mutex<AuthState>>>,
+    control_state: tauri::State<'_, ServerControl>,
+    app: tauri::AppHandle,
+) -> Result<ServerState, String> {
+    // Extract Arc clones upfront so State borrows don't cross await points
+    let status_tx = control_state.status_tx.clone();
+    let shutdown_tx = control_state.shutdown_tx.clone();
+    let config_arc = state.inner().clone();
+    let auth_arc = auth_state.inner().clone();
+
+    // If already running, return current state
+    {
+        let current = status_tx.borrow().clone();
+        if matches!(current, ServerStatus::Running) {
+            let port = config_arc.lock().unwrap().server.port;
+            return Ok(ServerState { status: current, port });
+        }
+    }
+
+    // Reload config from disk
+    let mut new_config = config::load_config(&app);
+    new_config.auth.api_key = None;
+    {
+        let mut config = config_arc.lock().unwrap();
+        *config = new_config.clone();
+    }
+
+    // Start server
+    spawn_server(
+        new_config.server.port,
+        config_arc.clone(),
+        auth_arc,
+        status_tx.clone(),
+        shutdown_tx,
+    );
+
+    // Wait for server to finish starting
+    wait_for_status(&status_tx, |s| {
+        !matches!(s, ServerStatus::Starting)
+    })
+    .await;
+
+    let status = status_tx.borrow().clone();
+    let port = config_arc.lock().unwrap().server.port;
+    Ok(ServerState { status, port })
 }
 
 #[tauri::command]
@@ -748,19 +845,19 @@ pub fn run() {
             let shared_config = Arc::new(Mutex::new(cfg));
             app.manage(shared_config.clone());
 
-            // Server Status State
-            let server_status = Arc::new(Mutex::new(ServerStatus::Starting));
-            app.manage(server_status.clone());
+            // Server Control with watch channel
+            let (status_tx, _status_rx) = tokio::sync::watch::channel(ServerStatus::Starting);
+            let status_tx = Arc::new(status_tx);
+            let shutdown_tx = Arc::new(Mutex::new(None));
 
-            // Server Control
-            let control_tx = Arc::new(Mutex::new(None));
             app.manage(ServerControl {
-                tx: control_tx.clone(),
+                shutdown_tx: shutdown_tx.clone(),
+                status_tx: status_tx.clone(),
             });
 
             // Start initial server
             let auth_state = app.state::<Arc<Mutex<AuthState>>>().inner().clone();
-            spawn_server(port, shared_config, auth_state, server_status, control_tx);
+            spawn_server(port, shared_config, auth_state, status_tx, shutdown_tx);
 
             // Sync Autostart
             // let autostart_enabled is extracted above
@@ -794,7 +891,8 @@ pub fn run() {
             toggle_feature,
             get_server_status,
             open_config_dir,
-            reload_config,
+            restart_service,
+            start_service,
             stop_service,
             // WebSocket controls
             update_ws_interval,

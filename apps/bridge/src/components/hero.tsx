@@ -1,18 +1,22 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
-import { EthernetPort, HouseWifi, QrCode, X } from "lucide-solid";
-import { createEffect, createSignal, onMount } from "solid-js";
+import { HouseWifi, Lock, LockOpen, QrCode, X } from "lucide-solid";
+import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { useApp } from "../context/app-context";
-import { getAppVersion } from "../lib/backend";
+import { getAppVersion, getLocalIps } from "../lib/backend";
+import ServerDock from "./screens/hero/server-dock";
 import { Logo } from "./svgs";
+import CopyBtn from "./ui/copy-btn";
 import { IconButton } from "./ui/icon-btn";
 import PixelBlast from "./ui/pixel-blast";
+import TextTip from "./ui/text-tip";
 
 gsap.registerPlugin(Flip);
 
 const Hero = () => {
   const [version, setVersion] = createSignal("");
+  const [host, setHost] = createSignal("");
 
   let containerRef!: HTMLDivElement;
   let bannerWrapperRef!: HTMLDivElement;
@@ -31,6 +35,11 @@ const Hero = () => {
       console.error("Failed to close window:", e);
     }
   };
+
+  onMount(async () => {
+    const s = await getLocalIps();
+    if (s) setHost(s.find((ip) => ip.startsWith("192.168.")) || "localhost");
+  });
 
   onMount(async () => {
     const v = await getAppVersion();
@@ -139,10 +148,10 @@ const Hero = () => {
 
   // Banner/card height animation
   createEffect(() => {
-    const isAuth = store.page === "auth";
+    const isMain = store.page === "main";
     const tl = gsap.timeline();
 
-    if (isAuth) {
+    if (!isMain) {
       // Exit: banner slides up behind card, wrapper collapses
       tl.to(bannerRef, { y: "-100%", duration: 0.25, ease: "circ.inOut" })
         .to(
@@ -188,28 +197,34 @@ const Hero = () => {
             >
               {/* Home Button - animated with FLIP */}
               <div ref={homeBtnRef} data-flip-id="home-btn" class="overflow-hidden">
+                <TextTip content="Home">
+                  <IconButton
+                    onClick={() => {
+                      actions.setPage("main");
+                    }}
+                  >
+                    <HouseWifi class="text-neutral-500" />
+                  </IconButton>
+                </TextTip>
+              </div>
+              <TextTip content="Connect">
                 <IconButton
                   onClick={() => {
-                    actions.setPage("main");
+                    closeWindow();
                   }}
                 >
-                  <HouseWifi class="text-neutral-500" />
+                  <QrCode class="text-neutral-500" />
                 </IconButton>
-              </div>
-              <IconButton
-                onClick={() => {
-                  closeWindow();
-                }}
-              >
-                <QrCode class="text-neutral-500" />
-              </IconButton>
-              <IconButton
-                onClick={() => {
-                  closeWindow();
-                }}
-              >
-                <X class="text-neutral-600" />
-              </IconButton>
+              </TextTip>
+              <TextTip content="Close">
+                <IconButton
+                  onClick={() => {
+                    closeWindow();
+                  }}
+                >
+                  <X class="text-neutral-600" />
+                </IconButton>
+              </TextTip>
             </div>
           </div>
           <div class="absolute inset-0 z-0 h-40 w-full">
@@ -224,27 +239,36 @@ const Hero = () => {
             />
           </div>
           {/* Dock Tray */}
-          <div
-            ref={dockTrayRef}
-            class="absolute inset-x-0 bottom-3 mx-auto flex h-9 w-max items-center gap-3 overflow-hidden rounded-lg border bg-neutral-950/25 px-3 backdrop-blur-sm"
-          >
-            <div class="flex items-center gap-2">
-              <div class="bg-accent absolute inset-y-0 left-0 my-auto h-4 w-2 translate-x-[-25%] blur-sm" />
-              <EthernetPort class="text-accent size-4" />
-              <p class="text-xs font-medium text-neutral-500">9990</p>
-            </div>
-            {/* <div class="h-3 border-r border-neutral-700" />
-                        <div class="flex items-center justify-end">
-
-                        </div> */}
+          <div ref={dockTrayRef} class="absolute inset-x-0 bottom-3 mx-auto flex w-max">
+            <ServerDock />
           </div>
         </div>
         <div ref={bannerWrapperRef} class="z-0 -mt-1 w-full overflow-hidden">
           <div
             ref={bannerRef}
-            class="bg-border flex w-full items-center justify-between rounded-b-lg px-3 pt-2 pb-1"
+            class="bg-border pointer-events-auto flex w-full items-center justify-between rounded-b-lg px-3 pt-2 pb-1"
           >
-            <p class="text-sm font-medium text-neutral-700">URL</p>
+            <div class="flex items-center gap-2">
+              <Show
+                when={store.auth.mode === "protected"}
+                fallback={
+                  <TextTip content="Unprotected" side="top">
+                    <LockOpen class="size-3 text-orange-500" />
+                  </TextTip>
+                }
+              >
+                <Lock class="size-3 text-neutral-500" />
+              </Show>
+              <p class="text-xs font-medium text-neutral-600">
+                Host <span class="text-neutral-400">{host()}</span>
+              </p>
+            </div>
+            <CopyBtn
+              tip="Copy Host"
+              content={host()}
+              className="-m-2 size-auto p-2 text-neutral-500 [&_svg:not([class*='size-'])]:size-3"
+            />
+            {/* <p class="text-sm font-medium text-neutral-700">Auth <span class="text-neutral-400">{store.cfg?.auth.enabled ? "Enabled" : "Disabled"}</span></p> */}
           </div>
         </div>
       </div>

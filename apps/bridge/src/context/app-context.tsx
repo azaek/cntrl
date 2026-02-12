@@ -1,5 +1,7 @@
 import { createContext, onMount, useContext, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
+import type { AuthInfo } from "../lib/auth";
+import * as auth from "../lib/auth";
 import * as backend from "../lib/backend";
 import { Config, ServerState, loadConfig } from "../lib/backend";
 import { AppScreen } from "../types";
@@ -7,6 +9,7 @@ import { AppScreen } from "../types";
 type StoreType = {
   cfg: Config | null;
   status: ServerState | null;
+  auth: AuthInfo;
   page: AppScreen;
   reloadingConfig: boolean;
   loading: boolean;
@@ -14,6 +17,7 @@ type StoreType = {
 const defaultStore: StoreType = {
   cfg: null,
   status: null,
+  auth: { mode: "public", keys: [] },
   page: "main",
   reloadingConfig: false,
   loading: true,
@@ -22,6 +26,8 @@ const defaultStore: StoreType = {
 const defaultStoreSetter: {
   setConfig: (cfg: Config) => void;
   setStatus: (status: ServerState) => void;
+  setAuth: (info: AuthInfo) => void;
+  refreshAuth: () => Promise<void>;
   setPage: (page: AppScreen) => void;
   setReloadingConfig: (reloadingConfig: boolean) => void;
   setLoading: (loading: boolean) => void;
@@ -29,6 +35,8 @@ const defaultStoreSetter: {
 } = {
   setConfig: () => {},
   setStatus: () => {},
+  setAuth: () => {},
+  refreshAuth: async () => {},
   setPage: () => {},
   setReloadingConfig: () => {},
   setLoading: () => {},
@@ -44,6 +52,7 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
   const [state, setState] = createStore<StoreType>({
     cfg: null,
     status: null,
+    auth: { mode: "public", keys: [] },
     page: "main",
     reloadingConfig: false,
     loading: true,
@@ -60,6 +69,15 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
 
   const setConfig = (cfg: Config) => {
     setState("cfg", cfg);
+  };
+
+  const setAuth = (info: AuthInfo) => {
+    setState("auth", info);
+  };
+
+  const refreshAuth = async () => {
+    const info = await auth.getAuthInfo();
+    setAuth(info);
   };
 
   const setLoading = (loading: boolean) => {
@@ -91,6 +109,7 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
     }
 
     pollStatus();
+    refreshAuth();
     const interval = setInterval(pollStatus, 3000); // Poll status every 3s
     return () => clearInterval(interval);
   });
@@ -102,6 +121,8 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
         {
           setConfig,
           setStatus,
+          setAuth,
+          refreshAuth,
           setPage,
           setReloadingConfig,
           setLoading,

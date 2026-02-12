@@ -137,27 +137,11 @@ export const toggleFeature = async (feature: Feature) => {
   }
 };
 
-export const reloadConfig = async () => {
-  try {
-    await invoke("reload_config");
-  } catch (e) {
-    console.error("Failed to reload config:", e);
-  }
-};
-
 export const openConfig = async () => {
   try {
     await invoke("open_config_dir");
   } catch (e) {
     console.error("Failed to open config dir:", e);
-  }
-};
-
-export const stopService = async () => {
-  try {
-    await invoke("stop_service");
-  } catch (e) {
-    console.error("Failed to stop service:", e);
   }
 };
 
@@ -200,22 +184,39 @@ export const repositionTrafficLights = async (x: number, y: number) => {
 // ============================================================================
 
 /**
- * Restart the server with current config (stops and starts server)
+ * Start the server (if stopped). Returns final ServerState.
  */
-export const restartServer = async (): Promise<Config | null> => {
+export const startServer = async (): Promise<ServerState | null> => {
   try {
-    return await invoke<Config>("reload_config");
+    return await invoke<ServerState>("start_service");
   } catch (e) {
-    console.error("Failed to restart server:", e);
+    console.error("Failed to start server:", e);
     return null;
   }
 };
 
 /**
- * Start the server (if stopped). Currently uses reload_config which handles start.
+ * Stop the server. Returns final ServerState.
  */
-export const startServer = async (): Promise<Config | null> => {
-  return restartServer();
+export const stopServer = async (): Promise<ServerState | null> => {
+  try {
+    return await invoke<ServerState>("stop_service");
+  } catch (e) {
+    console.error("Failed to stop server:", e);
+    return null;
+  }
+};
+
+/**
+ * Restart the server with current config (stops, reloads config, starts). Returns final ServerState.
+ */
+export const restartServer = async (): Promise<ServerState | null> => {
+  try {
+    return await invoke<ServerState>("restart_service");
+  } catch (e) {
+    console.error("Failed to restart server:", e);
+    return null;
+  }
 };
 
 // ============================================================================
@@ -304,42 +305,6 @@ export const updateHostname = async (hostname: string): Promise<Config | null> =
     return await invoke<Config>("update_hostname", { hostname });
   } catch (e) {
     console.error("Failed to update hostname:", e);
-    return null;
-  }
-};
-
-/**
- * Toggle authentication on/off
- */
-export const toggleAuth = async (): Promise<Config | null> => {
-  try {
-    return await invoke<Config>("toggle_auth");
-  } catch (e) {
-    console.error("Failed to toggle auth:", e);
-    return null;
-  }
-};
-
-/**
- * Update API key for authentication
- */
-export const updateApiKey = async (apiKey: string | null): Promise<Config | null> => {
-  try {
-    return await invoke<Config>("update_api_key", { apiKey });
-  } catch (e) {
-    console.error("Failed to update API key:", e);
-    return null;
-  }
-};
-
-/**
- * Generate a new random API key
- */
-export const generateApiKey = async (): Promise<Config | null> => {
-  try {
-    return await invoke<Config>("generate_api_key");
-  } catch (e) {
-    console.error("Failed to generate API key:", e);
     return null;
   }
 };

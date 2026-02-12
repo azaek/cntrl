@@ -7,20 +7,23 @@ import {
   Plus,
   RotateCw,
   Shield,
+  TriangleAlert,
   X,
 } from "lucide-solid";
 import { createSignal } from "solid-js";
 import { useApp } from "../../context/app-context";
 import { useDebounce } from "../../hooks/use-debounce";
 import {
+  generateLegacyApiKey as generateApiKey,
+  toggleAuth,
+  updateLegacyApiKey as updateApiKey,
+} from "../../lib/auth";
+import {
   Config,
   addAllowedIp,
   addBlockedIp,
-  generateApiKey,
   removeAllowedIp,
   removeBlockedIp,
-  toggleAuth,
-  updateApiKey,
 } from "../../lib/backend";
 import { Label } from "../label";
 import { Switch } from "../switch";
@@ -141,7 +144,7 @@ const AuthScreen = () => {
           <div class="flex w-full items-center gap-2 rounded px-2 py-1.5">
             <Button
               onClick={() => actions.setPage("main")}
-              className="-mx-1 size-9! w-auto flex-[unset] items-center justify-center p-0!"
+              class="-mx-1 size-9! w-auto flex-[unset] items-center justify-center p-0!"
             >
               <ChevronLeft class="text-fg-muted size-4.5" />
             </Button>
@@ -153,6 +156,14 @@ const AuthScreen = () => {
             <Switch value={store.cfg!.auth.enabled} onValueChange={() => toggle()} />
           </div>
           <Divider />
+        </div>
+        <div class="mx-2 mt-2 flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+          <TriangleAlert class="mt-0.5 size-3.5 shrink-0 text-amber-400" />
+          <p class="text-xs leading-relaxed text-amber-300/90">
+            Running without authentication is not recommended. Exposing the bridge outside
+            your local network without auth gives full control over your system to anyone
+            who can reach it. Only disable auth if you understand the risks.
+          </p>
         </div>
         <div class="my-2 flex w-full flex-col gap-1 px-2">
           <Label>API KEY</Label>
@@ -220,7 +231,7 @@ const AuthScreen = () => {
                 actions.setConfig(config);
                 setApiKey(config.auth.api_key || "");
               }}
-              className="text-secondary min-h-8 w-max flex-[unset] rounded-md px-3! py-1!"
+              class="text-secondary min-h-8 w-max flex-[unset] rounded-md px-3! py-1!"
             >
               <RotateCw class="size-3" />
               <p>Generate Key</p>

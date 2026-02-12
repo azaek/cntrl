@@ -458,7 +458,7 @@ pub async fn start_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
     auth_state: Arc<Mutex<auth_store::AuthState>>,
-    status_handle: Arc<Mutex<ServerStatus>>,
+    status_tx: Arc<tokio::sync::watch::Sender<ServerStatus>>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     let loop_manager = Arc::new(LoopManager::new());
@@ -530,16 +530,12 @@ pub async fn start_server(
         Ok(l) => l,
         Err(e) => {
             println!("Failed to bind port: {}", e);
-            let mut status = status_handle.lock().unwrap();
-            *status = ServerStatus::Error(format!("Failed to bind port {}: {}", port, e));
+            status_tx.send_modify(|s| *s = ServerStatus::Error(format!("Failed to bind port {}: {}", port, e)));
             return;
         }
     };
 
-    {
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Running;
-    }
+    status_tx.send_modify(|s| *s = ServerStatus::Running);
 
     let app = app.into_make_service_with_connect_info::<SocketAddr>();
 
@@ -550,11 +546,9 @@ pub async fn start_server(
 
     if let Err(e) = server.await {
         println!("Server exited with error: {}", e);
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Error(format!("Server exited: {}", e));
+        status_tx.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
     } else {
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Stopped;
+        status_tx.send_modify(|s| *s = ServerStatus::Stopped);
     }
 }
 

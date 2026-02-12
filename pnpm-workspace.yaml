@@ -5,8 +5,10 @@ packages:
 
 catalog:
   '@base-ui/react': ^1.1.0
+  '@corvu/drawer': ^0.2.4
   '@eslint-react/eslint-plugin': ^2.7.2
   '@eslint/js': ^9.39.2
+  '@kobalte/core': ^0.13.11
   '@tailwindcss/vite': ^4.1.18
   '@tanstack/devtools-vite': ^0.4.1
   '@tanstack/eslint-plugin-query': ^5.91.3
