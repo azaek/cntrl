@@ -11,7 +11,7 @@ const TextTip = ({
   side?: "top" | "right" | "bottom" | "left";
 }) => {
   return (
-    <Tooltip placement={side}>
+    <Tooltip placement={side} openDelay={1000} closeDelay={100} skipDelayDuration={500}>
       <TooltipTrigger class="cursor-pointer">
         <>{children}</>
       </TooltipTrigger>

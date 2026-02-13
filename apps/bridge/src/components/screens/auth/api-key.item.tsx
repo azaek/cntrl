@@ -1,4 +1,4 @@
-import { Ellipsis, Key, Trash2 } from "lucide-solid";
+import { Ellipsis, Key, KeyRound, Trash2 } from "lucide-solid";
 import { createMemo, createSignal, Show } from "solid-js";
 import { sanitizeScopes } from "../../../helper/data-helper";
 import { ApiKeySummary } from "../../../lib/auth";
@@ -83,9 +83,13 @@ const ApiKeyItem = (props: { apiKey: ApiKeySummary }) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent>
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-          {/* <DropdownMenuItem onSelect={() => {
-                        setTimeout(() => setOpenUpdate(true), 10);
-                    }}><KeyRound class="size-3.5" /> Update</DropdownMenuItem> */}
+          <DropdownMenuItem
+            onSelect={() => {
+              setTimeout(() => setOpenUpdate(true), 10);
+            }}
+          >
+            <KeyRound class="size-3.5" /> Update
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => {
               setTimeout(() => setOpenRemove(true), 10);

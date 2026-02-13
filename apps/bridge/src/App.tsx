@@ -1,5 +1,6 @@
+import gsap from "gsap";
 import type { Component } from "solid-js";
-import { Show } from "solid-js";
+import { createEffect, Match, Show, Switch } from "solid-js";
 import Footer from "./components/footer";
 import Hero from "./components/hero";
 import MainLoadingScreen from "./components/loading.main";
@@ -22,23 +23,33 @@ const App: Component = () => {
 const Screen = () => {
   const [store] = useApp();
 
-  // createEffect(() => {
-  //   const p = store.page;
-  //   switch (p) {
-  //     case "main":
-  //       backend.setWindowSize(380, 626);
-  //       break;
-  //     case "auth":
-  //       backend.setWindowSize(380, 532);
-  //       break;
-  //     case "power":
-  //       backend.setWindowSize(380, 425);
-  //       break;
-  //     default:
-  //       backend.setWindowSize(380, 425);
-  //       break;
-  //   }
-  // });
+  let screenContainer: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!store.loading && screenContainer) {
+      store.page; // Track page changes
+      // Use requestAnimationFrame to ensure Solid has updated the DOM
+      requestAnimationFrame(() => {
+        gsap.fromTo(
+          screenContainer!.children,
+          {
+            opacity: 0,
+            y: 20,
+            filter: "blur(10px)",
+          },
+          {
+            opacity: 1,
+            y: 0,
+            filter: "blur(0px)",
+            duration: 0.5,
+            ease: "power2.out",
+            stagger: 0.1,
+            delay: 0.25,
+          },
+        );
+      });
+    }
+  });
 
   return (
     <>
@@ -50,21 +61,25 @@ const Screen = () => {
           </div>
           {/* <Header /> */}
           <Container>
-            <Show when={store.page === "settings"} fallback={null}>
-              <SettingsScreen />
-            </Show>
-            <Show when={store.page === "auth"} fallback={null}>
-              <AuthScreen />
-            </Show>
-            <Show when={store.page === "main"} fallback={null}>
-              <HomeScreen />
-            </Show>
-            <Show when={store.page === "power"} fallback={null}>
-              <PowerScreen />
-            </Show>
-            <Show when={store.page === "ws"} fallback={null}>
-              <WsScreen />
-            </Show>
+            <div ref={screenContainer} class="contents">
+              <Switch>
+                <Match when={store.page === "settings"}>
+                  <SettingsScreen />
+                </Match>
+                <Match when={store.page === "auth"}>
+                  <AuthScreen />
+                </Match>
+                <Match when={store.page === "main"}>
+                  <HomeScreen />
+                </Match>
+                <Match when={store.page === "power"}>
+                  <PowerScreen />
+                </Match>
+                <Match when={store.page === "ws"}>
+                  <WsScreen />
+                </Match>
+              </Switch>
+            </div>
           </Container>
           <div class="flex w-full flex-col items-center px-3">
             <Footer />

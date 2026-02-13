@@ -59,7 +59,12 @@ const ServerDock = () => {
           fallback={
             <>
               <TriangleAlert class="size-4 text-red-500" />
-              <Tooltip placement="top">
+              <Tooltip
+                placement="top"
+                openDelay={1000}
+                closeDelay={100}
+                skipDelayDuration={500}
+              >
                 <TooltipTrigger>
                   <p class="cursor-pointer text-xs font-medium text-red-500 underline decoration-dotted">
                     Error
@@ -130,7 +135,12 @@ const ServerDock = () => {
       <div class="h-3 border-r border-neutral-700" />
       <div class="flex items-center justify-end">
         <Show when={store.status?.status.status === "Running"} fallback={null}>
-          <Tooltip placement="top">
+          <Tooltip
+            placement="top"
+            openDelay={1000}
+            closeDelay={100}
+            skipDelayDuration={500}
+          >
             <TooltipTrigger
               as={IconButtonGhost}
               onClick={stopServer}
@@ -150,7 +160,12 @@ const ServerDock = () => {
           }
           fallback={null}
         >
-          <Tooltip placement="top">
+          <Tooltip
+            placement="top"
+            openDelay={1000}
+            closeDelay={100}
+            skipDelayDuration={500}
+          >
             <TooltipTrigger
               as={IconButtonGhost}
               onClick={startServer}
@@ -166,7 +181,12 @@ const ServerDock = () => {
             <TooltipContent>Start server</TooltipContent>
           </Tooltip>
         </Show>
-        <Tooltip placement="top">
+        <Tooltip
+          placement="top"
+          openDelay={1000}
+          closeDelay={100}
+          skipDelayDuration={500}
+        >
           <TooltipTrigger
             as={IconButtonGhost}
             onClick={refreshServer}
@@ -213,7 +233,12 @@ const ServerDock = () => {
             </Show>
           </TooltipContent>
         </Tooltip>
-        <Tooltip placement="top">
+        <Tooltip
+          placement="top"
+          openDelay={1000}
+          closeDelay={100}
+          skipDelayDuration={500}
+        >
           <TooltipTrigger
             as={IconButtonGhost}
             onClick={() => {
