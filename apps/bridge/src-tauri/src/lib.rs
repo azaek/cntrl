@@ -369,15 +369,16 @@ fn update_hostname(
 }
 
 // ============================================================================
-// Auth Commands
+// Auth Commands (DEPRECATED — use set_auth_mode, create_api_key, etc.)
 // ============================================================================
 
+#[deprecated(note = "use set_auth_mode instead")]
 #[tauri::command]
 fn toggle_auth(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut auth = auth_state.lock().unwrap();
     auth.mode = match auth.mode {
         AuthMode::Public => AuthMode::Protected,
@@ -388,20 +389,20 @@ fn toggle_auth(
     let mut config = state.lock().unwrap();
     config.auth.enabled = matches!(auth.mode, AuthMode::Protected);
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
+#[deprecated(note = "use create_api_key instead")]
 #[tauri::command]
 fn update_api_key(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
     api_key: Option<String>,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut auth = auth_state.lock().unwrap();
     auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
 
-    let mut response_key: Option<String> = None;
     if let Some(token) = api_key.as_ref().map(|s| s.trim().to_string()) {
         if !token.is_empty() {
             let record = auth_store::create_key_record_from_token(
@@ -412,30 +413,28 @@ fn update_api_key(
                 None,
             )?;
             auth.keys.push(record);
-            response_key = Some(token);
         }
     }
 
     auth_store::save_auth_state(&auth)?;
 
     let mut config = state.lock().unwrap();
-    config.auth.api_key = response_key;
-    let response = config.clone();
     config.auth.api_key = None;
     config::save_config(&app, &config);
-    Ok(response)
+    Ok(())
 }
 
+#[deprecated(note = "use create_api_key instead")]
 #[tauri::command]
 fn generate_api_key(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut auth = auth_state.lock().unwrap();
     auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
 
-    let (record, token) = auth_store::create_api_key(
+    let (record, _token) = auth_store::create_api_key(
         "Legacy Key".to_string(),
         vec!["admin".to_string()],
         None,
@@ -445,11 +444,47 @@ fn generate_api_key(
     auth_store::save_auth_state(&auth)?;
 
     let mut config = state.lock().unwrap();
-    config.auth.api_key = Some(token);
-    let response = config.clone();
     config.auth.api_key = None;
     config::save_config(&app, &config);
-    Ok(response)
+    Ok(())
+}
+
+/// Validate an IP address, CIDR, or hostname entry.
+/// Accepts: raw IP ("192.168.1.1"), CIDR ("192.168.1.0/24"), or hostname ("pi.local").
+/// Hostnames are stored as-is and resolved at match time so DHCP changes are handled.
+fn validate_ip_entry(input: &str) -> Result<(), String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("Entry cannot be empty".to_string());
+    }
+
+    // Valid IP
+    if input.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(());
+    }
+
+    // CIDR notation — validate network + prefix
+    if input.contains('/') {
+        if let Some((network, prefix)) = input.split_once('/') {
+            if network.parse::<std::net::IpAddr>().is_ok() && prefix.parse::<u8>().is_ok() {
+                return Ok(());
+            }
+        }
+        return Err("Invalid CIDR notation".to_string());
+    }
+
+    // Hostname: alphanumeric, hyphens, dots, no spaces, reasonable length
+    if input.len() <= 253
+        && input
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
+        && !input.starts_with('-')
+        && !input.starts_with('.')
+    {
+        return Ok(());
+    }
+
+    Err("Invalid IP address, CIDR, or hostname".to_string())
 }
 
 #[tauri::command]
@@ -457,18 +492,16 @@ fn add_allowed_ip(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     app: tauri::AppHandle,
     ip: String,
-) -> Result<AppConfig, String> {
-    // Validate IP
-    if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
-        return Err("Invalid IP address or CIDR".to_string());
-    }
+) -> Result<(), String> {
+    let entry = ip.trim().to_string();
+    validate_ip_entry(&entry)?;
 
     let mut config = state.lock().unwrap();
-    if !config.auth.allowed_ips.contains(&ip) {
-        config.auth.allowed_ips.push(ip);
+    if !config.auth.allowed_ips.contains(&entry) {
+        config.auth.allowed_ips.push(entry);
     }
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 #[tauri::command]
@@ -476,11 +509,11 @@ fn remove_allowed_ip(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     app: tauri::AppHandle,
     ip: String,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut config = state.lock().unwrap();
     config.auth.allowed_ips.retain(|x| x != &ip);
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 #[tauri::command]
@@ -488,18 +521,16 @@ fn add_blocked_ip(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     app: tauri::AppHandle,
     ip: String,
-) -> Result<AppConfig, String> {
-    // Validate IP or CIDR
-    if ip.parse::<std::net::IpAddr>().is_err() && !ip.contains('/') {
-        return Err("Invalid IP address or CIDR".to_string());
-    }
+) -> Result<(), String> {
+    let entry = ip.trim().to_string();
+    validate_ip_entry(&entry)?;
 
     let mut config = state.lock().unwrap();
-    if !config.auth.blocked_ips.contains(&ip) {
-        config.auth.blocked_ips.push(ip);
+    if !config.auth.blocked_ips.contains(&entry) {
+        config.auth.blocked_ips.push(entry);
     }
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 #[tauri::command]
@@ -507,22 +538,22 @@ fn remove_blocked_ip(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     app: tauri::AppHandle,
     ip: String,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut config = state.lock().unwrap();
     config.auth.blocked_ips.retain(|x| x != &ip);
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 #[tauri::command]
 fn clear_blocked_ips(
     state: tauri::State<Arc<Mutex<AppConfig>>>,
     app: tauri::AppHandle,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mut config = state.lock().unwrap();
     config.auth.blocked_ips.clear();
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 // ============================================================================
@@ -571,7 +602,7 @@ fn set_auth_mode(
     auth_state: tauri::State<Arc<Mutex<AuthState>>>,
     app: tauri::AppHandle,
     mode: String,
-) -> Result<AppConfig, String> {
+) -> Result<(), String> {
     let mode = match mode.as_str() {
         "public" => AuthMode::Public,
         "protected" => AuthMode::Protected,
@@ -585,7 +616,7 @@ fn set_auth_mode(
     let mut config = state.lock().unwrap();
     config.auth.enabled = matches!(auth.mode, AuthMode::Protected);
     config::save_config(&app, &config);
-    Ok(config.clone())
+    Ok(())
 }
 
 #[tauri::command]

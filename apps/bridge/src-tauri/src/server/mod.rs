@@ -618,7 +618,8 @@ async fn auth_middleware(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Check if an IP matches any entry in a list (supports exact match and CIDR)
+/// Check if an IP matches any entry in a list.
+/// Supports exact IP match, CIDR notation, and hostname entries (resolved via DNS).
 fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
     let client: std::net::IpAddr = match client_ip.parse() {
         Ok(ip) => ip,
@@ -626,12 +627,12 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
     };
 
     for entry in list {
-        // Exact match
+        // Exact IP match
         if entry == client_ip {
             return true;
         }
 
-        // CIDR match (simplified - just prefix check for common cases)
+        // CIDR match
         if entry.contains('/') {
             if let Some((network, prefix_len)) = entry.split_once('/') {
                 if let (Ok(net_ip), Ok(prefix)) = (
@@ -639,6 +640,19 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
                     prefix_len.parse::<u8>(),
                 ) {
                     if ip_matches_cidr(&client, &net_ip, prefix) {
+                        return true;
+                    }
+                }
+            }
+            continue;
+        }
+
+        // If entry is not a valid IP, treat it as a hostname and resolve
+        if entry.parse::<std::net::IpAddr>().is_err() {
+            use std::net::ToSocketAddrs;
+            if let Ok(addrs) = (entry.as_str(), 0u16).to_socket_addrs() {
+                for addr in addrs {
+                    if addr.ip() == client {
                         return true;
                     }
                 }

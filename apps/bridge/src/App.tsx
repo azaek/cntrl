@@ -13,81 +13,81 @@ import Container from "./components/ui/container";
 import { AppContextProvider, useApp } from "./context/app-context";
 
 const App: Component = () => {
-  return (
-    <AppContextProvider>
-      <Screen />
-    </AppContextProvider>
-  );
+    return (
+        <AppContextProvider>
+            <Screen />
+        </AppContextProvider>
+    );
 };
 
 const Screen = () => {
-  const [store] = useApp();
+    const [store] = useApp();
 
-  let screenContainer: HTMLDivElement | undefined;
+    let screenContainer: HTMLDivElement | undefined;
 
-  createEffect(() => {
-    if (!store.loading && screenContainer) {
-      store.page; // Track page changes
-      // Use requestAnimationFrame to ensure Solid has updated the DOM
-      requestAnimationFrame(() => {
-        gsap.fromTo(
-          screenContainer!.children,
-          {
-            opacity: 0,
-            y: 20,
-            filter: "blur(10px)",
-          },
-          {
-            opacity: 1,
-            y: 0,
-            filter: "blur(0px)",
-            duration: 0.5,
-            ease: "power2.out",
-            stagger: 0.1,
-            delay: 0.25,
-          },
-        );
-      });
-    }
-  });
+    createEffect(() => {
+        if (!store.loading && screenContainer) {
+            store.page; // Track page changes
+            // Use requestAnimationFrame to ensure Solid has updated the DOM
+            requestAnimationFrame(() => {
+                gsap.fromTo(
+                    screenContainer!.children,
+                    {
+                        opacity: 0,
+                        y: 20,
+                        filter: "blur(10px)",
+                    },
+                    {
+                        opacity: 1,
+                        y: 0,
+                        filter: "blur(0px)",
+                        duration: 0.3,
+                        ease: "power2.out",
+                        stagger: 0.1,
+                        delay: 0.15,
+                    },
+                );
+            });
+        }
+    });
 
-  return (
-    <>
-      <div data-tauri-drag-region class="fixed z-5 h-13 w-screen" />
-      <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-neutral-300 select-none">
-        <Show when={!store.loading} fallback={<MainLoadingScreen />}>
-          <div class="flex w-full flex-col items-center px-3">
-            <Hero />
-          </div>
-          {/* <Header /> */}
-          <Container>
-            <div ref={screenContainer} class="contents">
-              <Switch>
-                <Match when={store.page === "settings"}>
-                  <SettingsScreen />
-                </Match>
-                <Match when={store.page === "auth"}>
-                  <AuthScreen />
-                </Match>
-                <Match when={store.page === "main"}>
-                  <HomeScreen />
-                </Match>
-                <Match when={store.page === "power"}>
-                  <PowerScreen />
-                </Match>
-                <Match when={store.page === "ws"}>
-                  <WsScreen />
-                </Match>
-              </Switch>
+    return (
+        <>
+            <div data-tauri-drag-region class="fixed z-5 h-13 w-screen" />
+            <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-neutral-300 select-none">
+                <Show when={!store.loading} fallback={<MainLoadingScreen />}>
+                    <div class="flex w-full flex-col items-center px-3">
+                        <Hero />
+                    </div>
+                    {/* <Header /> */}
+                    <Container>
+                        <div ref={screenContainer} class="contents">
+                            <Switch>
+                                <Match when={store.page === "settings"}>
+                                    <SettingsScreen />
+                                </Match>
+                                <Match when={store.page === "auth"}>
+                                    <AuthScreen />
+                                </Match>
+                                <Match when={store.page === "main"}>
+                                    <HomeScreen />
+                                </Match>
+                                <Match when={store.page === "power"}>
+                                    <PowerScreen />
+                                </Match>
+                                <Match when={store.page === "ws"}>
+                                    <WsScreen />
+                                </Match>
+                            </Switch>
+                        </div>
+                    </Container>
+                    <div class="flex w-full flex-col items-center px-3">
+                        <Footer />
+                    </div>
+                </Show>
             </div>
-          </Container>
-          <div class="flex w-full flex-col items-center px-3">
-            <Footer />
-          </div>
-        </Show>
-      </div>
-    </>
-  );
+        </>
+    );
 };
 
 export default App;
