@@ -46,9 +46,12 @@ const AuthScreen = () => {
                 <NewKeySheet />
             </div>
             <div class="flex w-full flex-col gap-2">
-                {store.auth.keys.map((key) => (
-                    <ApiKeyItem apiKey={key} />
-                ))}
+                <For
+                    each={store.auth.keys}
+                    fallback={<p class="text-xs text-neutral-500">No API keys</p>}
+                >
+                    {(key) => <ApiKeyItem apiKey={key} />}
+                </For>
             </div>
             <div class="w-full border-b border-dashed"></div>
             <div class="flex w-full items-center justify-between px-2">
