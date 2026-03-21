@@ -402,11 +402,11 @@ export type FeatureKey =
     | "stream"
     | "media"
     | "processes"
-    | "autostart"
     | "shutdown"
     | "restart"
     | "hibernate"
-    | "sleep";
+    | "sleep"
+    | "autostart";
 
 /**
  * Toggle a specific feature and return updated config

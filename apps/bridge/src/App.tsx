@@ -4,11 +4,12 @@ import { createEffect, Match, Show, Switch } from "solid-js";
 import Footer from "./components/footer";
 import Hero from "./components/hero";
 import MainLoadingScreen from "./components/loading.main";
+import ApiScreen from "./components/screens/api/screen";
 import AuthScreen from "./components/screens/auth/screen";
 import HomeScreen from "./components/screens/home/screen";
-import PowerScreen from "./components/screens/power";
+import PowerScreen from "./components/screens/power/screen";
 import SettingsScreen from "./components/screens/settings/screen";
-import WsScreen from "./components/screens/ws";
+import TimingScreen from "./components/screens/timings/screen";
 import Container from "./components/ui/container";
 import { AppContextProvider, useApp } from "./context/app-context";
 
@@ -69,14 +70,17 @@ const Screen = () => {
                                 <Match when={store.page === "auth"}>
                                     <AuthScreen />
                                 </Match>
+                                <Match when={store.page === "api"}>
+                                    <ApiScreen />
+                                </Match>
                                 <Match when={store.page === "main"}>
                                     <HomeScreen />
                                 </Match>
                                 <Match when={store.page === "power"}>
                                     <PowerScreen />
                                 </Match>
-                                <Match when={store.page === "ws"}>
-                                    <WsScreen />
+                                <Match when={store.page === "timings"}>
+                                    <TimingScreen />
                                 </Match>
                             </Switch>
                         </div>
