@@ -1,4 +1,4 @@
-import { Clock3, Moon, Power, RotateCcw, SquareDashedMousePointer } from "lucide-solid";
+import { Clock3, SquareDashedMousePointer } from "lucide-solid";
 import { useApp } from "../../../context/app-context";
 import * as backend from "../../../lib/backend";
 import { FeatureKey } from "../../../lib/backend";
@@ -18,30 +18,10 @@ const TimingScreen = () => {
         <div class="flex w-full flex-1 flex-col gap-2.5 pt-2.5">
             <div class="w-full">
                 <p class="text-secondary text-xs font-semibold uppercase">
-                    Power Controls
+                    Timings & Intervals
                 </p>
             </div>
-            <FeatureCard
-                icon={<Power />}
-                title="Shutdown"
-                description="Allow system shutdown"
-                value={store.cfg!.features.enable_shutdown}
-                onValueChange={() => toggle("shutdown")}
-            />
-            <FeatureCard
-                icon={<RotateCcw />}
-                title="Restart"
-                description="Allow system restart"
-                value={store.cfg!.features.enable_restart}
-                onValueChange={() => toggle("restart")}
-            />
-            <FeatureCard
-                icon={<Moon />}
-                title="Sleep"
-                description="Allow system sleep"
-                value={store.cfg!.features.enable_sleep}
-                onValueChange={() => toggle("sleep")}
-            />
+
             <FeatureCard
                 icon={<Clock3 />}
                 title="Hibernate"

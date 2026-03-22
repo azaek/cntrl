@@ -189,11 +189,11 @@ const Hero = () => {
                     <div class="pointer-events-none z-1 flex h-11.5 w-full items-center justify-between pr-2 pl-3">
                         <div class="flex items-center gap-2">
                             <Logo className="size-5 text-neutral-600" />
-                            <div class="flex flex-col gap-0.5">
-                                <p class="text-[10px] leading-none font-medium text-neutral-500">
+                            <div class="flex flex-col gap-px">
+                                <p class="text-xs leading-none font-medium text-neutral-500">
                                     <b>Cntrl</b> Bridge
                                 </p>
-                                <p class="text-[8px] leading-none font-bold text-neutral-600">
+                                <p class="text-[10px] leading-none font-bold text-neutral-600">
                                     {version()}
                                 </p>
                             </div>
