@@ -6,6 +6,7 @@ import Hero from "./components/hero";
 import MainLoadingScreen from "./components/loading.main";
 import ApiScreen from "./components/screens/api/screen";
 import AuthScreen from "./components/screens/auth/screen";
+import ConnectScreen from "./components/screens/connect/screen";
 import HomeScreen from "./components/screens/home/screen";
 import PowerScreen from "./components/screens/power/screen";
 import SettingsScreen from "./components/screens/settings/screen";
@@ -78,6 +79,9 @@ const Screen = () => {
                                 </Match>
                                 <Match when={store.page === "power"}>
                                     <PowerScreen />
+                                </Match>
+                                <Match when={store.page === "connect"}>
+                                    <ConnectScreen />
                                 </Match>
                                 <Match when={store.page === "timings"}>
                                     <TimingScreen />

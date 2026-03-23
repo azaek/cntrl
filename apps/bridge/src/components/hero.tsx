@@ -221,7 +221,7 @@ const Hero = () => {
                             <TextTip content="Connect">
                                 <IconButton
                                     onClick={() => {
-                                        closeWindow();
+                                        actions.setPage("connect");
                                     }}
                                 >
                                     <QrCode class="text-neutral-500" />
