@@ -1,66 +1,132 @@
-import { Clock3, SquareDashedMousePointer } from "lucide-solid";
+import { Activity, Database, Headphones, Radio, Waves } from "lucide-solid";
 import { useApp } from "../../../context/app-context";
 import * as backend from "../../../lib/backend";
-import { FeatureKey } from "../../../lib/backend";
-import FeatureCard from "../../feature-card";
-import { Button } from "../../ui/button";
+import IntervalCard, { type IntervalOption } from "../../interval-card";
+import PostContentBlock from "../post-content-block";
+
+const WS_STATS_OPTIONS: IntervalOption[] = [
+    { value: 250, label: "250ms" },
+    { value: 500, label: "500ms" },
+    { value: 1000, label: "1s" },
+    { value: 2000, label: "2s" },
+    { value: 5000, label: "5s" },
+    { value: 10000, label: "10s" },
+    { value: 30000, label: "30s" },
+];
+
+const WS_MEDIA_OPTIONS: IntervalOption[] = [
+    { value: 100, label: "100ms" },
+    { value: 250, label: "250ms" },
+    { value: 500, label: "500ms" },
+    { value: 1000, label: "1s" },
+    { value: 2000, label: "2s" },
+    { value: 5000, label: "5s" },
+];
+
+const WS_PROCESSES_OPTIONS: IntervalOption[] = [
+    { value: 1000, label: "1s" },
+    { value: 2000, label: "2s" },
+    { value: 3000, label: "3s" },
+    { value: 5000, label: "5s" },
+    { value: 10000, label: "10s" },
+    { value: 30000, label: "30s" },
+];
+
+const DISK_CACHE_OPTIONS: IntervalOption[] = [
+    { value: 5, label: "5s" },
+    { value: 10, label: "10s" },
+    { value: 30, label: "30s" },
+    { value: 60, label: "1m" },
+    { value: 120, label: "2m" },
+    { value: 300, label: "5m" },
+];
+
+const STREAM_OPTIONS: IntervalOption[] = [
+    { value: 1, label: "1s" },
+    { value: 2, label: "2s" },
+    { value: 5, label: "5s" },
+    { value: 10, label: "10s" },
+    { value: 30, label: "30s" },
+    { value: 60, label: "1m" },
+];
 
 const TimingScreen = () => {
     const [store, actions] = useApp();
 
-    const toggle = async (feature: FeatureKey) => {
-        const config = await backend.toggleFeatureWithResult(feature);
-        if (!config) return;
-        actions.setConfig(config);
+    const handleWsInterval = async (topic: backend.WebSocketTopic, value: number) => {
+        const config = await backend.updateWsInterval(topic, value);
+        if (config) actions.setConfig(config);
+    };
+
+    const handleDiskCache = async (value: number) => {
+        const config = await backend.updateDiskCacheSeconds(value);
+        if (config) actions.setConfig(config);
+    };
+
+    const handleStreamInterval = async (value: number) => {
+        const config = await backend.updateStreamInterval(value);
+        if (config) actions.setConfig(config);
     };
 
     return (
         <div class="flex w-full flex-1 flex-col gap-2.5 pt-2.5">
             <div class="w-full">
                 <p class="text-secondary text-xs font-semibold uppercase">
-                    Timings & Intervals
+                    WebSocket Intervals
                 </p>
             </div>
 
-            <FeatureCard
-                icon={<Clock3 />}
-                title="Hibernate"
-                description="Allow system hibernate"
-                value={store.cfg!.features.enable_hibernate}
-                onValueChange={() => toggle("hibernate")}
+            <IntervalCard
+                icon={<Activity />}
+                title="Stats"
+                description="System stats push rate"
+                options={WS_STATS_OPTIONS}
+                value={store.cfg!.websocket.stats.interval_ms}
+                onChange={(v) => handleWsInterval("stats", v)}
             />
 
-            <div class="relative flex min-h-50 w-full flex-col items-center justify-center px-2 text-neutral-500">
-                <div class="z-1 flex flex-col items-center">
-                    <SquareDashedMousePointer class="size-5" />
-                    <p class="mt-2 text-xs font-medium">
-                        Couldn't find what you're looking for?
-                    </p>
-                    <div class="flex items-center gap-2">
-                        <Button variant={"link"} class="text-xs">
-                            Docs
-                        </Button>
-                        <Button variant={"link"} class="text-xs">
-                            Github Issues
-                        </Button>
-                    </div>
-                </div>
-                <div
-                    class="pointer-events-none absolute inset-0 z-0"
-                    style={{
-                        "background-image": `
-                            linear-gradient(90deg, rgba(56,56,56,0.30) 1px, transparent 0),
-                            linear-gradient(180deg, rgba(56,56,56,0.30) 1px, transparent 0),
-                            repeating-linear-gradient(45deg, rgba(56,56,56,0.25) 0 2px, transparent 2px 6px)
-                        `,
-                        "background-size": "24px 24px, 24px 24px, 24px 24px",
-                    }}
-                />
-                <div class="from-background pointer-events-none absolute inset-x-0 top-0 h-1/2 w-full bg-linear-to-b to-transparent"></div>
-                <div class="from-background pointer-events-none absolute inset-x-0 bottom-0 h-1/2 w-full bg-linear-to-t to-transparent"></div>
-                <div class="from-background pointer-events-none absolute inset-y-0 left-0 h-full w-[20%] bg-linear-to-r to-transparent"></div>
-                <div class="from-background pointer-events-none absolute inset-y-0 right-0 h-full w-[20%] bg-linear-to-l to-transparent"></div>
+            <IntervalCard
+                icon={<Headphones />}
+                title="Media"
+                description="Media state check rate"
+                options={WS_MEDIA_OPTIONS}
+                value={store.cfg!.websocket.media.interval_ms}
+                onChange={(v) => handleWsInterval("media", v)}
+            />
+
+            <IntervalCard
+                icon={<Waves />}
+                title="Processes"
+                description="Process list refresh rate"
+                options={WS_PROCESSES_OPTIONS}
+                value={store.cfg!.websocket.processes.interval_ms}
+                onChange={(v) => handleWsInterval("processes", v)}
+            />
+
+            <div class="w-full pt-1">
+                <p class="text-secondary text-xs font-semibold uppercase">
+                    Polling Intervals
+                </p>
             </div>
+
+            <IntervalCard
+                icon={<Database />}
+                title="Disk & GPU Cache"
+                description="How long disk and GPU data is cached"
+                options={DISK_CACHE_OPTIONS}
+                value={store.cfg!.stats.disk_cache_seconds}
+                onChange={handleDiskCache}
+            />
+
+            <IntervalCard
+                icon={<Radio />}
+                title="SSE Stream"
+                description="REST stream endpoint poll rate"
+                options={STREAM_OPTIONS}
+                value={store.cfg!.stats.stream_interval_seconds}
+                onChange={handleStreamInterval}
+            />
+            <PostContentBlock />
         </div>
     );
 };
