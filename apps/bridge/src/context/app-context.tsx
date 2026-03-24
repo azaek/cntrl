@@ -14,6 +14,7 @@ type StoreType = {
     page: AppScreen;
     reloadingConfig: boolean;
     loading: boolean;
+    configError: boolean;
 };
 const defaultStore: StoreType = {
     cfg: null,
@@ -22,6 +23,7 @@ const defaultStore: StoreType = {
     page: "main",
     reloadingConfig: false,
     loading: true,
+    configError: false,
 };
 
 const defaultStoreSetter: {
@@ -33,6 +35,7 @@ const defaultStoreSetter: {
     setReloadingConfig: (reloadingConfig: boolean) => void;
     setLoading: (loading: boolean) => void;
     pollStatus: () => void;
+    retryConfig: () => void;
 } = {
     setConfig: () => {},
     setStatus: () => {},
@@ -42,6 +45,7 @@ const defaultStoreSetter: {
     setReloadingConfig: () => {},
     setLoading: () => {},
     pollStatus: () => {},
+    retryConfig: () => {},
 };
 
 export const AppContext = createContext<[StoreType, typeof defaultStoreSetter]>([
@@ -57,6 +61,7 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
         page: "main",
         reloadingConfig: false,
         loading: true,
+        configError: false,
     });
 
     const setStatus = (status: ServerState) => {
@@ -93,13 +98,24 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
         setState("page", page);
     };
 
-    onMount(() => {
+    const loadAppConfig = () => {
+        setState("configError", false);
         loadConfig({
-            onFinish: () => setLoading(false),
             onSuccess(c) {
                 setConfig(c);
+                setLoading(false);
+            },
+            onError() {
+                setState("configError", true);
+                // Keep loading: true so screens that need cfg are never rendered with null
             },
         });
+    };
+
+    const retryConfig = () => loadAppConfig();
+
+    onMount(() => {
+        loadAppConfig();
 
         isOnboardingCompleted().then((done) => {
             if (!done) setPage("welcome");
@@ -132,6 +148,7 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
                     setReloadingConfig,
                     setLoading,
                     pollStatus,
+                    retryConfig,
                 },
             ]}
         >

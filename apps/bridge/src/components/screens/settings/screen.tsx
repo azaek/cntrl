@@ -84,7 +84,7 @@ const SettingsScreen = () => {
                 <Network />
                 <div class="flex min-w-0 flex-1 flex-col items-start">
                     <p class="text-sm font-medium">Bind Address</p>
-                    <p class="text-xs opacity-40">Network interface to listen on</p>
+                    <p class="text-xs opacity-40">Listening interface</p>
                 </div>
                 <Select<BindOption>
                     value={currentBind()}
@@ -101,7 +101,11 @@ const SettingsScreen = () => {
                 >
                     <SelectTrigger class="h-8 w-28 border-white/10 px-2 py-1 text-xs">
                         <SelectValue<BindOption>>
-                            {(state) => state.selectedOption()?.label}
+                            {(state) => (
+                                <p class="line-clamp-1 flex-1 text-start">
+                                    {state.selectedOption()?.label}
+                                </p>
+                            )}
                         </SelectValue>
                     </SelectTrigger>
                     <SelectContent class="bg-background" />

@@ -523,10 +523,15 @@ pub async fn start_server(
         std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))
     });
 
-    let addr = SocketAddr::from((ip_addr, port));
-    println!("Server listening on {}", addr);
+    // On Windows, :: is IPv6-only (IPV6_V6ONLY=true by default), so binding 0.0.0.0
+    // won't accept IPv6 clients. We bind :: as a second listener to cover both.
+    // On Linux/macOS, :: is dual-stack by default, so 0.0.0.0 + :: would conflict on
+    // the same port — no second listener needed there.
+    let dual_stack = cfg!(target_os = "windows")
+        && ip_addr == std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
 
-    let listener = match tokio::net::TcpListener::bind(addr).await {
+    let addr_v4 = SocketAddr::from((ip_addr, port));
+    let listener = match tokio::net::TcpListener::bind(addr_v4).await {
         Ok(l) => l,
         Err(e) => {
             println!("Failed to bind port: {}", e);
@@ -535,20 +540,71 @@ pub async fn start_server(
         }
     };
 
+    let ipv6_listener = if dual_stack {
+        let addr_v6 = SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port));
+        match tokio::net::TcpListener::bind(addr_v6).await {
+            Ok(l) => {
+                println!("Server listening on {} (dual-stack)", addr_v4);
+                Some(l)
+            }
+            Err(e) => {
+                // IPv6 not available on this system — continue with IPv4 only
+                println!("IPv6 bind failed ({}), continuing with IPv4 only", e);
+                println!("Server listening on {}", addr_v4);
+                None
+            }
+        }
+    } else {
+        println!("Server listening on {}", addr_v4);
+        None
+    };
+
     status_tx.send_modify(|s| *s = ServerStatus::Running);
 
     let app = app.into_make_service_with_connect_info::<SocketAddr>();
 
-    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+    // Broadcast shutdown to both servers
+    let (inner_tx, inner_rx1) = tokio::sync::broadcast::channel::<()>(1);
+    let inner_rx2 = inner_tx.subscribe();
+
+    // Forward the external shutdown signal to the inner broadcast
+    tauri::async_runtime::spawn(async move {
         shutdown_rx.recv().await.ok();
         println!("Server received shutdown signal");
+        let _ = inner_tx.send(());
     });
 
-    if let Err(e) = server.await {
-        println!("Server exited with error: {}", e);
-        status_tx.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
+    let status_tx_clone = status_tx.clone();
+    if let Some(v6_listener) = ipv6_listener {
+        let app_v6 = app.clone();
+        let v4_task = tauri::async_runtime::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move { inner_rx1.resubscribe().recv().await.ok(); })
+                .await
+        });
+        let v6_task = tauri::async_runtime::spawn(async move {
+            axum::serve(v6_listener, app_v6)
+                .with_graceful_shutdown(async move { inner_rx2.resubscribe().recv().await.ok(); })
+                .await
+        });
+
+        let (r4, r6) = tokio::join!(v4_task, v6_task);
+        let err = r4.err().map(|e| e.to_string())
+            .or_else(|| r6.err().map(|e| e.to_string()));
+        if let Some(e) = err {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
+        } else {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Stopped);
+        }
     } else {
-        status_tx.send_modify(|s| *s = ServerStatus::Stopped);
+        let result = axum::serve(listener, app)
+            .with_graceful_shutdown(async move { inner_rx1.resubscribe().recv().await.ok(); })
+            .await;
+        if let Err(e) = result {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
+        } else {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Stopped);
+        }
     }
 }
 
@@ -727,7 +783,14 @@ fn is_local_network(ip: std::net::IpAddr) -> bool {
             v4.is_loopback() || v4.is_private() || v4.is_link_local()
         }
         std::net::IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+            if v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local() {
+                return true;
+            }
+            // IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.x) — check the inner IPv4
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            false
         }
     }
 }

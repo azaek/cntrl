@@ -755,9 +755,15 @@ fn update_config(
     // Apply server updates
     if let Some(server) = updates.get("server") {
         if let Some(port) = server.get("port").and_then(|v| v.as_u64()) {
+            if port < 1024 || port > 65535 {
+                return Err("Port must be between 1024 and 65535".to_string());
+            }
             config.server.port = port as u16;
         }
         if let Some(host) = server.get("host").and_then(|v| v.as_str()) {
+            if host.parse::<std::net::IpAddr>().is_err() {
+                return Err("Invalid IP address".to_string());
+            }
             config.server.host = host.to_string();
         }
     }
