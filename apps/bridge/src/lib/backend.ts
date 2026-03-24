@@ -602,15 +602,17 @@ export const installUpdate = async (
 ): Promise<boolean> => {
     try {
         // Download with progress
+        let downloaded = 0;
+        let total: number | null = null;
         await update.downloadAndInstall((event) => {
-            if (event.event === "Started" && onProgress) {
-                onProgress({ downloaded: 0, total: event.data.contentLength ?? null });
-            } else if (event.event === "Progress" && onProgress) {
-                onProgress({
-                    downloaded: event.data.chunkLength,
-                    total: null,
-                });
+            if (event.event === "Started") {
+                total = event.data.contentLength ?? null;
+                if (onProgress) onProgress({ downloaded: 0, total });
+            } else if (event.event === "Progress") {
+                downloaded += event.data.chunkLength;
+                if (onProgress) onProgress({ downloaded, total });
             } else if (event.event === "Finished") {
+                if (onProgress) onProgress({ downloaded: total ?? downloaded, total });
                 console.log("Update download finished");
             }
         });

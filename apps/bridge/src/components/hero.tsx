@@ -277,7 +277,11 @@ const Hero = () => {
                                 <Lock class="size-3 text-neutral-500" />
                             </Show>
                             <p class="text-xs font-medium text-neutral-600">
-                                Host <span class="text-neutral-400">{host()}</span>
+                                Host <span class="text-neutral-400">{host()}</span>&nbsp;
+                                Port{" "}
+                                <span class="text-neutral-400">
+                                    {store.cfg?.server.port}
+                                </span>
                             </p>
                         </div>
                         <CopyBtn

@@ -56,14 +56,15 @@ export interface AuthInfo {
  */
 export const getAuthInfo = async (): Promise<AuthInfo> => {
     try {
-        const [keys, config] = await Promise.all([
+        const [keys, mode, config] = await Promise.all([
             invoke<ApiKeySummary[]>("list_api_keys"),
+            invoke<string>("get_auth_mode"),
             invoke<{
-                auth: { enabled: boolean; allowed_ips: string[]; blocked_ips: string[] };
+                auth: { allowed_ips: string[]; blocked_ips: string[] };
             }>("get_config"),
         ]);
         return {
-            mode: config.auth.enabled ? "protected" : "public",
+            mode: mode === "protected" ? "protected" : "public",
             keys,
             allowed_ips: config.auth.allowed_ips ?? [],
             blocked_ips: config.auth.blocked_ips ?? [],
@@ -242,43 +243,6 @@ export const clearBlockedIps = async (): Promise<boolean> => {
         return true;
     } catch (e) {
         console.error("Failed to clear blocked IPs:", e);
-        return false;
-    }
-};
-
-// ============================================================================
-// Legacy Config Auth — DEPRECATED, use set_auth_mode + create_api_key instead
-// ============================================================================
-
-/** @deprecated use {@link setAuthMode} */
-export const toggleAuth = async (): Promise<boolean> => {
-    try {
-        await invoke("toggle_auth");
-        return true;
-    } catch (e) {
-        console.error("Failed to toggle auth:", e);
-        return false;
-    }
-};
-
-/** @deprecated use {@link createApiKey} */
-export const updateLegacyApiKey = async (apiKey: string | null): Promise<boolean> => {
-    try {
-        await invoke("update_api_key", { apiKey });
-        return true;
-    } catch (e) {
-        console.error("Failed to update API key:", e);
-        return false;
-    }
-};
-
-/** @deprecated use {@link createApiKey} */
-export const generateLegacyApiKey = async (): Promise<boolean> => {
-    try {
-        await invoke("generate_api_key");
-        return true;
-    } catch (e) {
-        console.error("Failed to generate API key:", e);
         return false;
     }
 };

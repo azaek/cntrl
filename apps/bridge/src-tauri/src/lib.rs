@@ -368,86 +368,6 @@ fn update_hostname(
     Ok(config.clone())
 }
 
-// ============================================================================
-// Auth Commands (DEPRECATED — use set_auth_mode, create_api_key, etc.)
-// ============================================================================
-
-#[deprecated(note = "use set_auth_mode instead")]
-#[tauri::command]
-fn toggle_auth(
-    state: tauri::State<Arc<Mutex<AppConfig>>>,
-    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let mut auth = auth_state.lock().unwrap();
-    auth.mode = match auth.mode {
-        AuthMode::Public => AuthMode::Protected,
-        AuthMode::Protected => AuthMode::Public,
-    };
-    auth_store::save_auth_state(&auth)?;
-
-    let mut config = state.lock().unwrap();
-    config.auth.enabled = matches!(auth.mode, AuthMode::Protected);
-    config::save_config(&app, &config);
-    Ok(())
-}
-
-#[deprecated(note = "use create_api_key instead")]
-#[tauri::command]
-fn update_api_key(
-    state: tauri::State<Arc<Mutex<AppConfig>>>,
-    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
-    app: tauri::AppHandle,
-    api_key: Option<String>,
-) -> Result<(), String> {
-    let mut auth = auth_state.lock().unwrap();
-    auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
-
-    if let Some(token) = api_key.as_ref().map(|s| s.trim().to_string()) {
-        if !token.is_empty() {
-            let record = auth_store::create_key_record_from_token(
-                &token,
-                "Legacy Key",
-                vec!["admin".to_string()],
-                ApiKeySource::Legacy,
-                None,
-            )?;
-            auth.keys.push(record);
-        }
-    }
-
-    auth_store::save_auth_state(&auth)?;
-
-    let mut config = state.lock().unwrap();
-    config.auth.api_key = None;
-    config::save_config(&app, &config);
-    Ok(())
-}
-
-#[deprecated(note = "use create_api_key instead")]
-#[tauri::command]
-fn generate_api_key(
-    state: tauri::State<Arc<Mutex<AppConfig>>>,
-    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let mut auth = auth_state.lock().unwrap();
-    auth.keys.retain(|k| k.source != ApiKeySource::Legacy);
-
-    let (record, _token) = auth_store::create_api_key(
-        "Legacy Key".to_string(),
-        vec!["admin".to_string()],
-        None,
-        ApiKeySource::Legacy,
-    )?;
-    auth.keys.push(record);
-    auth_store::save_auth_state(&auth)?;
-
-    let mut config = state.lock().unwrap();
-    config.auth.api_key = None;
-    config::save_config(&app, &config);
-    Ok(())
-}
 
 /// Validate an IP address, CIDR, or hostname entry.
 /// Accepts: raw IP ("192.168.1.1"), CIDR ("192.168.1.0/24"), or hostname ("pi.local").
@@ -463,11 +383,22 @@ fn validate_ip_entry(input: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // CIDR notation — validate network + prefix
+    // CIDR notation — validate network + prefix length against address family
     if input.contains('/') {
         if let Some((network, prefix)) = input.split_once('/') {
-            if network.parse::<std::net::IpAddr>().is_ok() && prefix.parse::<u8>().is_ok() {
-                return Ok(());
+            if let Ok(ip) = network.parse::<std::net::IpAddr>() {
+                if let Ok(len) = prefix.parse::<u8>() {
+                    let max = if ip.is_ipv4() { 32u8 } else { 128u8 };
+                    if len <= max {
+                        return Ok(());
+                    }
+                    return Err(format!(
+                        "Prefix length /{} is invalid for {} (max /{})",
+                        len,
+                        if ip.is_ipv4() { "IPv4" } else { "IPv6" },
+                        max
+                    ));
+                }
             }
         }
         return Err("Invalid CIDR notation".to_string());
@@ -593,6 +524,17 @@ fn summarize_key(record: &ApiKeyRecord) -> ApiKeySummary {
             ApiKeySource::Legacy => "legacy".to_string(),
             ApiKeySource::User => "user".to_string(),
         },
+    }
+}
+
+#[tauri::command]
+fn get_auth_mode(
+    auth_state: tauri::State<Arc<Mutex<AuthState>>>,
+) -> String {
+    let auth = auth_state.lock().unwrap();
+    match auth.mode {
+        AuthMode::Public => "public".to_string(),
+        AuthMode::Protected => "protected".to_string(),
     }
 }
 
@@ -951,9 +893,7 @@ pub fn run() {
             update_server_host,
             update_hostname,
             // Auth
-            toggle_auth,
-            update_api_key,
-            generate_api_key,
+            get_auth_mode,
             set_auth_mode,
             list_api_keys,
             create_api_key,
