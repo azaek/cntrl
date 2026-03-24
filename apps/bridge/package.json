@@ -22,6 +22,7 @@
         "@tailwindcss/vite": "catalog:",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-opener": "^2",
+        "@tauri-apps/plugin-store": "catalog:",
         "@tauri-apps/plugin-updater": "catalog:",
         "@types/qrcode": "catalog:",
         "class-variance-authority": "catalog:",

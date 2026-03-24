@@ -60,6 +60,9 @@ catalogs:
     '@tanstack/react-start':
       specifier: ^1.154.1
       version: 1.157.4
+    '@tauri-apps/plugin-store':
+      specifier: ^2.4.2
+      version: 2.4.2
     '@tauri-apps/plugin-updater':
       specifier: ^2.9.0
       version: 2.9.0
@@ -119,7 +122,7 @@ catalogs:
       version: 0.562.0
     nitro:
       specifier: npm:nitro-nightly@latest
-      version: 3.0.1-20260322-095631-ffdd706a
+      version: 3.0.1-20260324-103046-9ce219ca
     posthog-js:
       specifier: ^1.336.1
       version: 1.336.1
@@ -215,6 +218,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.3
+      '@tauri-apps/plugin-store':
+        specifier: 'catalog:'
+        version: 2.4.2
       '@tauri-apps/plugin-updater':
         specifier: 'catalog:'
         version: 2.9.0
@@ -381,7 +387,7 @@ importers:
         version: 0.562.0(react@19.2.3)
       nitro:
         specifier: 'catalog:'
-        version: nitro-nightly@3.0.1-20260322-095631-ffdd706a(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+        version: nitro-nightly@3.0.1-20260324-103046-9ce219ca(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -487,7 +493,7 @@ importers:
         version: 0.562.0(react@19.2.3)
       nitro:
         specifier: 'catalog:'
-        version: nitro-nightly@3.0.1-20260322-095631-ffdd706a(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+        version: nitro-nightly@3.0.1-20260324-103046-9ce219ca(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -593,7 +599,7 @@ importers:
         version: 0.562.0(react@19.2.3)
       nitro:
         specifier: 'catalog:'
-        version: nitro-nightly@3.0.1-20260322-095631-ffdd706a(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+        version: nitro-nightly@3.0.1-20260324-103046-9ce219ca(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -2899,6 +2905,9 @@ packages:
   '@tauri-apps/plugin-opener@2.5.3':
     resolution: {integrity: sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==}
 
+  '@tauri-apps/plugin-store@2.4.2':
+    resolution: {integrity: sha512-0ClHS50Oq9HEvLPhNzTNFxbWVOqoAp3dRvtewQBeqfIQ0z5m3JRnOISIn2ZVPCrQC0MyGyhTS9DWhHjpigQE7A==}
+
   '@tauri-apps/plugin-updater@2.9.0':
     resolution: {integrity: sha512-j++sgY8XpeDvzImTrzWA08OqqGqgkNyxczLD7FjNJJx/uXxMZFz5nDcfkyoI/rCjYuj2101Tci/r/HFmOmoxCg==}
 
@@ -4481,8 +4490,8 @@ packages:
       crossws:
         optional: true
 
-  h3@2.0.1-rc.18:
-    resolution: {integrity: sha512-2EdYEOIJwZHfhfdxvqZsmmUz4tgwzQSuzre+l50j+voHJV4m7j3zw2lYLgHoyfkCF9EAZcaH4ea0zH/hgcs9Yg==}
+  h3@2.0.1-rc.19:
+    resolution: {integrity: sha512-47er/mh8eGA7+0nvNUloalj+yTJ1ku8M0BVzA2I1ZHSlpfbUNdBK4LpWztfH7TwW6kuhF8MfAvl0AwB+X9B+2w==}
     engines: {node: '>=20.11.1'}
     hasBin: true
     peerDependencies:
@@ -5410,8 +5419,8 @@ packages:
   nf3@0.3.13:
     resolution: {integrity: sha512-drDt0yl4d/yUhlpD0GzzqahSpA5eUNeIfFq0/aoZb0UlPY0ZwP4u1EfREVvZrYdEnJ3OU9Le9TrzbvWgEkkeKw==}
 
-  nitro-nightly@3.0.1-20260322-095631-ffdd706a:
-    resolution: {integrity: sha512-0JYoJDf1RO8DxQbk53b1TtxGfM3Su+kNHgbrZpqAScEi+G54k6/nmAI7rgTGBNYLZgQW3zOXXNIpJRZpHhCVdw==}
+  nitro-nightly@3.0.1-20260324-103046-9ce219ca:
+    resolution: {integrity: sha512-N9ZennO7ZNNZT0/mBwfA288zGC5l+fp2MVu8QPjCwpyNSS+yvZacQrgVzWJsrl2UAAPVRgTroKbAo+m1Fds/sw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -9188,6 +9197,10 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.9.1
 
+  '@tauri-apps/plugin-store@2.4.2':
+    dependencies:
+      '@tauri-apps/api': 2.9.1
+
   '@tauri-apps/plugin-updater@2.9.0':
     dependencies:
       '@tauri-apps/api': 2.9.1
@@ -10929,7 +10942,7 @@ snapshots:
     optionalDependencies:
       crossws: 0.4.4(srvx@0.11.13)
 
-  h3@2.0.1-rc.18(crossws@0.4.4(srvx@0.11.13)):
+  h3@2.0.1-rc.19(crossws@0.4.4(srvx@0.11.13)):
     dependencies:
       rou3: 0.8.1
       srvx: 0.11.13
@@ -12082,13 +12095,13 @@ snapshots:
 
   nf3@0.3.13: {}
 
-  nitro-nightly@3.0.1-20260322-095631-ffdd706a(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)):
+  nitro-nightly@3.0.1-20260324-103046-9ce219ca(chokidar@5.0.0)(dotenv@17.2.3)(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))(jiti@2.6.1)(vite@8.0.0-beta.10(@types/node@24.10.9)(esbuild@0.27.2)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)):
     dependencies:
       consola: 3.4.2
       crossws: 0.4.4(srvx@0.11.13)
       db0: 0.3.4(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(kysely@0.28.10)(postgres@3.4.8))
       env-runner: 0.1.6
-      h3: 2.0.1-rc.18(crossws@0.4.4(srvx@0.11.13))
+      h3: 2.0.1-rc.19(crossws@0.4.4(srvx@0.11.13))
       hookable: 6.1.0
       nf3: 0.3.13
       ocache: 0.1.4

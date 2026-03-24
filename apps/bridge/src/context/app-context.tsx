@@ -4,6 +4,7 @@ import type { AuthInfo } from "../lib/auth";
 import * as auth from "../lib/auth";
 import * as backend from "../lib/backend";
 import { Config, ServerState, loadConfig } from "../lib/backend";
+import { isOnboardingCompleted } from "../lib/ui-store";
 import { AppScreen } from "../types";
 
 type StoreType = {
@@ -98,6 +99,10 @@ export const AppContextProvider = (props: { children: JSX.Element | JSX.Element[
             onSuccess(c) {
                 setConfig(c);
             },
+        });
+
+        isOnboardingCompleted().then((done) => {
+            if (!done) setPage("welcome");
         });
 
         // Enable rounded corners on macOS

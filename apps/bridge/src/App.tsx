@@ -11,6 +11,7 @@ import HomeScreen from "./components/screens/home/screen";
 import PowerScreen from "./components/screens/power/screen";
 import SettingsScreen from "./components/screens/settings/screen";
 import TimingScreen from "./components/screens/timings/screen";
+import WelcomeScreen from "./components/screens/welcome/screen";
 import Container from "./components/ui/container";
 import { AppContextProvider, useApp } from "./context/app-context";
 
@@ -56,44 +57,46 @@ const Screen = () => {
     return (
         <>
             <div data-tauri-drag-region class="fixed z-5 h-13 w-screen" />
-            <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-neutral-300 select-none">
-                <Show when={!store.loading} fallback={<MainLoadingScreen />}>
-                    <div class="flex w-full flex-col items-center px-3">
-                        <Hero />
-                    </div>
-                    {/* <Header /> */}
-                    <Container>
-                        <div ref={screenContainer} class="contents">
-                            <Switch>
-                                <Match when={store.page === "settings"}>
-                                    <SettingsScreen />
-                                </Match>
-                                <Match when={store.page === "auth"}>
-                                    <AuthScreen />
-                                </Match>
-                                <Match when={store.page === "api"}>
-                                    <ApiScreen />
-                                </Match>
-                                <Match when={store.page === "main"}>
-                                    <HomeScreen />
-                                </Match>
-                                <Match when={store.page === "power"}>
-                                    <PowerScreen />
-                                </Match>
-                                <Match when={store.page === "connect"}>
-                                    <ConnectScreen />
-                                </Match>
-                                <Match when={store.page === "timings"}>
-                                    <TimingScreen />
-                                </Match>
-                            </Switch>
+            <Show when={store.page !== "welcome"} fallback={<WelcomeScreen />}>
+                <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-neutral-300 select-none">
+                    <Show when={!store.loading} fallback={<MainLoadingScreen />}>
+                        <div class="flex w-full flex-col items-center px-3">
+                            <Hero />
                         </div>
-                    </Container>
-                    <div class="flex w-full flex-col items-center px-3">
-                        <Footer />
-                    </div>
-                </Show>
-            </div>
+                        {/* <Header /> */}
+                        <Container>
+                            <div ref={screenContainer} class="contents">
+                                <Switch>
+                                    <Match when={store.page === "settings"}>
+                                        <SettingsScreen />
+                                    </Match>
+                                    <Match when={store.page === "auth"}>
+                                        <AuthScreen />
+                                    </Match>
+                                    <Match when={store.page === "api"}>
+                                        <ApiScreen />
+                                    </Match>
+                                    <Match when={store.page === "main"}>
+                                        <HomeScreen />
+                                    </Match>
+                                    <Match when={store.page === "power"}>
+                                        <PowerScreen />
+                                    </Match>
+                                    <Match when={store.page === "connect"}>
+                                        <ConnectScreen />
+                                    </Match>
+                                    <Match when={store.page === "timings"}>
+                                        <TimingScreen />
+                                    </Match>
+                                </Switch>
+                            </div>
+                        </Container>
+                        <div class="flex w-full flex-col items-center px-3">
+                            <Footer />
+                        </div>
+                    </Show>
+                </div>
+            </Show>
         </>
     );
 };

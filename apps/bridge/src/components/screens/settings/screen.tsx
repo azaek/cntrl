@@ -1,4 +1,12 @@
-import { Cpu, Globe, Network, RefreshCcwDot, RotateCcw, Server } from "lucide-solid";
+import {
+    Cpu,
+    FolderOpen,
+    Globe,
+    Network,
+    RefreshCcwDot,
+    RotateCcw,
+    Server,
+} from "lucide-solid";
 import { useApp } from "../../../context/app-context";
 import * as backend from "../../../lib/backend";
 import FeatureCard from "../../feature-card";
@@ -135,6 +143,21 @@ const SettingsScreen = () => {
                 value={store.cfg!.features.enable_autostart}
                 onValueChange={() => handleToggle("autostart")}
             />
+
+            <div class="w-full pt-1">
+                <p class="text-secondary text-xs font-semibold uppercase">Config</p>
+            </div>
+
+            <button
+                onClick={() => backend.openConfig()}
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-white transition-colors hover:bg-neutral-800 [&_svg:not([class*='size-'])]:size-4.5"
+            >
+                <FolderOpen />
+                <div class="flex min-w-0 flex-1 flex-col items-start">
+                    <p class="text-sm font-medium">Open Config Directory</p>
+                    <p class="text-xs opacity-40">Browse the raw config.json file</p>
+                </div>
+            </button>
 
             <PostContentBlock />
         </div>
