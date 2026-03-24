@@ -188,14 +188,17 @@ const Hero = () => {
                 >
                     <div class="pointer-events-none z-1 flex h-11.5 w-full items-center justify-between pr-2 pl-3">
                         <div class="flex items-center gap-2">
-                            <Logo className="size-5 text-neutral-600" />
+                            <Logo className="size-5.5 text-neutral-600" />
                             <div class="flex flex-col gap-px">
-                                <p class="text-xs leading-none font-medium text-neutral-500">
-                                    <b>Cntrl</b> Bridge
-                                </p>
                                 <p class="text-[10px] leading-none font-bold text-neutral-600">
-                                    {version()}
+                                    Cntrl
                                 </p>
+                                <p class="text-xs leading-none font-medium text-neutral-500">
+                                    Bridge
+                                </p>
+                                {/*<p class="text-[10px] leading-none font-bold text-neutral-600">
+                                    {version()}
+                                </p>*/}
                             </div>
                         </div>
                         <div
@@ -214,7 +217,7 @@ const Hero = () => {
                                             actions.setPage("main");
                                         }}
                                     >
-                                        <HouseWifi class="text-neutral-500" />
+                                        <HouseWifi class="text-neutral-200" />
                                     </IconButton>
                                 </TextTip>
                             </div>
@@ -224,7 +227,7 @@ const Hero = () => {
                                         actions.setPage("connect");
                                     }}
                                 >
-                                    <QrCode class="text-neutral-500" />
+                                    <QrCode class="text-neutral-200" />
                                 </IconButton>
                             </TextTip>
                             <TextTip content="Close">
@@ -233,7 +236,7 @@ const Hero = () => {
                                         closeWindow();
                                     }}
                                 >
-                                    <X class="text-neutral-600" />
+                                    <X class="text-neutral-200" />
                                 </IconButton>
                             </TextTip>
                         </div>
