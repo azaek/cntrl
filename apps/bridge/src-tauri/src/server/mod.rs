@@ -64,19 +64,19 @@ impl LoopManager {
 
         if is_stats_topic {
             let mut handle = self.stats_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting stats loop");
                 *handle = Some(spawn_stats_loop(state));
             }
         } else if is_media_topic {
             let mut handle = self.media_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting media loop");
                 *handle = Some(spawn_media_loop(state));
             }
         } else if is_processes_topic {
             let mut handle = self.processes_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting processes loop");
                 *handle = Some(spawn_processes_loop(state));
             }
