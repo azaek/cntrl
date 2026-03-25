@@ -4,6 +4,17 @@ description: Release notes and breaking changes for the React SDK.
 icon: FileText
 ---
 
+## 0.2.0
+
+### Breaking Changes
+
+- Dropped `zod` dependency — `BridgeConfigSchema` is no longer exported. Use the `BridgeConfig` interface and `parseBridgeConfig()` instead.
+- `@tanstack/react-query` is now a peer dependency — must be installed separately.
+
+### Improvements
+
+- Reduced SDK install footprint by ~7 MB (removed zod, moved react-query to peer dependencies).
+
 ## 0.1.1
 
 ### Bug Fixes

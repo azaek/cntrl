@@ -1,66 +1,66 @@
 {
-  "name": "@cntrl-pw/sdk",
-  "version": "0.1.1",
-  "description": "SDK for Cntrl Bridge devices — REST/WebSocket client and React hooks for controlling your PC over the local network.",
-  "type": "module",
-  "license": "MIT",
-  "private": false,
-  "sideEffects": false,
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/azaek/cntrl.git",
-    "directory": "packages/sdk"
-  },
-  "homepage": "https://cntrl.pw/docs",
-  "keywords": [
-    "cntrl",
-    "bridge",
-    "sdk",
-    "websocket",
-    "react",
-    "hooks",
-    "local-network",
-    "remote-control"
-  ],
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "build": "tsdown",
-    "prepublishOnly": "pnpm build",
-    "lint": "eslint .",
-    "check-types": "tsc --noEmit"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
+    "name": "@cntrl-pw/sdk",
+    "version": "0.2.0",
+    "description": "SDK for Cntrl Bridge devices — REST/WebSocket client and React hooks for controlling your PC over the local network.",
+    "type": "module",
+    "license": "MIT",
+    "private": false,
+    "sideEffects": false,
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/azaek/cntrl.git",
+        "directory": "packages/sdk"
     },
-    "./client": {
-      "types": "./dist/client.d.mts",
-      "import": "./dist/client.mjs"
+    "homepage": "https://cntrl.pw/docs",
+    "keywords": [
+        "cntrl",
+        "bridge",
+        "sdk",
+        "websocket",
+        "react",
+        "hooks",
+        "local-network",
+        "remote-control"
+    ],
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "build": "tsdown",
+        "prepublishOnly": "pnpm build",
+        "lint": "eslint .",
+        "check-types": "tsc --noEmit"
     },
-    "./types": {
-      "types": "./dist/types.d.mts",
-      "import": "./dist/types.mjs"
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.mts",
+            "import": "./dist/index.mjs"
+        },
+        "./client": {
+            "types": "./dist/client.d.mts",
+            "import": "./dist/client.mjs"
+        },
+        "./types": {
+            "types": "./dist/types.d.mts",
+            "import": "./dist/types.mjs"
+        }
+    },
+    "dependencies": {
+        "zustand": "catalog:"
+    },
+    "devDependencies": {
+        "@cntrl-pw/eslint-config": "workspace:*",
+        "@cntrl-pw/tsconfig": "workspace:*",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "eslint": "catalog:",
+        "tsdown": "^0.20.1",
+        "typescript": "catalog:"
+    },
+    "peerDependencies": {
+        "@tanstack/react-query": "catalog:",
+        "react": "catalog:"
     }
-  },
-  "dependencies": {
-    "zustand": "catalog:"
-  },
-  "devDependencies": {
-    "@cntrl-pw/eslint-config": "workspace:*",
-    "@cntrl-pw/tsconfig": "workspace:*",
-    "@types/node": "catalog:",
-    "@types/react": "catalog:",
-    "eslint": "catalog:",
-    "tsdown": "^0.20.1",
-    "typescript": "catalog:"
-  },
-  "peerDependencies": {
-    "@tanstack/react-query": "catalog:",
-    "react": "catalog:"
-  }
 }

@@ -1,57 +1,104 @@
+import gsap from "gsap";
 import type { Component } from "solid-js";
-import { createEffect, Show } from "solid-js";
+import { createEffect, Match, Show, Switch } from "solid-js";
 import Footer from "./components/footer";
-import Header from "./components/header";
+import Hero from "./components/hero";
 import MainLoadingScreen from "./components/loading.main";
-import AuthScreen from "./components/screens/auth";
-import MainScreen from "./components/screens/main";
-import PowerScreen from "./components/screens/power";
-import WsScreen from "./components/screens/ws";
+import ApiScreen from "./components/screens/api/screen";
+import AuthScreen from "./components/screens/auth/screen";
+import ConnectScreen from "./components/screens/connect/screen";
+import HomeScreen from "./components/screens/home/screen";
+import PowerScreen from "./components/screens/power/screen";
+import SettingsScreen from "./components/screens/settings/screen";
+import TimingScreen from "./components/screens/timings/screen";
+import WelcomeScreen from "./components/screens/welcome/screen";
+import Container from "./components/ui/container";
 import { AppContextProvider, useApp } from "./context/app-context";
-import * as backend from "./lib/backend";
 
 const App: Component = () => {
-  return (
-    <AppContextProvider>
-      <Screen />
-    </AppContextProvider>
-  );
+    return (
+        <AppContextProvider>
+            <Screen />
+        </AppContextProvider>
+    );
 };
 
 const Screen = () => {
-  const [store] = useApp();
+    const [store] = useApp();
 
-  createEffect(() => {
-    const p = store.page;
-    switch (p) {
-      case "main":
-        backend.setWindowSize(380, 626);
-        break;
-      case "auth":
-        backend.setWindowSize(380, 532);
-        break;
-      case "power":
-        backend.setWindowSize(380, 425);
-        break;
-      default:
-        backend.setWindowSize(380, 425);
-        break;
-    }
-  });
+    let screenContainer: HTMLDivElement | undefined;
 
-  return (
-    <div class="bg-bg flex min-h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-md p-1 font-sans text-white select-none">
-      <Show when={!store.loading} fallback={<MainLoadingScreen />}>
-        {/* Header */}
-        <Header />
-        {store.page === "auth" && <AuthScreen />}
-        {store.page === "main" && <MainScreen />}
-        {store.page === "power" && <PowerScreen />}
-        {store.page === "ws" && <WsScreen />}
-        <Footer />
-      </Show>
-    </div>
-  );
+    createEffect(() => {
+        if (!store.loading && screenContainer) {
+            store.page; // Track page changes
+            // Use requestAnimationFrame to ensure Solid has updated the DOM
+            requestAnimationFrame(() => {
+                gsap.fromTo(
+                    screenContainer!.children,
+                    {
+                        opacity: 0,
+                        y: 20,
+                        filter: "blur(10px)",
+                    },
+                    {
+                        opacity: 1,
+                        y: 0,
+                        filter: "blur(0px)",
+                        duration: 0.3,
+                        ease: "power2.out",
+                        stagger: 0.1,
+                        delay: 0.15,
+                    },
+                );
+            });
+        }
+    });
+
+    return (
+        <>
+            <div data-tauri-drag-region class="fixed z-5 h-13 w-screen" />
+            <Show when={store.page !== "welcome"} fallback={<WelcomeScreen />}>
+                <div class="flex h-screen w-screen flex-1 flex-col gap-0.5 overflow-hidden rounded-2xl bg-neutral-900 py-3 font-sans text-neutral-300 select-none">
+                    <Show when={!store.loading} fallback={<MainLoadingScreen />}>
+                        <div class="flex w-full flex-col items-center px-3">
+                            <Hero />
+                        </div>
+                        {/* <Header /> */}
+                        <Container>
+                            <div ref={screenContainer} class="contents">
+                                <Switch>
+                                    <Match when={store.page === "settings"}>
+                                        <SettingsScreen />
+                                    </Match>
+                                    <Match when={store.page === "auth"}>
+                                        <AuthScreen />
+                                    </Match>
+                                    <Match when={store.page === "api"}>
+                                        <ApiScreen />
+                                    </Match>
+                                    <Match when={store.page === "main"}>
+                                        <HomeScreen />
+                                    </Match>
+                                    <Match when={store.page === "power"}>
+                                        <PowerScreen />
+                                    </Match>
+                                    <Match when={store.page === "connect"}>
+                                        <ConnectScreen />
+                                    </Match>
+                                    <Match when={store.page === "timings"}>
+                                        <TimingScreen />
+                                    </Match>
+                                </Switch>
+                            </div>
+                        </Container>
+                        <div class="flex w-full flex-col items-center px-3">
+                            <Footer />
+                        </div>
+                    </Show>
+                </div>
+            </Show>
+        </>
+    );
 };
 
 export default App;

@@ -36,42 +36,24 @@ const Footer = () => {
   return (
     <>
       <Divider />
-      <footer class="bg-bg sticky bottom-0 z-10 flex min-h-9 items-center justify-between gap-3 p-2">
-        <div class="flex items-center gap-1 text-[#39393B]">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
-              d="M0 7.22581C0 3.81953 0 2.11639 1.05819 1.05819C2.11639 0 3.81953 0 7.22581 0H8.77419C12.1805 0 13.8836 0 14.9418 1.05819C16 2.11639 16 3.81953 16 7.22581V8.77419C16 12.1805 16 13.8836 14.9418 14.9418C13.8836 16 12.1805 16 8.77419 16H7.22581C3.81953 16 2.11639 16 1.05819 14.9418C0 13.8836 0 12.1805 0 8.77419V7.22581ZM10.1835 11.7626C10.1667 10.082 9.49159 8.47498 8.30315 7.28654C7.11471 6.0981 5.50768 5.42297 3.82707 5.40615C3.11448 5.39902 2.531 5.97109 2.52387 6.68368C2.51682 7.39621 3.08868 7.97957 3.80123 7.98669C4.8064 7.99675 5.76756 8.40053 6.47836 9.11133C7.18916 9.82213 7.59294 10.7833 7.60299 11.7885C7.61012 12.501 8.19348 13.0729 8.90601 13.0658C9.6186 13.0587 10.1907 12.4752 10.1835 11.7626ZM4.68584 10.9266C5.18969 11.4305 5.18972 12.2475 4.68584 12.7513C4.18195 13.2552 3.36495 13.2552 2.86104 12.7513L2.85374 12.744C2.34984 12.2401 2.34984 11.4232 2.85374 10.9193C3.35764 10.4153 4.17463 10.4153 4.67853 10.9193L4.68584 10.9266Z"
-              fill="#39393B"
-            />
-          </svg>
+      <footer class="z-10 flex w-full items-center justify-between gap-3 pt-2 pb-1">
+        <div class="flex items-center gap-1 text-neutral-500">
           {version() && (
-            <p class="text-fg-muted/50 font-mono text-xs tracking-tighter">
-              v{version()}
-            </p>
+            <p class="text-xs tracking-tighter text-neutral-500">v{version()}</p>
           )}
           {update().status === "available" && !updating() && (
             <button
               onClick={() => {
                 handleUpdate();
               }}
-              class="bg-card hover:bg-secondary/40 group -my-2 flex cursor-pointer items-center gap-2 rounded py-1.5 pr-3 pl-2 transition-colors"
+              class="group -my-2 flex cursor-pointer items-center gap-1 rounded-md bg-neutral-800 py-1.5 pr-3 pl-2 transition-colors hover:bg-neutral-700/50"
             >
               <UpdateIcon />
-              <p class="text-xs font-medium text-white/40 group-hover:text-white">
-                Update Available!
-              </p>
+              <p class="text-[10px] font-medium text-neutral-300">Update Available!</p>
             </button>
           )}
           {updating() && (
-            <div class="bg-bg-dark h-2 w-10 rounded-full">
+            <div class="h-2 w-14 rounded-full bg-neutral-950">
               <div
                 style={{
                   width: `${((progress()?.downloaded || 0) / (progress()?.total || 1)) * 100}%`,
@@ -83,13 +65,13 @@ const Footer = () => {
         </div>
         <div class="flex items-center gap-2">
           <button
-            class="hover:bg-fg-muted/10 -m-1 flex items-center gap-1 rounded p-1 transition-colors"
+            class="hover:bg-fg-muted/10 -m-1 flex cursor-pointer items-center gap-1 rounded p-1 transition-colors"
             onClick={() => openUrl("https://github.com/azaek/cntrl")}
             title="GitHub"
           >
             <svg
-              width="18"
-              height="18"
+              width="16"
+              height="16"
               viewBox="0 0 18 18"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -102,12 +84,12 @@ const Footer = () => {
           </button>
           <div class="h-3 border-r"></div>
           <button
-            class="hover:bg-fg-muted/10 text-fg-muted -m-1 flex items-center gap-1 rounded p-1 transition-colors"
+            class="hover:bg-fg-muted/10 text-fg-muted -m-1 flex cursor-pointer items-center gap-1 rounded p-1 transition-colors"
             onClick={() => openUrl("https://cntrl.pw")}
             title="Documentation"
           >
-            <BookOpen class="size-4" />
-            <p class="text-xs font-medium">Docs</p>
+            <BookOpen class="size-3.5" />
+            <p class="text-[10px] font-medium">Docs</p>
           </button>
         </div>
       </footer>
@@ -117,7 +99,7 @@ const Footer = () => {
 
 const UpdateIcon = (props: { class?: string }) => (
   <svg
-    class={cn("aspect-square size-4", props.class)}
+    class={cn("aspect-square size-3.5", props.class)}
     viewBox="0 0 12 12"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"

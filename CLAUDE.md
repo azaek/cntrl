@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Cntrl Bridge: The programmable API for multi-OS desktop control.
+Cntrl Bridge: The programmable, open-source API for multi-OS desktop control.
 
 This monorepo contains the bridge app, SDK, UI components, and consumer apps.
 
@@ -75,17 +75,54 @@ const { shutdown, sleep } = usePower(bridgeId);
 
 Base: `http://<ip>:9990` / `ws://<ip>:9990/api/ws`
 
-Auth: `Authorization: Bearer <api_key>` (optional)
+Auth: `Authorization: Bearer <api_key>` (scope-based, see below)
+
+### Auth System
+
+Role-based API key auth with scoped permissions. Implemented in `auth_store.rs` and `auth_scopes.rs`.
+
+**Modes**: `public` (local-network only guard) or `protected` (API key required)
+
+**API Keys** (`ApiKeyRecord`):
+
+- Argon2 hashed, stored in OS keyring (`cntrl.bridge` service)
+- Have scopes, expiration, revocation, created/last-used timestamps
+- Token format: `ck_<64 hex chars>`, ID format: `key_<32 hex chars>`
+- Source: `legacy` (migrated from config) or `user` (created in app)
+
+**Scopes** (each key can have one or more):
+
+| Scope               | Grants access to                                  |
+| ------------------- | ------------------------------------------------- |
+| `admin`             | Everything (superscope)                           |
+| `system:read`       | `GET /api/status`, `GET /api/system`              |
+| `usage:read`        | `GET /api/usage`                                  |
+| `stats:read`        | WS stats topics (cpu, memory, gpu, disks, net)    |
+| `media:read`        | `GET /api/media/status`, WS media topic           |
+| `media:control`     | `POST /api/media/control`, WS media commands      |
+| `processes:read`    | `GET /api/processes`, WS processes topic          |
+| `processes:control` | `POST /api/processes/{kill,focus,launch}`         |
+| `power:control`     | `POST /api/pw/{shutdown,restart,sleep,hibernate}` |
+| `stream:read`       | `GET /api/stream`                                 |
+| `ws:connect`        | `GET /api/ws`                                     |
+
+**Middleware flow** (`auth_middleware` in `server/mod.rs`):
+
+1. Check blocked IPs (always enforced)
+2. If `public` mode → allow local network, reject external
+3. Check allowed IPs (bypass auth if matched)
+4. Extract Bearer token → find active record → check scope for endpoint
+5. WS topics and commands are also scope-checked
 
 ### REST Endpoints
 
-- `GET /api/status` - Health check (public)
-- `GET /api/system` - Static system info
-- `GET /api/usage` - Dynamic usage stats
-- `POST /api/media/control` - Media actions
-- `POST /api/processes/kill` - Kill process
-- `POST /api/processes/launch` - Launch app
-- `POST /api/pw/{shutdown,restart,sleep,hibernate}` - Power control
+- `GET /api/status` - Health check (`system:read`)
+- `GET /api/system` - Static system info (`system:read`)
+- `GET /api/usage` - Dynamic usage stats (`usage:read`)
+- `POST /api/media/control` - Media actions (`media:control`)
+- `POST /api/processes/kill` - Kill process (`processes:control`)
+- `POST /api/processes/launch` - Launch app (`processes:control`)
+- `POST /api/pw/{shutdown,restart,sleep,hibernate}` - Power control (`power:control`)
 
 ### WebSocket
 

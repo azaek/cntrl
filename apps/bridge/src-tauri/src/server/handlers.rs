@@ -20,6 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::AppConfig;
+use crate::auth_store::AuthState;
 use crate::server::types::*;
 
 /// Subscribe to topics - increments ref counts and starts loops if needed
@@ -75,6 +76,7 @@ pub struct AppState {
     pub broadcast_tx: tokio::sync::broadcast::Sender<crate::server::types::BroadcastEvent>,
     pub active_topics: Arc<Mutex<std::collections::HashMap<String, usize>>>,
     pub config: Arc<Mutex<AppConfig>>,
+    pub auth_state: Arc<Mutex<AuthState>>,
     pub loop_manager: Arc<crate::server::LoopManager>,
 }
 

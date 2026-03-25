@@ -1,14 +1,15 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(pnpm install:*)",
-      "Bash(pnpm check-types:*)",
-      "Bash(pnpm lint:*)",
-      "Bash(timeout 10 pnpm dev:hub:*)",
-      "Bash(timeout 10 pnpm dev:rhub:*)",
-      "WebFetch(domain:www.anthropic.com)",
-      "Bash(cargo check:*)",
-      "Bash(pnpm --filter @cntrl-pw/sdk check-types:*)"
-    ]
-  }
+    "permissions": {
+        "allow": [
+            "Bash(pnpm install:*)",
+            "Bash(pnpm check-types:*)",
+            "Bash(pnpm lint:*)",
+            "Bash(timeout 10 pnpm dev:hub:*)",
+            "Bash(timeout 10 pnpm dev:rhub:*)",
+            "WebFetch(domain:www.anthropic.com)",
+            "Bash(cargo check:*)",
+            "Bash(pnpm --filter @cntrl-pw/sdk check-types:*)",
+            "mcp__acp__Edit"
+        ]
+    }
 }

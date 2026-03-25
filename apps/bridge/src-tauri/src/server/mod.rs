@@ -13,6 +13,8 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::AppConfig;
+use crate::auth_scopes::{self, AuthContext, SCOPE_ADMIN};
+use crate::auth_store::{self, AuthMode};
 
 pub mod gpu;
 pub mod handlers;
@@ -62,19 +64,19 @@ impl LoopManager {
 
         if is_stats_topic {
             let mut handle = self.stats_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting stats loop");
                 *handle = Some(spawn_stats_loop(state));
             }
         } else if is_media_topic {
             let mut handle = self.media_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting media loop");
                 *handle = Some(spawn_media_loop(state));
             }
         } else if is_processes_topic {
             let mut handle = self.processes_handle.lock().unwrap();
-            if handle.is_none() {
+            if handle.as_ref().map_or(true, |h| h.is_finished()) {
                 println!("[LoopManager] Starting processes loop");
                 *handle = Some(spawn_processes_loop(state));
             }
@@ -455,7 +457,8 @@ use ws::ws_handler;
 pub async fn start_server(
     port: u16,
     config: Arc<Mutex<AppConfig>>,
-    status_handle: Arc<Mutex<ServerStatus>>,
+    auth_state: Arc<Mutex<auth_store::AuthState>>,
+    status_tx: Arc<tokio::sync::watch::Sender<ServerStatus>>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     let loop_manager = Arc::new(LoopManager::new());
@@ -479,6 +482,7 @@ pub async fn start_server(
         },
         active_topics: Arc::new(Mutex::new(std::collections::HashMap::new())),
         config: config,
+        auth_state: auth_state,
         loop_manager: loop_manager,
     });
 
@@ -486,8 +490,8 @@ pub async fn start_server(
     // when clients subscribe to topics.
     println!("Server initialized with lazy loop spawning (zero CPU when idle)");
 
-    let app = Router::new()
-        .route("/api/status", get(status_handler))
+    // Authenticated routes
+    let authed = Router::new()
         .route("/api/system", get(get_system_info))
         .route("/api/usage", get(get_system_usage))
         .route("/api/processes", get(list_processes))
@@ -505,9 +509,17 @@ pub async fn start_server(
             state.clone(),
             auth_middleware,
         ))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
+
+    // Public routes (no auth required)
+    let public = Router::new()
+        .route("/api/status", get(status_handler));
+
+    let app = Router::new()
+        .merge(authed)
+        .merge(public)
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http());
 
     let host = {
         let c = state.config.lock().unwrap();
@@ -519,56 +531,105 @@ pub async fn start_server(
         std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))
     });
 
-    let addr = SocketAddr::from((ip_addr, port));
-    println!("Server listening on {}", addr);
+    // On Windows, :: is IPv6-only (IPV6_V6ONLY=true by default), so binding 0.0.0.0
+    // won't accept IPv6 clients. We bind :: as a second listener to cover both.
+    // On Linux/macOS, :: is dual-stack by default, so 0.0.0.0 + :: would conflict on
+    // the same port — no second listener needed there.
+    let dual_stack = cfg!(target_os = "windows")
+        && ip_addr == std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
 
-    let listener = match tokio::net::TcpListener::bind(addr).await {
+    let addr_v4 = SocketAddr::from((ip_addr, port));
+    let listener = match tokio::net::TcpListener::bind(addr_v4).await {
         Ok(l) => l,
         Err(e) => {
             println!("Failed to bind port: {}", e);
-            let mut status = status_handle.lock().unwrap();
-            *status = ServerStatus::Error(format!("Failed to bind port {}: {}", port, e));
+            status_tx.send_modify(|s| *s = ServerStatus::Error(format!("Failed to bind port {}: {}", port, e)));
             return;
         }
     };
 
-    {
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Running;
-    }
+    let ipv6_listener = if dual_stack {
+        let addr_v6 = SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port));
+        match tokio::net::TcpListener::bind(addr_v6).await {
+            Ok(l) => {
+                println!("Server listening on {} (dual-stack)", addr_v4);
+                Some(l)
+            }
+            Err(e) => {
+                // IPv6 not available on this system — continue with IPv4 only
+                println!("IPv6 bind failed ({}), continuing with IPv4 only", e);
+                println!("Server listening on {}", addr_v4);
+                None
+            }
+        }
+    } else {
+        println!("Server listening on {}", addr_v4);
+        None
+    };
+
+    status_tx.send_modify(|s| *s = ServerStatus::Running);
 
     let app = app.into_make_service_with_connect_info::<SocketAddr>();
 
-    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+    // Broadcast shutdown to both servers
+    let (inner_tx, inner_rx1) = tokio::sync::broadcast::channel::<()>(1);
+    let inner_rx2 = inner_tx.subscribe();
+
+    // Forward the external shutdown signal to the inner broadcast
+    tauri::async_runtime::spawn(async move {
         shutdown_rx.recv().await.ok();
         println!("Server received shutdown signal");
+        let _ = inner_tx.send(());
     });
 
-    if let Err(e) = server.await {
-        println!("Server exited with error: {}", e);
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Error(format!("Server exited: {}", e));
+    let status_tx_clone = status_tx.clone();
+    if let Some(v6_listener) = ipv6_listener {
+        let app_v6 = app.clone();
+        let v4_task = tauri::async_runtime::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move { inner_rx1.resubscribe().recv().await.ok(); })
+                .await
+        });
+        let v6_task = tauri::async_runtime::spawn(async move {
+            axum::serve(v6_listener, app_v6)
+                .with_graceful_shutdown(async move { inner_rx2.resubscribe().recv().await.ok(); })
+                .await
+        });
+
+        let (r4, r6) = tokio::join!(v4_task, v6_task);
+        let err = r4.err().map(|e| e.to_string())
+            .or_else(|| r6.err().map(|e| e.to_string()));
+        if let Some(e) = err {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
+        } else {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Stopped);
+        }
     } else {
-        let mut status = status_handle.lock().unwrap();
-        *status = ServerStatus::Stopped;
+        let result = axum::serve(listener, app)
+            .with_graceful_shutdown(async move { inner_rx1.resubscribe().recv().await.ok(); })
+            .await;
+        if let Err(e) = result {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Error(format!("Server exited: {}", e)));
+        } else {
+            status_tx_clone.send_modify(|s| *s = ServerStatus::Stopped);
+        }
     }
 }
 
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let (auth_enabled, api_key, allowed_ips, blocked_ips) = {
+    let (allowed_ips, blocked_ips) = {
         let config = state.config.lock().unwrap();
         (
-            config.auth.enabled,
-            config.auth.api_key.clone(),
             config.auth.allowed_ips.clone(),
             config.auth.blocked_ips.clone(),
         )
     };
+    let auth_state = { state.auth_state.lock().unwrap().clone() };
 
     let client_ip = addr.ip().to_string();
 
@@ -577,53 +638,52 @@ async fn auth_middleware(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // If auth is disabled, allow the request
-    if !auth_enabled {
+    // If auth is disabled/public, allow the request (local-only guard)
+    if matches!(auth_state.mode, AuthMode::Public) {
+        if !is_local_network(addr.ip()) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        req.extensions_mut().insert(AuthContext {
+            mode: AuthMode::Public,
+            scopes: vec![SCOPE_ADMIN.to_string()],
+        });
         return next.run(req).await;
     }
 
     // Check IP in allowlist, if found bypass auth
     if is_ip_in_list(&client_ip, &allowed_ips) {
+        req.extensions_mut().insert(AuthContext {
+            mode: AuthMode::Protected,
+            scopes: vec![SCOPE_ADMIN.to_string()],
+        });
         return next.run(req).await;
     }
 
-    // Check API key (if configured)
-    let required_key = match api_key {
-        Some(k) => k,
-        None => return next.run(req).await, // No key configured, allow
-    };
+    let required_scope =
+        auth_scopes::required_scope_for_request(req.method().as_str(), req.uri().path());
+    let token = extract_token(&req);
 
-    // Check Authorization header first
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "));
-
-    if let Some(token) = auth_header {
-        if token == required_key {
-            return next.run(req).await;
-        }
-    }
-
-    // For WebSocket endpoint only, also check query param
-    let is_ws_endpoint = req.uri().path() == "/api/ws";
-    if is_ws_endpoint {
-        if let Some(query) = req.uri().query() {
-            for param in query.split('&') {
-                if let Some(key) = param.strip_prefix("api_key=") {
-                    if key == required_key {
-                        return next.run(req).await;
-                    }
+    if let Some(token) = token {
+        if let Some(record) = auth_store::find_active_record(&auth_state, &token) {
+            if let Some(scope) = required_scope {
+                if !auth_store::has_scope(&record, scope) {
+                    return StatusCode::FORBIDDEN.into_response();
                 }
             }
+            req.extensions_mut().insert(AuthContext {
+                mode: AuthMode::Protected,
+                scopes: record.scopes.clone(),
+            });
+            return next.run(req).await;
         }
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Check if an IP matches any entry in a list (supports exact match and CIDR)
+/// Check if an IP matches any entry in a list.
+/// Supports exact IP match, CIDR notation, and hostname entries (resolved via DNS).
 fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
     let client: std::net::IpAddr = match client_ip.parse() {
         Ok(ip) => ip,
@@ -631,12 +691,12 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
     };
 
     for entry in list {
-        // Exact match
+        // Exact IP match
         if entry == client_ip {
             return true;
         }
 
-        // CIDR match (simplified - just prefix check for common cases)
+        // CIDR match
         if entry.contains('/') {
             if let Some((network, prefix_len)) = entry.split_once('/') {
                 if let (Ok(net_ip), Ok(prefix)) = (
@@ -644,6 +704,19 @@ fn is_ip_in_list(client_ip: &str, list: &[String]) -> bool {
                     prefix_len.parse::<u8>(),
                 ) {
                     if ip_matches_cidr(&client, &net_ip, prefix) {
+                        return true;
+                    }
+                }
+            }
+            continue;
+        }
+
+        // If entry is not a valid IP, treat it as a hostname and resolve
+        if entry.parse::<std::net::IpAddr>().is_err() {
+            use std::net::ToSocketAddrs;
+            if let Ok(addrs) = (entry.as_str(), 0u16).to_socket_addrs() {
+                for addr in addrs {
+                    if addr.ip() == client {
                         return true;
                     }
                 }
@@ -684,5 +757,48 @@ fn ip_matches_cidr(client: &std::net::IpAddr, network: &std::net::IpAddr, prefix
             (c_bits & mask) == (n_bits & mask)
         }
         _ => false, // IPv4/IPv6 mismatch
+    }
+}
+
+fn extract_token(req: &axum::extract::Request) -> Option<String> {
+    if let Some(token) = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        return Some(token.to_string());
+    }
+
+    // WebSocket fallback for compatibility (deprecated)
+    if req.uri().path() == "/api/ws" {
+        if let Some(query) = req.uri().query() {
+            for param in query.split('&') {
+                if let Some(key) = param.strip_prefix("api_key=") {
+                    println!("[auth] Deprecated api_key query param used for /api/ws");
+                    return Some(key.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn is_local_network(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local()
+        }
+        std::net::IpAddr::V6(v6) => {
+            if v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local() {
+                return true;
+            }
+            // IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.x) — check the inner IPv4
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            false
+        }
     }
 }

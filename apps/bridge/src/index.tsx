@@ -6,3 +6,9 @@ import "./index.css";
 const root = document.getElementById("root");
 
 render(() => <App />, root!);
+
+const splash = document.getElementById("splash");
+if (splash) {
+  splash.classList.add("hidden");
+  setTimeout(() => splash.remove(), 200);
+}

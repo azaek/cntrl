@@ -10,19 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Cntrl Bridge",
-        "width": 380,
-        "height": 626,
-        "resizable": false,
-        "backgroundColor": "#202022",
-        "decorations": false,
-        "transparent": true,
-        "center": true,
-        "skipTaskbar": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

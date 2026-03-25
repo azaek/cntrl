@@ -2,14 +2,16 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #202022;
+  --color-bg: #171717;
   --color-bg-dark: #18181a;
+  --color-background: #171717;
   --color-accent: #67ff90;
   --color-fg-muted: #808080;
-  --color-card: #28292b;
+  --color-card: #1f1f1f;
   --color-secondary: #79797a;
   --color-toggle-bg: #3c3c41;
-  --color-border: rgba(255, 255, 255, 0.05);
+  --color-border: #232323;
+  --color-input: #111111;
   --font-sans: "Space Grotesk", sans-serif;
   --font-mono: "Geist Mono", monospace;
 }
@@ -30,6 +32,7 @@
   ::file-selector-button {
     border-color: var(--color-border, currentcolor);
     font-family: var(--font-sans);
+    outline-color: var(--color-border, currentcolor);
   }
 }
 
@@ -39,11 +42,17 @@
 }
 
 body {
-  background: #202022;
-  color: #ffffff;
+  background: #171717;
+  color: #d4d4d4;
   user-select: none;
   width: 100vw;
-  overflow-x: hidden;
+  overflow: hidden;
   height: 100vh;
-  overflow-y: auto;
+  border-radius: 1rem;
+}
+
+@custom-variant initial {
+  @layer initial {
+    @slot;
+  }
 }
