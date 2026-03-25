@@ -61,7 +61,7 @@ const UpdateKeySheetScreen = (props: {
     apiKey: ApiKeySummary;
     onOpenChange: (open: boolean) => void;
 }) => {
-    const [store, actions] = useApp();
+    const [_, actions] = useApp();
     const [scopes, setScopes] = createSignal(props.apiKey.scopes);
     const isAdmin = createMemo(() => scopes().includes("admin"));
     const [expiration, setExpiration] = createSignal<ExpTime>("current");
@@ -464,7 +464,7 @@ const UpdateKeySheetScreen = (props: {
                                     Full Access (Admin)
                                 </p>
                             </TextTip>
-                            <div class="flex items-start">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="admin"
                                     checked={scopes().includes("admin")}

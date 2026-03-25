@@ -115,7 +115,7 @@ const NewKeySheetScreen = () => {
                                             System
                                         </p>
                                     </TextTip>
-                                    <Label for="system:read-input">
+                                    <div class="flex items-center">
                                         <Checkbox
                                             id="system:read"
                                             checked={scopes().includes("system:read")}
@@ -135,8 +135,10 @@ const NewKeySheetScreen = () => {
                                                 }
                                             }}
                                         />
-                                        Read
-                                    </Label>
+                                        <Label for="system:read-input" class="pl-2">
+                                            Read
+                                        </Label>
+                                    </div>
                                 </div>
                                 <div
                                     aria-disabled={isAdmin()}
@@ -151,7 +153,7 @@ const NewKeySheetScreen = () => {
                                             Stats
                                         </p>
                                     </TextTip>
-                                    <Label for="stats:read-input">
+                                    <div class="flex items-center">
                                         <Checkbox
                                             id="stats:read"
                                             checked={
@@ -176,8 +178,10 @@ const NewKeySheetScreen = () => {
                                                 }
                                             }}
                                         />
-                                        Read
-                                    </Label>
+                                        <Label for="stats:read-input" class="pl-2">
+                                            Read
+                                        </Label>
+                                    </div>
                                 </div>
                                 <div
                                     aria-disabled={isAdmin()}
@@ -193,7 +197,7 @@ const NewKeySheetScreen = () => {
                                         </p>
                                     </TextTip>
                                     <div class="flex items-center gap-4">
-                                        <Label for="media:control-input">
+                                        <div class="flex items-center">
                                             <Checkbox
                                                 id="media:control"
                                                 checked={scopes().includes(
@@ -216,9 +220,11 @@ const NewKeySheetScreen = () => {
                                                     }
                                                 }}
                                             />
-                                            Control
-                                        </Label>
-                                        <Label for="media:read-input">
+                                            <Label for="media:control-input" class="pl-2">
+                                                Control
+                                            </Label>
+                                        </div>
+                                        <div class="flex items-center">
                                             <Checkbox
                                                 id="media:read"
                                                 checked={scopes().includes("media:read")}
@@ -239,8 +245,10 @@ const NewKeySheetScreen = () => {
                                                     }
                                                 }}
                                             />
-                                            Read
-                                        </Label>
+                                            <Label for="media:read-input" class="pl-2">
+                                                Read
+                                            </Label>
+                                        </div>
                                     </div>
                                 </div>
                                 <div
@@ -257,7 +265,7 @@ const NewKeySheetScreen = () => {
                                         </p>
                                     </TextTip>
                                     <div class="flex items-center gap-4">
-                                        <Label for="processes:control-input">
+                                        <div class="flex items-center">
                                             <Checkbox
                                                 id="processes:control"
                                                 checked={scopes().includes(
@@ -280,9 +288,14 @@ const NewKeySheetScreen = () => {
                                                     }
                                                 }}
                                             />
-                                            Control
-                                        </Label>
-                                        <Label for="processes:read-input">
+                                            <Label
+                                                for="processes:control-input"
+                                                class="pl-2"
+                                            >
+                                                Control
+                                            </Label>
+                                        </div>
+                                        <div class="flex items-center">
                                             <Checkbox
                                                 id="processes:read"
                                                 checked={scopes().includes(
@@ -305,8 +318,13 @@ const NewKeySheetScreen = () => {
                                                     }
                                                 }}
                                             />
-                                            Read
-                                        </Label>
+                                            <Label
+                                                for="processes:read-input"
+                                                class="pl-2"
+                                            >
+                                                Read
+                                            </Label>
+                                        </div>
                                     </div>
                                 </div>
                                 <Divider />
@@ -323,7 +341,7 @@ const NewKeySheetScreen = () => {
                                             Power
                                         </p>
                                     </TextTip>
-                                    <Label for="power:control-input">
+                                    <div class="flex items-center">
                                         <Checkbox
                                             id="power:control"
                                             checked={scopes().includes("power:control")}
@@ -343,8 +361,10 @@ const NewKeySheetScreen = () => {
                                                 }
                                             }}
                                         />
-                                        Allow
-                                    </Label>
+                                        <Label for="power:control-input" class="pl-2">
+                                            Allow
+                                        </Label>
+                                    </div>
                                 </div>
                                 <div
                                     aria-disabled={isAdmin()}
@@ -359,7 +379,7 @@ const NewKeySheetScreen = () => {
                                             SSE Stream
                                         </p>
                                     </TextTip>
-                                    <Label for="stream:read-input">
+                                    <div class="flex items-center">
                                         <Checkbox
                                             id="stream:read"
                                             checked={scopes().includes("stream:read")}
@@ -379,8 +399,10 @@ const NewKeySheetScreen = () => {
                                                 }
                                             }}
                                         />
-                                        Allow
-                                    </Label>
+                                        <Label for="stream:read-input" class="pl-2">
+                                            Allow
+                                        </Label>
+                                    </div>
                                 </div>
                                 <div
                                     aria-disabled={isAdmin()}
@@ -395,7 +417,7 @@ const NewKeySheetScreen = () => {
                                             WebSocket
                                         </p>
                                     </TextTip>
-                                    <Label for="ws:connect-input">
+                                    <div class="flex items-center">
                                         <Checkbox
                                             id="ws:connect"
                                             checked={scopes().includes("ws:connect")}
@@ -415,8 +437,10 @@ const NewKeySheetScreen = () => {
                                                 }
                                             }}
                                         />
-                                        Allow
-                                    </Label>
+                                        <Label for="ws:connect-input" class="pl-2">
+                                            Allow
+                                        </Label>
+                                    </div>
                                 </div>
                                 <div class="flex w-full items-center justify-between">
                                     <TextTip
@@ -428,27 +452,26 @@ const NewKeySheetScreen = () => {
                                             Full Access (Admin)
                                         </p>
                                     </TextTip>
-                                    <div class="flex items-start space-x-2">
-                                        <Label for="admin-input">
-                                            <Checkbox
-                                                id="admin"
-                                                checked={scopes().includes("admin")}
-                                                onChange={(c) => {
-                                                    if (c) {
-                                                        setScopes((prev) => [
-                                                            ...prev,
-                                                            "admin",
-                                                        ]);
-                                                    } else {
-                                                        setScopes((prev) =>
-                                                            prev.filter(
-                                                                (scope) =>
-                                                                    scope !== "admin",
-                                                            ),
-                                                        );
-                                                    }
-                                                }}
-                                            />
+                                    <div class="flex items-center">
+                                        <Checkbox
+                                            id="admin"
+                                            checked={scopes().includes("admin")}
+                                            onChange={(c) => {
+                                                if (c) {
+                                                    setScopes((prev) => [
+                                                        ...prev,
+                                                        "admin",
+                                                    ]);
+                                                } else {
+                                                    setScopes((prev) =>
+                                                        prev.filter(
+                                                            (scope) => scope !== "admin",
+                                                        ),
+                                                    );
+                                                }
+                                            }}
+                                        />
+                                        <Label for="admin-input" class="pl-2">
                                             Allow
                                         </Label>
                                     </div>
