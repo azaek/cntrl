@@ -31,7 +31,7 @@ impl AuthContext {
 
 pub fn required_scope_for_request(method: &str, path: &str) -> Option<&'static str> {
     match (method, path) {
-        ("GET", "/api/status") => Some(SCOPE_SYSTEM_READ),
+        // /api/status is public (outside auth middleware)
         ("GET", "/api/system") => Some(SCOPE_SYSTEM_READ),
         ("GET", "/api/usage") => Some(SCOPE_USAGE_READ),
         ("GET", "/api/clients") => Some(SCOPE_ADMIN),

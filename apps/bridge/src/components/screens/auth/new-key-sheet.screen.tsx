@@ -323,21 +323,21 @@ const NewKeySheetScreen = () => {
                                             Power
                                         </p>
                                     </TextTip>
-                                    <Label for="power:allow-input">
+                                    <Label for="power:control-input">
                                         <Checkbox
-                                            id="power:allow"
-                                            checked={scopes().includes("power:allow")}
+                                            id="power:control"
+                                            checked={scopes().includes("power:control")}
                                             onChange={(c) => {
                                                 if (c) {
                                                     setScopes((prev) => [
                                                         ...prev,
-                                                        "power:allow",
+                                                        "power:control",
                                                     ]);
                                                 } else {
                                                     setScopes((prev) =>
                                                         prev.filter(
                                                             (scope) =>
-                                                                scope !== "power:allow",
+                                                                scope !== "power:control",
                                                         ),
                                                     );
                                                 }

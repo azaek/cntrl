@@ -367,21 +367,24 @@ const UpdateKeySheetScreen = (props: {
                             </TextTip>
                             <div class="flex items-center">
                                 <Checkbox
-                                    id="power:allow"
-                                    checked={scopes().includes("power:allow")}
+                                    id="power:control"
+                                    checked={scopes().includes("power:control")}
                                     onChange={(c) => {
                                         if (c) {
-                                            setScopes((prev) => [...prev, "power:allow"]);
+                                            setScopes((prev) => [
+                                                ...prev,
+                                                "power:control",
+                                            ]);
                                         } else {
                                             setScopes((prev) =>
                                                 prev.filter(
-                                                    (scope) => scope !== "power:allow",
+                                                    (scope) => scope !== "power:control",
                                                 ),
                                             );
                                         }
                                     }}
                                 />
-                                <Label for="power:allow-input" class="pl-2">
+                                <Label for="power:control-input" class="pl-2">
                                     Allow
                                 </Label>
                             </div>

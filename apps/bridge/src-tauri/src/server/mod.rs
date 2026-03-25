@@ -490,8 +490,8 @@ pub async fn start_server(
     // when clients subscribe to topics.
     println!("Server initialized with lazy loop spawning (zero CPU when idle)");
 
-    let app = Router::new()
-        .route("/api/status", get(status_handler))
+    // Authenticated routes
+    let authed = Router::new()
         .route("/api/system", get(get_system_info))
         .route("/api/usage", get(get_system_usage))
         .route("/api/processes", get(list_processes))
@@ -509,9 +509,17 @@ pub async fn start_server(
             state.clone(),
             auth_middleware,
         ))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
+
+    // Public routes (no auth required)
+    let public = Router::new()
+        .route("/api/status", get(status_handler));
+
+    let app = Router::new()
+        .merge(authed)
+        .merge(public)
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http());
 
     let host = {
         let c = state.config.lock().unwrap();
