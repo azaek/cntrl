@@ -1,6 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    webview::PageLoadPayload,
     Manager, Runtime, WebviewUrl, WebviewWindowBuilder,
     window::Color,
 };
@@ -16,12 +17,11 @@ pub fn show_or_create_window<R: Runtime>(app: &tauri::AppHandle<R>) {
             .inner_size(380.0, 626.0)
             .resizable(false)
             .decorations(false)
-            .transparent(true)
             .background_color(Color(23, 23, 23, 255))
             .center()
             .skip_taskbar(true)
             .visible(false)
-            .on_page_load(move |_webview, payload| {
+            .on_page_load(move |_webview, payload: PageLoadPayload<'_>| {
                 if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                     if let Some(win) = app_handle.get_webview_window("main") {
                         let _ = win.show();
