@@ -163,7 +163,7 @@ const UpdateKeySheetScreen = (props: {
                                     System
                                 </p>
                             </TextTip>
-                            <Label for="system:read-input">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="system:read"
                                     checked={scopes().includes("system:read")}
@@ -179,8 +179,10 @@ const UpdateKeySheetScreen = (props: {
                                         }
                                     }}
                                 />
-                                Read
-                            </Label>
+                                <Label for="system:read-input" class="pl-2">
+                                    Read
+                                </Label>
+                            </div>
                         </div>
                         <div
                             aria-disabled={isAdmin()}
@@ -195,7 +197,7 @@ const UpdateKeySheetScreen = (props: {
                                     Stats
                                 </p>
                             </TextTip>
-                            <Label for="stats:read-input">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="stats:read"
                                     checked={
@@ -220,8 +222,10 @@ const UpdateKeySheetScreen = (props: {
                                         }
                                     }}
                                 />
-                                Read
-                            </Label>
+                                <Label for="stats:read-input" class="pl-2">
+                                    Read
+                                </Label>
+                            </div>
                         </div>
                         <div
                             aria-disabled={isAdmin()}
@@ -234,7 +238,7 @@ const UpdateKeySheetScreen = (props: {
                                 </p>
                             </TextTip>
                             <div class="flex items-center gap-4">
-                                <Label for="media:control-input">
+                                <div class="flex items-center">
                                     <Checkbox
                                         id="media:control"
                                         checked={scopes().includes("media:control")}
@@ -254,9 +258,11 @@ const UpdateKeySheetScreen = (props: {
                                             }
                                         }}
                                     />
-                                    Control
-                                </Label>
-                                <Label for="media:read-input">
+                                    <Label for="media:control-input" class="pl-2">
+                                        Control
+                                    </Label>
+                                </div>
+                                <div class="flex items-center">
                                     <Checkbox
                                         id="media:read"
                                         checked={scopes().includes("media:read")}
@@ -275,8 +281,10 @@ const UpdateKeySheetScreen = (props: {
                                             }
                                         }}
                                     />
-                                    Read
-                                </Label>
+                                    <Label for="media:read-input" class="pl-2">
+                                        Read
+                                    </Label>
+                                </div>
                             </div>
                         </div>
                         <div
@@ -293,7 +301,7 @@ const UpdateKeySheetScreen = (props: {
                                 </p>
                             </TextTip>
                             <div class="flex items-center gap-4">
-                                <Label for="processes:control-input">
+                                <div class="flex items-center">
                                     <Checkbox
                                         id="processes:control"
                                         checked={scopes().includes("processes:control")}
@@ -313,9 +321,11 @@ const UpdateKeySheetScreen = (props: {
                                             }
                                         }}
                                     />
-                                    Control
-                                </Label>
-                                <Label for="processes:read-input">
+                                    <Label for="processes:control-input" class="pl-2">
+                                        Control
+                                    </Label>
+                                </div>
+                                <div class="flex items-center">
                                     <Checkbox
                                         id="processes:read"
                                         checked={scopes().includes("processes:read")}
@@ -335,8 +345,10 @@ const UpdateKeySheetScreen = (props: {
                                             }
                                         }}
                                     />
-                                    Read
-                                </Label>
+                                    <Label for="processes:read-input" class="pl-2">
+                                        Read
+                                    </Label>
+                                </div>
                             </div>
                         </div>
                         <Divider />
@@ -353,7 +365,7 @@ const UpdateKeySheetScreen = (props: {
                                     Power
                                 </p>
                             </TextTip>
-                            <Label for="power:allow-input">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="power:allow"
                                     checked={scopes().includes("power:allow")}
@@ -369,8 +381,10 @@ const UpdateKeySheetScreen = (props: {
                                         }
                                     }}
                                 />
-                                Allow
-                            </Label>
+                                <Label for="power:allow-input" class="pl-2">
+                                    Allow
+                                </Label>
+                            </div>
                         </div>
                         <div
                             aria-disabled={isAdmin()}
@@ -385,7 +399,7 @@ const UpdateKeySheetScreen = (props: {
                                     SSE Stream
                                 </p>
                             </TextTip>
-                            <Label for="stream:read-input">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="stream:read"
                                     checked={scopes().includes("stream:read")}
@@ -401,8 +415,10 @@ const UpdateKeySheetScreen = (props: {
                                         }
                                     }}
                                 />
-                                Allow
-                            </Label>
+                                <Label for="stream:read-input" class="pl-2">
+                                    Allow
+                                </Label>
+                            </div>
                         </div>
                         <div
                             aria-disabled={isAdmin()}
@@ -417,7 +433,7 @@ const UpdateKeySheetScreen = (props: {
                                     WebSocket
                                 </p>
                             </TextTip>
-                            <Label for="ws:connect-input">
+                            <div class="flex items-center">
                                 <Checkbox
                                     id="ws:connect"
                                     checked={scopes().includes("ws:connect")}
@@ -433,8 +449,10 @@ const UpdateKeySheetScreen = (props: {
                                         }
                                     }}
                                 />
-                                Allow
-                            </Label>
+                                <Label for="ws:connect-input" class="pl-2">
+                                    Allow
+                                </Label>
+                            </div>
                         </div>
                         <div class="flex w-full items-center justify-between">
                             <TextTip content="Full access to the device." side="top">
@@ -443,23 +461,21 @@ const UpdateKeySheetScreen = (props: {
                                     Full Access (Admin)
                                 </p>
                             </TextTip>
-                            <div class="flex items-start space-x-2">
-                                <Label for="admin-input">
-                                    <Checkbox
-                                        id="admin"
-                                        checked={scopes().includes("admin")}
-                                        onChange={(c) => {
-                                            if (c) {
-                                                setScopes((prev) => [...prev, "admin"]);
-                                            } else {
-                                                setScopes((prev) =>
-                                                    prev.filter(
-                                                        (scope) => scope !== "admin",
-                                                    ),
-                                                );
-                                            }
-                                        }}
-                                    />
+                            <div class="flex items-start">
+                                <Checkbox
+                                    id="admin"
+                                    checked={scopes().includes("admin")}
+                                    onChange={(c) => {
+                                        if (c) {
+                                            setScopes((prev) => [...prev, "admin"]);
+                                        } else {
+                                            setScopes((prev) =>
+                                                prev.filter((scope) => scope !== "admin"),
+                                            );
+                                        }
+                                    }}
+                                />
+                                <Label for="admin-input" class="pl-2">
                                     Allow
                                 </Label>
                             </div>
