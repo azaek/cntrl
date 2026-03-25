@@ -4,6 +4,29 @@ description: Release notes and breaking changes for Cntrl Bridge.
 icon: FileText
 ---
 
+## 0.2.0
+
+### Features
+
+- Redesigned bridge UI with improved navigation, layout, and overall UX.
+- Granular auth system with 11 scoped permissions (`admin`, `system:read`, `media:control`, etc.).
+- API keys stored in OS keyring with Argon2 hashing, expiration, and revocation.
+- Automatic migration from legacy single API key to new scoped auth.
+- IP allowlist and blocklist with CIDR and hostname support.
+- Onboarding screen for first-time setup.
+- Full settings UI: server control, API key management, allowed/blocked IPs, power controls, and connection timings.
+
+### Bug Fixes
+
+- Fixed disabled WebSocket topic loops never restarting.
+- Fixed server control commands not awaiting actual state transitions.
+- Fixed CIDR validation logic.
+- Fixed server binding issues.
+
+### Improvements
+
+- Destroy webview on close to free ~237 MB when minimized to tray.
+
 ## 0.1.0
 
 Initial release.

@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowRight, ArrowUpRight, X } from "lucide-solid";
 import { createSignal, onMount } from "solid-js";
 import { useApp } from "../../../context/app-context";
@@ -74,15 +75,19 @@ const WelcomeScreen = () => {
                 <div>
                     <p class="font-mono text-xs text-neutral-500">What's New</p>
                     <ul class="list-disc pl-4 font-mono text-sm font-medium text-neutral-600">
-                        <li>Auto-reconnect support</li>
-                        <li>New Auth with permissions</li>
-                        <li>New User Interface</li>
+                        <li>Redesigned bridge UI</li>
+                        <li>Granular auth system with scoped permissions.</li>
+                        <li>Better API key storage</li>
                     </ul>
                 </div>
             </div>
             <div class="flex w-full items-center justify-between">
-                <Button class="gap-1 rounded-md px-6 text-neutral-400" variant={"ghost"}>
-                    <p class="text-xs">View Changelog</p>
+                <Button
+                    onClick={() => openUrl("https://cntrl.pw/docs/changelog")}
+                    class="gap-1 rounded-md px-3 text-neutral-400"
+                    variant={"ghost"}
+                >
+                    <p class="text-xs">View Full Changelog</p>
                     <ArrowUpRight />
                 </Button>
                 <Button

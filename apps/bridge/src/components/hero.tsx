@@ -5,7 +5,7 @@ import { HouseWifi, Lock, LockOpen, QrCode, X } from "lucide-solid";
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { useApp } from "../context/app-context";
 import { getLocalIp } from "../helper/data-helper";
-import { getAppVersion, getLocalIps } from "../lib/backend";
+import { getLocalIps } from "../lib/backend";
 import ServerDock from "./screens/hero/server-dock";
 import { Logo } from "./svgs";
 import CopyBtn from "./ui/copy-btn";
@@ -16,7 +16,6 @@ import TextTip from "./ui/text-tip";
 gsap.registerPlugin(Flip);
 
 const Hero = () => {
-    const [version, setVersion] = createSignal("");
     const [host, setHost] = createSignal("");
 
     let containerRef!: HTMLDivElement;
@@ -43,9 +42,6 @@ const Hero = () => {
     });
 
     onMount(async () => {
-        const v = await getAppVersion();
-        setVersion(v);
-
         // Set initial state
         if (store.page === "main") {
             homeBtnRef.style.display = "none";
@@ -285,8 +281,8 @@ const Hero = () => {
                             </p>
                         </div>
                         <CopyBtn
-                            tip="Copy Host"
-                            content={host()}
+                            tip="Copy Address"
+                            content={`${host()}:${store.cfg?.server.port}`}
                             className="-m-2 size-auto p-2 text-neutral-500 [&_svg:not([class*='size-'])]:size-3"
                         />
                         {/* <p class="text-sm font-medium text-neutral-700">Auth <span class="text-neutral-400">{store.cfg?.auth.enabled ? "Enabled" : "Disabled"}</span></p> */}
