@@ -78,6 +78,8 @@ pub struct AppState {
     pub config: Arc<Mutex<AppConfig>>,
     pub auth_state: Arc<Mutex<AuthState>>,
     pub loop_manager: Arc<crate::server::LoopManager>,
+    /// Notifies all WS connections to close when the server is shutting down.
+    pub shutdown: tokio::sync::watch::Receiver<bool>,
 }
 
 pub fn get_or_update_gpu_stats(state: &Arc<AppState>) -> Option<crate::server::gpu::GpuData> {

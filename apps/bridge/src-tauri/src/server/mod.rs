@@ -83,6 +83,22 @@ impl LoopManager {
         }
     }
 
+    /// Abort all running monitoring loops immediately.
+    pub fn abort_all(&self) {
+        if let Some(h) = self.stats_handle.lock().unwrap().take() {
+            println!("[LoopManager] Aborting stats loop (shutdown)");
+            h.abort();
+        }
+        if let Some(h) = self.media_handle.lock().unwrap().take() {
+            println!("[LoopManager] Aborting media loop (shutdown)");
+            h.abort();
+        }
+        if let Some(h) = self.processes_handle.lock().unwrap().take() {
+            println!("[LoopManager] Aborting processes loop (shutdown)");
+            h.abort();
+        }
+    }
+
     /// Called when topic subscriber count goes from 1 -> 0
     pub fn stop_loop_if_idle(&self, topic: &str, state: &handlers::AppState) {
         let topics = state.active_topics.lock().unwrap();
@@ -462,6 +478,7 @@ pub async fn start_server(
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     let loop_manager = Arc::new(LoopManager::new());
+    let (ws_shutdown_tx, ws_shutdown_rx) = tokio::sync::watch::channel(false);
 
     let state = Arc::new(AppState {
         system: Arc::new(Mutex::new(System::new_all())),
@@ -484,6 +501,7 @@ pub async fn start_server(
         config: config,
         auth_state: auth_state,
         loop_manager: loop_manager,
+        shutdown: ws_shutdown_rx,
     });
 
     // No always-running loops! Loops are now lazy-spawned via LoopManager
@@ -575,10 +593,17 @@ pub async fn start_server(
     let (inner_tx, inner_rx1) = tokio::sync::broadcast::channel::<()>(1);
     let inner_rx2 = inner_tx.subscribe();
 
-    // Forward the external shutdown signal to the inner broadcast
+    // Forward the external shutdown signal to the inner broadcast,
+    // abort monitoring loops, and notify all WS connections to close.
+    let shutdown_state = state.clone();
     tauri::async_runtime::spawn(async move {
         shutdown_rx.recv().await.ok();
         println!("Server received shutdown signal");
+        // Abort all monitoring loops so they stop feeding the broadcast channel
+        shutdown_state.loop_manager.abort_all();
+        // Signal all WS connections to close
+        let _ = ws_shutdown_tx.send(true);
+        // Stop the HTTP listeners
         let _ = inner_tx.send(());
     });
 
