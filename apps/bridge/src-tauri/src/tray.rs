@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -5,6 +6,10 @@ use tauri::{
     Manager, Runtime, WebviewUrl, WebviewWindowBuilder,
     window::Color,
 };
+
+/// Set to `true` right before an intentional quit so the
+/// `RunEvent::ExitRequested` handler knows not to prevent it.
+pub static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub fn show_or_create_window<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
@@ -47,6 +52,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => {
+                QUIT_REQUESTED.store(true, Ordering::SeqCst);
                 app.exit(0);
             }
             "open" => {

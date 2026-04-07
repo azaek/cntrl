@@ -927,7 +927,9 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|_app_handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+                if !tray::QUIT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
 }

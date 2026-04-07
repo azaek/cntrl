@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { SquareDashedMousePointer } from "lucide-solid";
 import { Button } from "../ui/button";
 
@@ -10,10 +11,18 @@ const PostContentBlock = () => {
                     Couldn't find what you're looking for?
                 </p>
                 <div class="flex items-center gap-2">
-                    <Button variant={"link"} class="text-xs">
+                    <Button
+                        onClick={() => openUrl("https://www.cntrl.pw/docs")}
+                        variant={"link"}
+                        class="text-xs"
+                    >
                         Docs
                     </Button>
-                    <Button variant={"link"} class="text-xs">
+                    <Button
+                        onClick={() => openUrl("https://github.com/azaek/cntrl/issues")}
+                        variant={"link"}
+                        class="text-xs"
+                    >
                         Github Issues
                     </Button>
                 </div>

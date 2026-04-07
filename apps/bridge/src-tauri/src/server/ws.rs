@@ -66,9 +66,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, auth_ctx: AuthCo
     // SEND TASK - handles both broadcast events and outgoing messages from recv_task
     let mut send_task = tokio::spawn({
         let subs = subscriptions.clone();
+        let mut shutdown_rx = state.shutdown.clone();
         async move {
             loop {
                 tokio::select! {
+                    // Server is shutting down — close this connection
+                    _ = shutdown_rx.changed() => {
+                        let _ = sender.close().await;
+                        break;
+                    }
                     // Handle outgoing messages from recv_task (errors, acks)
                     Some(msg) = outgoing_rx.recv() => {
                         if sender.send(Message::Text(msg)).await.is_err() {
