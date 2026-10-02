@@ -4,6 +4,19 @@ Cntrl Bridge: The programmable, open-source API for multi-OS desktop control.
 
 This monorepo contains the bridge app, SDK, UI components, and consumer apps.
 
+## Handoff
+
+The pickup point between sessions is `cntrl-notes/HANDOFF.md`. `cntrl-notes/` is a private repo (`azaek/cntrl-notes`) nested at this checkout's root and ignored here. Write private notes there: plans, specs, drafts, launch posts. Pull it before reading the handoff, and commit and push it after writing one. Terminal git reaches it as `azaek`, with the token in the environment:
+
+```bash
+GH_PUSH_TOKEN=$(gh auth token -u azaek) git -C cntrl-notes \
+  -c credential.https://github.com.helper= \
+  -c 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo password=$GH_PUSH_TOKEN; }; f' \
+  pull --rebase   # or: push
+```
+
+From a worktree, the folder is in the main checkout. If it is missing, clone `https://github.com/azaek/cntrl-notes.git` into `cntrl-notes/` the same way.
+
 ## Commands
 
 ```bash

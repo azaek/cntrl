@@ -42,3 +42,6 @@ yarn-error.log*
 __*.md
 *.tgz
 .content
+
+# The owner's private notes: a separate repo (azaek/cntrl-notes), cloned here.
+/cntrl-notes/
