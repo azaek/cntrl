@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+#[cfg(target_os = "macos")]
+pub mod launchd;
 pub mod linux;
 pub mod machine;
 #[cfg(target_os = "macos")]

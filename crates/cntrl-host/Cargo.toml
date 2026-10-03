@@ -21,6 +21,7 @@ procfs-core = { version = "0.18", default-features = false }
 # Host stats and system info on macOS, as the research recommends for
 # non-Linux hosts.
 [target.'cfg(target_os = "macos")'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 # systemd over D-Bus, for services.

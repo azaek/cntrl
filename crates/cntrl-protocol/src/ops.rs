@@ -10,7 +10,8 @@ define_ops! {
         capability: "system.read",
         since: 1,
     },
-    /// Restarts one systemd unit and waits for the job's result.
+    /// Restarts one service, a systemd unit or on macOS a launchd job, and waits
+    /// for the result.
     ServiceRestart = "service.restart" {
         params: crate::service::ServiceRef,
         result: crate::service::ServiceJob,

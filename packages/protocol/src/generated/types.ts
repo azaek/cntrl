@@ -221,7 +221,11 @@ export interface HostInfo {
     agent_version: string;
 }
 
-/** A job result, as systemd reports it in `JobRemoved`. */
+/**
+ * A job result, as systemd reports it in `JobRemoved`. On macOS it is `done`
+ * once launchd shows the job running again (or finished cleanly), `failed` if
+ * it exited with an error, and `timeout` if launchd doesn't say in time.
+ */
 export type JobResult = "done" | "canceled" | "timeout" | "failed" | "dependency" | "skipped" | "unknown";
 
 /** Limits the gateway enforces on this session. */
@@ -328,13 +332,16 @@ export interface Response {
     err?: ErrorBody | null;
 }
 
-/** The outcome of a unit job. */
+/** The outcome of a service job. */
 export interface ServiceJob {
     unit: string;
     result: JobResult;
 }
 
-/** Names one systemd unit, such as `nginx.service`. */
+/**
+ * Names one service: a systemd unit such as `nginx.service`, or on macOS a
+ * launchd job's label, such as `homebrew.mxcl.nginx`.
+ */
 export interface ServiceRef {
     unit: string;
 }

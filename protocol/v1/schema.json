@@ -881,7 +881,7 @@
       "required": [
         "unit"
       ],
-      "description": "Names one systemd unit, such as `nginx.service`."
+      "description": "Names one service: a systemd unit such as `nginx.service`, or on macOS a\nlaunchd job's label, such as `homebrew.mxcl.nginx`."
     },
     "ServiceJob": {
       "type": "object",
@@ -897,7 +897,7 @@
         "unit",
         "result"
       ],
-      "description": "The outcome of a unit job."
+      "description": "The outcome of a service job."
     },
     "JobResult": {
       "type": "string",
@@ -910,7 +910,7 @@
         "skipped",
         "unknown"
       ],
-      "description": "A job result, as systemd reports it in `JobRemoved`."
+      "description": "A job result, as systemd reports it in `JobRemoved`. On macOS it is `done`\nonce launchd shows the job running again (or finished cleanly), `failed` if\nit exited with an error, and `timeout` if launchd doesn't say in time."
     },
     "StatsParams": {
       "type": "object",

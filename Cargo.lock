@@ -315,6 +315,7 @@ dependencies = [
  "cntrl-protocol",
  "futures-util",
  "procfs-core",
+ "rustix",
  "sysinfo",
  "zbus",
  "zbus_systemd",

@@ -1,5 +1,5 @@
 //! Services behind the `service.*` operations: systemd units on Linux, through
-//! [`crate::systemd`].
+//! [`crate::systemd`], and launchd jobs on macOS, through `crate::launchd`.
 
 use crate::HostError;
 
@@ -17,6 +17,38 @@ const OTHER_TYPES: &[&str] = &[
     "slice",
     "scope",
 ];
+
+/// Checks a service's name as this OS names services: a systemd unit on Linux
+/// ([`service_unit`]), a launchd label on macOS ([`launchd_label`]).
+pub fn service_name(name: &str) -> Result<String, HostError> {
+    #[cfg(target_os = "macos")]
+    {
+        launchd_label(name)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        service_unit(name)
+    }
+}
+
+/// Checks a launchd job's label, such as `com.openssh.sshd`: letters, digits
+/// and `.-_`. A `/` would name another launchd domain, so it's refused.
+pub fn launchd_label(name: &str) -> Result<String, HostError> {
+    let invalid = |why: &str| HostError::Invalid(format!("`{name}` isn't a launchd label: {why}"));
+    if name.is_empty() || name.len() > 255 {
+        return Err(invalid("the name must have 1 to 255 characters"));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+    {
+        return Err(invalid("only letters, digits and `.-_` are allowed"));
+    }
+    if name.starts_with(['.', '-']) {
+        return Err(invalid("it can't start with `.` or `-`"));
+    }
+    Ok(name.to_owned())
+}
 
 /// Checks a service's unit name, adding `.service` when it has no type, so
 /// `nginx` names `nginx.service`.
@@ -71,6 +103,32 @@ mod tests {
             service_unit("ssh.socket"),
             Err(HostError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn checks_launchd_labels() {
+        assert_eq!(
+            launchd_label("com.openssh.sshd"),
+            Ok("com.openssh.sshd".to_owned())
+        );
+        assert_eq!(
+            launchd_label("homebrew.mxcl.nginx"),
+            Ok("homebrew.mxcl.nginx".to_owned())
+        );
+        for name in [
+            "",
+            "gui/501/x",
+            "system/com.apple.foo",
+            "a b",
+            "-k",
+            ".hidden",
+            "x;reboot",
+        ] {
+            assert!(
+                matches!(launchd_label(name), Err(HostError::Invalid(_))),
+                "{name} should be refused"
+            );
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use cntrl_host::HostError;
-use cntrl_host::services::service_unit;
+use cntrl_host::services::service_name;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
@@ -216,7 +216,7 @@ async fn restart_service(
     unit: String,
     actor: Option<Actor>,
 ) -> Result<Value, CallError> {
-    let unit = service_unit(&unit)?;
+    let unit = service_name(&unit)?;
     let policy = policy::load(&state.policy_path, state.owner);
     let refusal = if !policy.allows("services.manage") {
         Some("the device policy doesn't allow services.manage".to_owned())
@@ -263,7 +263,15 @@ async fn restart(unit: &str) -> Result<JobResult, HostError> {
         .await
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+async fn restart(label: &str) -> Result<JobResult, HostError> {
+    let label = label.to_owned();
+    tokio::task::spawn_blocking(move || cntrl_host::launchd::restart(&label))
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 async fn restart(_unit: &str) -> Result<JobResult, HostError> {
     Err(HostError::Unsupported)
 }

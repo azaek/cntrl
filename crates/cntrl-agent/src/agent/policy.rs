@@ -10,23 +10,29 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use super::digest::sha256_hex;
-use cntrl_host::services::service_unit;
+use cntrl_host::services::service_name;
 use cntrl_protocol::OpInfo;
 use cntrl_protocol::capability;
 use cntrl_protocol::frame::{Caps, PolicySummary};
 use cntrl_protocol::ops::{OPS, TOPICS};
 use serde::{Deserialize, Serialize};
 
-/// Units protected unless the policy file lists its own: losing SSH can lock
+/// Services protected unless the policy file lists its own: losing SSH can lock
 /// the owner out.
+#[cfg(not(target_os = "macos"))]
 const DEFAULT_PROTECTED: &[&str] = &["ssh.service", "sshd.service"];
-/// The agent's own units, always protected: a restart through the agent would
-/// end the request that asked for it.
+#[cfg(target_os = "macos")]
+const DEFAULT_PROTECTED: &[&str] = &["com.openssh.sshd"];
+/// The agent's own services, always protected: a restart through the agent
+/// would end the request that asked for it.
+#[cfg(not(target_os = "macos"))]
 const ALWAYS_PROTECTED: &[&str] = &[
     "cntrl-agent.service",
     "cntrl-privd.service",
     "cntrl-privd.socket",
 ];
+#[cfg(target_os = "macos")]
+const ALWAYS_PROTECTED: &[&str] = &["pw.cntrl.agent", "pw.cntrl.privd"];
 
 /// Where the policy in force came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,11 +84,11 @@ impl PolicyState {
         let Self::Valid { policy } = self else {
             return true;
         };
-        let unit = service_unit(unit).unwrap_or_else(|_| unit.to_owned());
+        let unit = service_name(unit).unwrap_or_else(|_| unit.to_owned());
         policy
             .protect
             .iter()
-            .any(|entry| service_unit(entry).is_ok_and(|entry| entry == unit))
+            .any(|entry| service_name(entry).is_ok_and(|entry| entry == unit))
     }
 
     /// The operations and topics this policy lets Console call, for the hello.
@@ -341,7 +347,14 @@ mod tests {
         assert!(!state.allows("power.reboot"));
     }
 
+    /// SSH's service, as this OS names it.
+    #[cfg(not(target_os = "macos"))]
+    const SSH: &str = "sshd";
+    #[cfg(target_os = "macos")]
+    const SSH: &str = "com.openssh.sshd";
+
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn ssh_and_the_agent_are_protected_by_default() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = write_policy(
@@ -357,6 +370,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn ssh_and_the_agent_are_protected_by_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_policy(
+            dir.path(),
+            "version = 1\nallow = [\"services.manage\"]\n",
+            0o644,
+        );
+        let state = load(&path, own_uid(&path));
+        assert!(state.protects("com.openssh.sshd"));
+        assert!(state.protects("pw.cntrl.agent"));
+        assert!(state.protects("pw.cntrl.privd"));
+        assert!(!state.protects("homebrew.mxcl.nginx"));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
     fn a_protect_list_replaces_the_defaults_but_not_the_agent() {
         let dir = tempfile::tempdir().expect("temp dir");
         let text = "version = 1\n[services]\nprotect = [\"nginx\"]\n";
@@ -368,6 +398,18 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn a_protect_list_replaces_the_defaults_but_not_the_agent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let text = "version = 1\n[services]\nprotect = [\"homebrew.mxcl.nginx\"]\n";
+        let path = write_policy(dir.path(), text, 0o644);
+        let state = load(&path, own_uid(&path));
+        assert!(state.protects("homebrew.mxcl.nginx"));
+        assert!(!state.protects("com.openssh.sshd"));
+        assert!(state.protects("pw.cntrl.privd"));
+    }
+
+    #[test]
     fn allow_starts_from_the_built_in_policy() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("policy.toml");
@@ -376,7 +418,7 @@ mod tests {
         let state = load(&path, owner);
         assert!(state.allows("services.manage"));
         assert!(state.allows("system.read"));
-        assert!(state.protects("sshd"));
+        assert!(state.protects(SSH));
         assert_eq!(allow(&path, owner, "services.manage"), Ok(false));
         assert!(!dir.path().join("policy.toml.bak").exists());
     }
