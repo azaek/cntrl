@@ -177,7 +177,8 @@ install_macos() {
     done
 }
 
-# Hands the token to the running agent, which enrolls with Console.
+# Waits for the agent, then hands it the token, if there is one and the
+# machine isn't enrolled yet; the agent enrolls with Console.
 enroll() {
     tries=0
     until "$bin" status >/dev/null 2>&1; do
@@ -185,11 +186,15 @@ enroll() {
         [ "$tries" -lt 20 ] || fail "the agent didn't start; see its log"
         sleep 0.5
     done
-    if "$bin" status 2>/dev/null | grep -q '^uplink: not enrolled'; then
+    if ! "$bin" status 2>/dev/null | grep -q '^uplink: not enrolled'; then
+        say "This machine is already enrolled, and its agent is now up to date."
+        if [ -n "$CNTRL_TOKEN" ]; then
+            say "To move it to another organization: echo '<token>' | sudo cntrl enroll --force-reenroll"
+        fi
+    elif [ -n "$CNTRL_TOKEN" ]; then
         printf '%s\n' "$CNTRL_TOKEN" | "$bin" enroll
     else
-        say "This machine is already enrolled, and its agent is now up to date."
-        say "To move it to another organization: echo '<token>' | sudo cntrl enroll --force-reenroll"
+        say "To add this machine, run the command from Console's Add device dialog."
     fi
 }
 
@@ -243,12 +248,7 @@ main() {
         ;;
     esac
     say "Installed the cntrl agent as $bin, also called cntrl."
-
-    if [ -n "$CNTRL_TOKEN" ]; then
-        enroll
-    else
-        say "To add this machine, run the command from Console's Add device dialog."
-    fi
+    enroll
 }
 
 main "$@"
