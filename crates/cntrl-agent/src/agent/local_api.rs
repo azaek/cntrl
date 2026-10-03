@@ -118,6 +118,29 @@ impl connect_info::Connected<IncomingStream<'_, UnixListener>> for Peer {
     }
 }
 
+/// The socket the service manager made for this process (systemd's through
+/// `LISTEN_FDS`, launchd's from the job's `Listeners` entry), or else `path`,
+/// bound here.
+pub fn listen(path: &Path) -> Result<UnixListener, String> {
+    match activated()? {
+        Some(listener) => {
+            listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+            UnixListener::from_std(listener).map_err(|e| e.to_string())
+        }
+        None => bind(path),
+    }
+}
+
+fn activated() -> Result<Option<std::os::unix::net::UnixListener>, String> {
+    #[cfg(target_os = "macos")]
+    if let Some(listener) = super::launchd::listener("Listeners") {
+        return Ok(Some(listener));
+    }
+    listenfd::ListenFd::from_env()
+        .take_unix_listener(0)
+        .map_err(|e| e.to_string())
+}
+
 /// Binds the socket, replacing a stale one from an earlier run. Mode 0660: the
 /// owner and its group, and root.
 pub fn bind(path: &Path) -> Result<UnixListener, String> {
@@ -195,8 +218,6 @@ async fn reload_policy(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::MetadataExt;
-
     use hyper::Method;
 
     use super::super::client;
@@ -255,11 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn enrolling_needs_a_root_peer() {
-        if fs::metadata("/proc/self")
-            .map(|metadata| metadata.uid())
-            .unwrap_or(0)
-            == 0
-        {
+        if rustix::process::getuid().is_root() {
             return;
         }
         let dir = tempfile::tempdir().expect("temp dir");

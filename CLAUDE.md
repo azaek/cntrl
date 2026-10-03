@@ -56,7 +56,7 @@ The root `Cargo.toml` is a Cargo workspace for the agent crates in `crates/` and
 | ---------------- | ---------------------------------------------------------------- |
 | `cntrl-protocol` | Agent wire protocol: envelope, operations, error and close codes |
 | `cntrl-host`     | Host capabilities: one trait per capability, a backend per OS    |
-| `cntrl-agent`    | The headless server-management agent (Linux first)               |
+| `cntrl-agent`    | The headless server-management agent (Linux, then macOS)         |
 
 `cntrl-protocol` is the protocol's source of truth. `cargo xtask codegen` turns it into `protocol/v1/` (JSON Schema and the operations table) and `packages/protocol` (`@cntrl-pw/protocol`, the TypeScript types); never edit those generated files by hand. Golden frames in `testdata/protocol/v1/frames/` must round-trip through the Rust types; add one for every new frame shape.
 

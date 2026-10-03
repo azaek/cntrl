@@ -66,7 +66,11 @@ pub fn backend() -> Arc<dyn Stats> {
     {
         Arc::new(crate::linux::LinuxStats::default())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(crate::macos::MacStats::default())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         Arc::new(crate::Unsupported)
     }

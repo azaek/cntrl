@@ -1,12 +1,12 @@
 //! privd, the privileged half of the agent. It runs as root with no network,
-//! started on demand by its systemd socket, and is the only part that reads the
-//! policy, writes the audit log, holds the audit key and acts on the machine. It
-//! accepts connections only from root, the `cntrl` user and its own user, and
-//! exits after a minute without one.
+//! started on demand by its systemd or launchd socket, and is the only part that
+//! reads the policy, writes the audit log, holds the audit key and acts on the
+//! machine. It accepts connections only from root, the agent's user (`cntrl`,
+//! or `_cntrl` on macOS) and its own user, and exits after a minute without one.
 
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::DirBuilderExt;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -19,7 +19,7 @@ use cntrl_protocol::frame::Actor;
 use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
 use cntrl_protocol::service::{JobResult, ServiceJob};
 use serde_json::{Value, json};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixStream;
 use tracing::{error, info, warn};
 
 use super::audit::AuditLog;
@@ -31,6 +31,11 @@ use super::{local_api, logging, policy};
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
 const AUDIT_KEY_FILE: &str = "audit.key";
+/// The account the agent runs as, which the installer creates.
+#[cfg(target_os = "macos")]
+const AGENT_USER: &str = "_cntrl";
+#[cfg(not(target_os = "macos"))]
+const AGENT_USER: &str = "cntrl";
 /// How long privd waits for systemd's verdict on a job.
 const JOB_LIMIT: Duration = Duration::from_secs(300);
 
@@ -65,7 +70,7 @@ pub fn main(config: &Config) -> ExitCode {
 }
 
 async fn serve(config: &Config) -> Result<(), String> {
-    let listener = listener(&config.paths.privd_socket)?;
+    let listener = local_api::listen(&config.paths.privd_socket)?;
     let audit = AuditLog::open(&config.paths.audit_dir)?;
     let state_dir = &config.paths.privd_state_dir;
     fs::DirBuilder::new()
@@ -75,7 +80,7 @@ async fn serve(config: &Config) -> Result<(), String> {
         .map_err(|e| format!("can't create {}: {e}", state_dir.display()))?;
     let owner = own_uid();
     let mut allowed = vec![0, owner];
-    allowed.extend(uid_of("cntrl"));
+    allowed.extend(uid_of(AGENT_USER));
     let state = Arc::new(State {
         audit: Mutex::new(audit),
         policy_path: config.paths.policy.clone(),
@@ -107,18 +112,6 @@ async fn serve(config: &Config) -> Result<(), String> {
                 }
             }
         }
-    }
-}
-
-/// Takes the socket systemd passed in, or binds one when started by hand.
-fn listener(path: &Path) -> Result<UnixListener, String> {
-    let mut fds = listenfd::ListenFd::from_env();
-    match fds.take_unix_listener(0).map_err(|e| e.to_string())? {
-        Some(listener) => {
-            listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-            UnixListener::from_std(listener).map_err(|e| e.to_string())
-        }
-        None => local_api::bind(path),
     }
 }
 
@@ -296,14 +289,13 @@ async fn blocking(
         .map_err(|e| e.to_string())?
 }
 
-/// The user this process runs as; `/proc/self` belongs to it.
+/// The user this process runs as.
 fn own_uid() -> u32 {
-    fs::metadata("/proc/self")
-        .map(|metadata| metadata.uid())
-        .unwrap_or(0)
+    rustix::process::getuid().as_raw()
 }
 
 /// Looks `user` up in `/etc/passwd`, where the installer creates it.
+#[cfg(not(target_os = "macos"))]
 fn uid_of(user: &str) -> Option<u32> {
     let passwd = fs::read_to_string("/etc/passwd").ok()?;
     passwd.lines().find_map(|line| {
@@ -311,6 +303,20 @@ fn uid_of(user: &str) -> Option<u32> {
         (fields.next()? == user).then_some(())?;
         fields.nth(1)?.parse().ok()
     })
+}
+
+/// Looks `user` up through `id`, which asks Directory Services: macOS keeps the
+/// accounts the installer creates out of `/etc/passwd`.
+#[cfg(target_os = "macos")]
+fn uid_of(user: &str) -> Option<u32> {
+    let output = std::process::Command::new("/usr/bin/id")
+        .args(["-u", user])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
 }
 
 /// Counts open connections and remembers when the last one ended.

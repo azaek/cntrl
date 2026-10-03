@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The network half of the cntrl agent, as the unprivileged _cntrl user;
+  everything privileged goes through pw.cntrl.privd. launchd makes the local
+  API's socket for root and the _cntrl group (mode 0660, written in decimal as
+  launchd.plist(5) asks). install.sh fills in @GID@, the _cntrl group's ID.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>pw.cntrl.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/cntrl-agent</string>
+        <string>run</string>
+    </array>
+    <key>UserName</key>
+    <string>_cntrl</string>
+    <key>GroupName</key>
+    <string>_cntrl</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>Sockets</key>
+    <dict>
+        <key>Listeners</key>
+        <dict>
+            <key>SockPathName</key>
+            <string>/var/run/cntrl-agent.sock</string>
+            <key>SockPathOwner</key>
+            <integer>0</integer>
+            <key>SockPathGroup</key>
+            <integer>@GID@</integer>
+            <key>SockPathMode</key>
+            <integer>432</integer>
+        </dict>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/var/log/cntrl/agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/cntrl/agent.log</string>
+</dict>
+</plist>

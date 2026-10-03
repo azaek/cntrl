@@ -12,6 +12,8 @@ mod host;
 mod identity;
 mod ipc;
 mod keys;
+#[cfg(target_os = "macos")]
+mod launchd;
 mod local_api;
 mod logging;
 mod outbox;
@@ -87,7 +89,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
     };
 
     runtime.block_on(async move {
-        let listener = match local_api::bind(&config.paths.agent_socket) {
+        let listener = match local_api::listen(&config.paths.agent_socket) {
             Ok(listener) => listener,
             Err(e) => {
                 error!("{e}");

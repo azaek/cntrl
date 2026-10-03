@@ -23,9 +23,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Run the agent; this is what its systemd unit starts.
+    /// Run the agent; this is what its systemd unit or launchd job starts.
     Run,
-    /// Run the privileged helper; its systemd socket starts it on demand.
+    /// Run the privileged helper; its systemd or launchd socket starts it on demand.
     Privd,
     /// Show the running agent's status.
     Status {

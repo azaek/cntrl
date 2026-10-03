@@ -1,5 +1,5 @@
 //! The cntrl agent: a headless, system-level server-management agent. It runs
-//! on Linux first; on other platforms the binary builds and refuses to run.
+//! on Linux and macOS; on other platforms the binary builds and refuses to run.
 
 #[cfg(unix)]
 mod agent;

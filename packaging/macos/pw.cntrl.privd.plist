@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The privileged half of the cntrl agent, as root. launchd starts it when
+  something connects to its socket, which only root and the _cntrl group can
+  reach (mode 0660, in decimal); privd also checks each peer's credentials, and
+  exits after a minute without connections. install.sh fills in @GID@.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>pw.cntrl.privd</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/cntrl-agent</string>
+        <string>privd</string>
+    </array>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>Sockets</key>
+    <dict>
+        <key>Listeners</key>
+        <dict>
+            <key>SockPathName</key>
+            <string>/var/run/cntrl-privd.sock</string>
+            <key>SockPathOwner</key>
+            <integer>0</integer>
+            <key>SockPathGroup</key>
+            <integer>@GID@</integer>
+            <key>SockPathMode</key>
+            <integer>432</integer>
+        </dict>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/var/log/cntrl/privd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/cntrl/privd.log</string>
+</dict>
+</plist>

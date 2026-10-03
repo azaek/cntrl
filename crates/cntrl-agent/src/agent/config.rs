@@ -51,14 +51,31 @@ pub struct Paths {
 }
 
 impl Default for Paths {
+    /// systemd makes the Linux sockets' directories; on macOS launchd makes
+    /// the sockets themselves in `/var/run`, and state lives under
+    /// `/Library/Application Support` (D20).
     fn default() -> Self {
-        Self {
-            agent_socket: "/run/cntrl-agent/agent.sock".into(),
-            privd_socket: "/run/cntrl-privd/privd.sock".into(),
-            state_dir: "/var/lib/cntrl".into(),
-            privd_state_dir: "/var/lib/cntrl-privd".into(),
-            policy: "/etc/cntrl/policy.toml".into(),
-            audit_dir: "/var/log/cntrl/audit".into(),
+        #[cfg(target_os = "macos")]
+        {
+            Self {
+                agent_socket: "/var/run/cntrl-agent.sock".into(),
+                privd_socket: "/var/run/cntrl-privd.sock".into(),
+                state_dir: "/Library/Application Support/cntrl/agent".into(),
+                privd_state_dir: "/Library/Application Support/cntrl/privd".into(),
+                policy: "/etc/cntrl/policy.toml".into(),
+                audit_dir: "/var/log/cntrl/audit".into(),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self {
+                agent_socket: "/run/cntrl-agent/agent.sock".into(),
+                privd_socket: "/run/cntrl-privd/privd.sock".into(),
+                state_dir: "/var/lib/cntrl".into(),
+                privd_state_dir: "/var/lib/cntrl-privd".into(),
+                policy: "/etc/cntrl/policy.toml".into(),
+                audit_dir: "/var/log/cntrl/audit".into(),
+            }
         }
     }
 }
@@ -66,7 +83,7 @@ impl Default for Paths {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ConsoleConfig {
-    /// Base URL of Console's API, where enrollment goes.
+    /// Base URL of Console's API, where enrollment goes: the gateway.
     pub url: String,
     /// Replaces the gateway URL from enrollment, for a staging gateway or
     /// debugging.
@@ -76,7 +93,7 @@ pub struct ConsoleConfig {
 impl Default for ConsoleConfig {
     fn default() -> Self {
         Self {
-            url: "https://console.cntrl.pw".to_owned(),
+            url: "https://gw.cntrl.pw".to_owned(),
             gateway_url: None,
         }
     }
