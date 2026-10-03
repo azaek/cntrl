@@ -1,0 +1,49 @@
+# The network half of the cntrl agent. It runs as the unprivileged `cntrl`
+# user with no capabilities; everything privileged goes through cntrl-privd.
+[Unit]
+Description=cntrl agent
+Documentation=https://cntrl.pw
+After=network.target cntrl-privd.socket
+Wants=cntrl-privd.socket
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/cntrl-agent run
+User=cntrl
+Group=cntrl
+RuntimeDirectory=cntrl-agent
+RuntimeDirectoryMode=0750
+StateDirectory=cntrl
+StateDirectoryMode=0700
+Restart=always
+RestartSec=2
+# Exit 78 means a bad config; restarting won't fix it.
+RestartPreventExitStatus=78
+WatchdogSec=30
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

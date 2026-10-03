@@ -15,28 +15,47 @@ use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
 use super::health::Health;
+use super::ipc::{self, Call};
+use super::policy::PolicyState;
 
 /// What the local API reads from the running agent.
 pub struct AgentState {
     config_path: PathBuf,
+    privd_socket: PathBuf,
     health: Arc<Health>,
 }
 
 impl AgentState {
-    pub fn new(config_path: PathBuf, health: Arc<Health>) -> Self {
+    pub fn new(config_path: PathBuf, privd_socket: PathBuf, health: Arc<Health>) -> Self {
         Self {
             config_path,
+            privd_socket,
             health,
         }
     }
 
-    fn status(&self) -> Status {
+    /// The agent's status. Asking privd for the policy also starts privd if its
+    /// socket is installed.
+    async fn status(&self) -> Status {
+        let privd = match ipc::call_once(&self.privd_socket, Call::PolicyShow).await {
+            Ok(policy) => PrivdStatus {
+                reachable: true,
+                error: None,
+                policy: serde_json::from_value(policy).ok(),
+            },
+            Err(e) => PrivdStatus {
+                reachable: false,
+                error: Some(e),
+                policy: None,
+            },
+        };
         Status {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             pid: std::process::id(),
             uptime_s: self.health.uptime().as_secs(),
             uplink: Uplink::NotEnrolled,
             config: self.config_path.display().to_string(),
+            privd,
         }
     }
 }
@@ -49,6 +68,7 @@ pub struct Status {
     pub uptime_s: u64,
     pub uplink: Uplink,
     pub config: String,
+    pub privd: PrivdStatus,
 }
 
 /// The connection to Console.
@@ -58,8 +78,18 @@ pub enum Uplink {
     NotEnrolled,
 }
 
+/// Whether privd answers, and the policy it reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivdStatus {
+    pub reachable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<PolicyState>,
+}
+
 /// Binds the socket, replacing a stale one from an earlier run. Mode 0660: the
-/// agent's user and group, and root.
+/// owner and its group, and root.
 pub fn bind(path: &Path) -> Result<UnixListener, String> {
     match fs::remove_file(path) {
         Ok(()) => {}
@@ -93,7 +123,7 @@ pub async fn serve(
 }
 
 async fn status(State(state): State<Arc<AgentState>>) -> Json<Status> {
-    Json(state.status())
+    Json(state.status().await)
 }
 
 #[cfg(test)]
@@ -113,6 +143,7 @@ mod tests {
 
         let state = Arc::new(AgentState::new(
             "/etc/cntrl/agent.toml".into(),
+            dir.path().join("no-privd.sock"),
             Arc::new(Health::new()),
         ));
         let token = CancellationToken::new();
@@ -123,6 +154,7 @@ mod tests {
             .expect("status");
         assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(status.uplink, Uplink::NotEnrolled);
+        assert!(!status.privd.reachable);
 
         token.cancel();
         server

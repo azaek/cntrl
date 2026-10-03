@@ -1,0 +1,32 @@
+# The privileged half of the cntrl agent: root, but with no network. It reads
+# the device policy, writes the audit log and acts on the machine, and exits
+# after a minute without connections.
+[Unit]
+Description=cntrl privileged helper
+Requires=cntrl-privd.socket
+After=cntrl-privd.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cntrl-agent privd
+LogsDirectory=cntrl
+LogsDirectoryMode=0700
+UMask=0077
+
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

@@ -21,3 +21,28 @@ export const CloseCode = {
 } as const;
 
 export type CloseCode = (typeof CloseCode)[keyof typeof CloseCode];
+
+/** Every policy capability: what a device's policy can allow. */
+export const CAPABILITIES = [
+    "system.read",
+    "processes.read",
+    "processes.signal",
+    "power.read",
+    "power.reboot",
+    "power.poweroff",
+    "power.suspend",
+    "power.hibernate",
+    "services.read",
+    "services.manage",
+    "logs.read",
+] as const;
+
+export type Capability = (typeof CAPABILITIES)[number];
+
+/** What a device allows when it has no policy file: monitoring only. */
+export const MONITOR_ONLY: readonly Capability[] = [
+    "system.read",
+    "processes.read",
+    "services.read",
+    "logs.read",
+];

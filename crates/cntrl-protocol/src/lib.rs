@@ -2,6 +2,7 @@
 //! and error and close codes. Shared by the agent and, through generated types,
 //! by the gateway and the SDKs. No OS code and no async runtime.
 
+pub mod capability;
 pub mod codes;
 pub mod frame;
 pub mod ops;
@@ -10,6 +11,7 @@ pub mod service;
 pub mod stats;
 pub mod system;
 
+pub use capability::{CAPABILITIES, MONITOR_ONLY};
 pub use codes::{ErrorCode, close};
 pub use frame::Frame;
 pub use registry::{DecodeError, OpInfo, TopicInfo};

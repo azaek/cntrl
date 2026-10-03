@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use cntrl_protocol::{OpInfo, OpSchema, TopicSchema, close};
+use cntrl_protocol::{OpInfo, OpSchema, TopicSchema, capability, close};
 use serde_json::{Map, Value};
 
 const HEADER: &str =
@@ -149,6 +149,25 @@ pub fn constants() -> String {
     out.push_str(
         "} as const;\n\nexport type CloseCode = (typeof CloseCode)[keyof typeof CloseCode];\n",
     );
+    out.push_str("\n/** Every policy capability: what a device's policy can allow. */\n");
+    out.push_str(&format!(
+        "export const CAPABILITIES = {} as const;\n\nexport type Capability = (typeof CAPABILITIES)[number];\n",
+        string_array(capability::CAPABILITIES)
+    ));
+    out.push_str("\n/** What a device allows when it has no policy file: monitoring only. */\n");
+    out.push_str(&format!(
+        "export const MONITOR_ONLY: readonly Capability[] = {};\n",
+        string_array(capability::MONITOR_ONLY)
+    ));
+    out
+}
+
+fn string_array(items: &[&str]) -> String {
+    let mut out = String::from("[\n");
+    for item in items {
+        out.push_str(&format!("{INDENT}\"{item}\",\n"));
+    }
+    out.push(']');
     out
 }
 

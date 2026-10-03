@@ -36,10 +36,30 @@ pub enum Command {
     /// Work with the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Work with the device policy.
+    #[command(subcommand)]
+    Policy(PolicyCommand),
+    /// Work with the local audit log.
+    #[command(subcommand)]
+    Audit(AuditCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuditCommand {
+    /// Check the audit log's hash chain: 0 when it's intact, 1 when it isn't.
+    Verify,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     /// Check the config file and exit: 0 when it's valid, 78 when it isn't.
+    Check,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PolicyCommand {
+    /// Show the device policy in force.
+    Show,
+    /// Check the policy file and exit: 0 when it's valid, 1 when it isn't.
     Check,
 }

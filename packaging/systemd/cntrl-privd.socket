@@ -1,0 +1,14 @@
+# Starts cntrl-privd on demand. Only root and the `cntrl` group can connect;
+# privd also checks each peer's credentials.
+[Unit]
+Description=cntrl privileged helper socket
+
+[Socket]
+ListenStream=/run/cntrl-privd/privd.sock
+SocketUser=root
+SocketGroup=cntrl
+SocketMode=0660
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

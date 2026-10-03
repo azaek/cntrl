@@ -87,3 +87,21 @@ fn registry_entries_are_unique_and_namespaced() {
         );
     }
 }
+
+#[test]
+fn every_capability_named_by_the_registry_exists() {
+    for entry in OPS.iter().chain(TOPICS) {
+        assert!(
+            cntrl_protocol::capability::is_capability(entry.capability),
+            "{} names an unknown capability {}",
+            entry.name,
+            entry.capability
+        );
+    }
+    for capability in cntrl_protocol::MONITOR_ONLY {
+        assert!(
+            cntrl_protocol::capability::is_capability(capability),
+            "{capability}"
+        );
+    }
+}
