@@ -1,0 +1,134 @@
+# Builds and publishes a cntrl agent release (D21) when an agent-v* tag is
+# pushed: static musl builds for x86_64 and aarch64 Linux and builds for
+# aarch64 and x86_64 macOS, each on a native runner, packed by
+# packaging/archive.sh and attested. Then a manifest of every archive's URL,
+# size and SHA-256, signed with the release key from the protected `release`
+# environment, and a GitHub release carrying all of it. Console imports a
+# release only after checking that signature against
+# packaging/release-key.pub.pem.
+name: Release agent
+
+on:
+    push:
+        tags:
+            - "agent-v*" # Stable: agent-v0.2.0. Beta: agent-v0.2.0-beta.1
+
+permissions:
+    contents: read
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        strategy:
+            matrix:
+                include:
+                    - target: x86_64-unknown-linux-musl
+                      runner: ubuntu-24.04
+                    - target: aarch64-unknown-linux-musl
+                      runner: ubuntu-24.04-arm
+                    - target: aarch64-apple-darwin
+                      runner: macos-15
+                    - target: x86_64-apple-darwin
+                      runner: macos-15
+        runs-on: ${{ matrix.runner }}
+        permissions:
+            contents: read
+            id-token: write
+            attestations: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Version
+              id: version
+              run: echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
+
+            - name: The tag matches the crate
+              run: |
+                  crate=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "cntrl-agent") | .version')
+                  if [ "$crate" != "${{ steps.version.outputs.version }}" ]; then
+                      echo "The tag says ${{ steps.version.outputs.version }} but cntrl-agent is $crate." >&2
+                      exit 1
+                  fi
+
+            - name: musl
+              if: contains(matrix.target, 'musl')
+              run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+            - name: Build
+              run: cargo build --release --locked -p cntrl-agent --target ${{ matrix.target }}
+              env:
+                  CC_x86_64_unknown_linux_musl: musl-gcc
+                  CC_aarch64_unknown_linux_musl: musl-gcc
+
+            - name: Pack
+              run: packaging/archive.sh "${{ steps.version.outputs.version }}" "${{ matrix.target }}" "target/${{ matrix.target }}/release/cntrl-agent" dist
+
+            - name: Attest
+              uses: actions/attest-build-provenance@v2
+              with:
+                  subject-path: dist/*.tar.gz
+
+            - name: Upload
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ matrix.target }}
+                  path: dist/*.tar.gz
+                  if-no-files-found: error
+
+    publish:
+        needs: build
+        runs-on: ubuntu-24.04
+        # Holds AGENT_RELEASE_KEY, the private half of the release key, as PEM.
+        environment: release
+        permissions:
+            contents: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Download
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  merge-multiple: true
+
+            - name: Manifest
+              run: |
+                  version=${GITHUB_REF_NAME#agent-v}
+                  case $version in *-*) channel=beta ;; *) channel=stable ;; esac
+                  packaging/manifest.sh "$version" "$channel" \
+                      "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+                      dist/*.tar.gz > dist/manifest.json
+                  cat dist/manifest.json
+
+            - name: Sign
+              env:
+                  AGENT_RELEASE_KEY: ${{ secrets.AGENT_RELEASE_KEY }}
+              run: |
+                  umask 077
+                  printf '%s\n' "$AGENT_RELEASE_KEY" > "$RUNNER_TEMP/release.pem"
+                  openssl pkeyutl -sign -inkey "$RUNNER_TEMP/release.pem" -rawin \
+                      -in dist/manifest.json -out "$RUNNER_TEMP/manifest.sig"
+                  rm "$RUNNER_TEMP/release.pem"
+                  # The committed public key must accept it, or nothing is published.
+                  openssl pkeyutl -verify -pubin -inkey packaging/release-key.pub.pem -rawin \
+                      -in dist/manifest.json -sigfile "$RUNNER_TEMP/manifest.sig"
+                  base64 -w0 "$RUNNER_TEMP/manifest.sig" > dist/manifest.json.sig
+
+            - name: Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version=${GITHUB_REF_NAME#agent-v}
+                  case $version in *-*) pre=--prerelease ;; *) pre= ;; esac
+                  gh release create "$GITHUB_REF_NAME" dist/* $pre \
+                      --title "cntrl agent $version" \
+                      --notes "Install with the command from Console's Add device dialog. Verify an archive's provenance with: gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}"
