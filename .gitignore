@@ -36,6 +36,8 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+# The release key's public half; the private half never comes near the repo.
+!packaging/release-key.pub.pem
 
 .tanstack
 # Packages/Apps specific TODOs

@@ -2,9 +2,9 @@
 # pushed: static musl builds for x86_64 and aarch64 Linux and builds for
 # aarch64 and x86_64 macOS, each on a native runner, packed by
 # packaging/archive.sh and attested. Then a manifest of every archive's URL,
-# size and SHA-256, signed with the release key from the protected `release`
-# environment, and a GitHub release carrying all of it. Console imports a
-# release only after checking that signature against
+# size and SHA-256, signed with the release key from the AGENT_RELEASE_KEY
+# repository secret, and a GitHub release carrying all of it. Console imports
+# a release only after checking that signature against
 # packaging/release-key.pub.pem.
 name: Release agent
 
@@ -86,8 +86,6 @@ jobs:
     publish:
         needs: build
         runs-on: ubuntu-24.04
-        # Holds AGENT_RELEASE_KEY, the private half of the release key, as PEM.
-        environment: release
         permissions:
             contents: write
         steps:
@@ -111,6 +109,7 @@ jobs:
 
             - name: Sign
               env:
+                  # The private half of the release key, as PEM.
                   AGENT_RELEASE_KEY: ${{ secrets.AGENT_RELEASE_KEY }}
               run: |
                   umask 077

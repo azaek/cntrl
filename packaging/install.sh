@@ -103,7 +103,7 @@ install_linux() {
     # starts again from the new one.
     systemctl stop cntrl-agent.service cntrl-privd.service 2>/dev/null || true
     install -d -m 0755 /usr/local/bin /etc/cntrl
-    install -m 0755 "$1/cntrl-agent" /usr/local/bin/cntrl-agent
+    install -m 0755 "$1/cntrl-agent" "$bin"
     ln -sf cntrl-agent /usr/local/bin/cntrl
     write_config
     for unit in "$1"/packaging/systemd/*; do
@@ -129,7 +129,8 @@ free_id() {
 }
 
 install_macos() {
-    if [ -e /usr/local/bin/cntrl ] && [ "$(readlink /usr/local/bin/cntrl)" != cntrl-agent ]; then
+    link=$(readlink /usr/local/bin/cntrl 2>/dev/null || true)
+    if [ -e /usr/local/bin/cntrl ] && [ "$link" != "$bin" ] && [ "$link" != cntrl-agent ]; then
         fail "/usr/local/bin/cntrl is something else; move it first"
     fi
     if ! dscl . -read /Users/_cntrl >/dev/null 2>&1; then
@@ -153,10 +154,12 @@ install_macos() {
         launchctl bootout "system/$label" 2>/dev/null || true
     done
     support="/Library/Application Support/cntrl"
+    install -d -m 0755 -o root -g wheel /etc/cntrl "$support" "$support/bin" /var/log/cntrl
+    install -m 0755 -o root -g wheel "$1/cntrl-agent" "$bin"
     install -d -m 0755 /usr/local/bin
-    install -m 0755 "$1/cntrl-agent" /usr/local/bin/cntrl-agent
-    ln -sf cntrl-agent /usr/local/bin/cntrl
-    install -d -m 0755 -o root -g wheel /etc/cntrl "$support" /var/log/cntrl
+    ln -sf "$bin" /usr/local/bin/cntrl
+    # Test builds before 0.1.0 installed it in /usr/local/bin.
+    rm -f /usr/local/bin/cntrl-agent
     install -d -m 0700 -o _cntrl -g _cntrl "$support/agent"
     install -d -m 0700 -o root -g wheel "$support/privd"
     touch /var/log/cntrl/agent.log /var/log/cntrl/privd.log
@@ -177,13 +180,13 @@ install_macos() {
 # Hands the token to the running agent, which enrolls with Console.
 enroll() {
     tries=0
-    until /usr/local/bin/cntrl status >/dev/null 2>&1; do
+    until "$bin" status >/dev/null 2>&1; do
         tries=$((tries + 1))
         [ "$tries" -lt 20 ] || fail "the agent didn't start; see its log"
         sleep 0.5
     done
-    if /usr/local/bin/cntrl status 2>/dev/null | grep -q '^uplink: not enrolled'; then
-        printf '%s\n' "$CNTRL_TOKEN" | /usr/local/bin/cntrl enroll
+    if "$bin" status 2>/dev/null | grep -q '^uplink: not enrolled'; then
+        printf '%s\n' "$CNTRL_TOKEN" | "$bin" enroll
     else
         say "This machine is already enrolled, and its agent is now up to date."
         say "To move it to another organization: echo '<token>' | sudo cntrl enroll --force-reenroll"
@@ -226,11 +229,20 @@ main() {
     fi
     [ -x "$work/files/cntrl-agent" ] || fail "the archive has no cntrl-agent"
 
+    # On macOS the binary root runs stays out of /usr/local: Homebrew on Intel
+    # Macs gave the user /usr/local/bin and /usr/local/lib, so any program
+    # that user ran could replace it.
     case $tgt in
-    *-linux-*) install_linux "$work/files" ;;
-    *-darwin) install_macos "$work/files" ;;
+    *-linux-*)
+        bin=/usr/local/bin/cntrl-agent
+        install_linux "$work/files"
+        ;;
+    *-darwin)
+        bin="/Library/Application Support/cntrl/bin/cntrl-agent"
+        install_macos "$work/files"
+        ;;
     esac
-    say "Installed the cntrl agent as /usr/local/bin/cntrl-agent, also called cntrl."
+    say "Installed the cntrl agent as $bin, also called cntrl."
 
     if [ -n "$CNTRL_TOKEN" ]; then
         enroll

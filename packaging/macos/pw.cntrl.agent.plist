@@ -12,7 +12,7 @@
     <string>pw.cntrl.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/cntrl-agent</string>
+        <string>/Library/Application Support/cntrl/bin/cntrl-agent</string>
         <string>run</string>
     </array>
     <key>UserName</key>

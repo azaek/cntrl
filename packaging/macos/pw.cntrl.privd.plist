@@ -12,7 +12,7 @@
     <string>pw.cntrl.privd</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/cntrl-agent</string>
+        <string>/Library/Application Support/cntrl/bin/cntrl-agent</string>
         <string>privd</string>
     </array>
     <key>Umask</key>

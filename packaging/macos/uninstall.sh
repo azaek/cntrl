@@ -20,13 +20,16 @@ case ${1:-} in
 esac
 [ "$(id -u)" -eq 0 ] || fail "run it with sudo"
 
+bin="/Library/Application Support/cntrl/bin/cntrl-agent"
 for label in pw.cntrl.agent pw.cntrl.privd; do
     launchctl bootout "system/$label" 2>/dev/null || true
     rm -f "/Library/LaunchDaemons/$label.plist"
 done
-if [ "$(readlink /usr/local/bin/cntrl 2>/dev/null)" = cntrl-agent ]; then
-    rm -f /usr/local/bin/cntrl
-fi
+case $(readlink /usr/local/bin/cntrl 2>/dev/null || true) in
+"$bin" | cntrl-agent) rm -f /usr/local/bin/cntrl ;;
+esac
+rm -rf "/Library/Application Support/cntrl/bin"
+# Test builds before 0.1.0 installed it in /usr/local/bin.
 rm -f /usr/local/bin/cntrl-agent /var/run/cntrl-agent.sock /var/run/cntrl-privd.sock
 
 if [ -n "$PURGE" ]; then
