@@ -332,7 +332,7 @@ async fn session(
             oldest_unacked: None,
         },
     };
-    if let Err(end) = send(&mut ws, &Frame::Hello(hello)).await {
+    if let Err(end) = send(&mut ws, &Frame::Hello(Box::new(hello))).await {
         return end;
     }
     let welcome = match timeout(HANDSHAKE_TIMEOUT, next_frame(&mut ws)).await {

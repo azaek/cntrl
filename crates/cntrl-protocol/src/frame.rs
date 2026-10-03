@@ -17,7 +17,9 @@ use crate::codes::ErrorCode;
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Frame {
     Challenge(Challenge),
-    Hello(Hello),
+    // Boxed: it's by far the largest frame and goes out once per connection,
+    // so it shouldn't set the size of every other one.
+    Hello(Box<Hello>),
     Welcome(Welcome),
     Req(Request),
     Res(Response),
