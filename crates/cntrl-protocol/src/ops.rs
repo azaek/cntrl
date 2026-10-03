@@ -10,6 +10,14 @@ define_ops! {
         capability: "system.read",
         since: 1,
     },
+    /// The services the service manager knows at system scope, with each one's
+    /// state and whether the device policy protects it.
+    ServiceList = "service.list" {
+        params: crate::system::NoParams,
+        result: crate::service::ServiceList,
+        capability: "services.read",
+        since: 1,
+    },
     /// Restarts one service, a systemd unit or on macOS a launchd job, and waits
     /// for the result.
     ServiceRestart = "service.restart" {

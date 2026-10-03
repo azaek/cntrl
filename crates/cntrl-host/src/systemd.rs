@@ -1,7 +1,7 @@
 //! systemd over D-Bus, for the `service.*` operations. It needs the system bus,
 //! and root to act on units.
 
-use cntrl_protocol::service::JobResult;
+use cntrl_protocol::service::{JobResult, ServiceState, ServiceStatus};
 use futures_util::StreamExt;
 use zbus_systemd::systemd1::ManagerProxy;
 
@@ -42,6 +42,43 @@ impl Systemd {
             "systemd stopped sending job results".to_owned(),
         ))
     }
+
+    /// The service units systemd has loaded, by name, each with
+    /// `protected: false` for the caller to fill in. Reading needs no root.
+    pub async fn list(&self) -> Result<Vec<ServiceStatus>, HostError> {
+        let units = self
+            .manager
+            .list_units_by_patterns(Vec::new(), vec!["*.service".to_owned()])
+            .await
+            .map_err(failed)?;
+        let mut services: Vec<ServiceStatus> = units
+            .into_iter()
+            .filter(|unit| unit.2 == "loaded")
+            .map(|(unit, description, _, active, sub, ..)| ServiceStatus {
+                state: unit_state(&active, &sub),
+                detail: Some(format!("{active} ({sub})")),
+                description: (!description.is_empty()).then_some(description),
+                unit,
+                pid: None,
+                protected: false,
+            })
+            .collect();
+        services.sort_by(|a, b| a.unit.cmp(&b.unit));
+        Ok(services)
+    }
+}
+
+/// A unit's ActiveState and SubState, as the protocol names the state.
+fn unit_state(active: &str, sub: &str) -> ServiceState {
+    match (active, sub) {
+        ("active", "exited") => ServiceState::Exited,
+        ("active" | "reloading", _) => ServiceState::Running,
+        ("inactive", _) => ServiceState::Stopped,
+        ("failed", _) => ServiceState::Failed,
+        ("activating", _) => ServiceState::Starting,
+        ("deactivating", _) => ServiceState::Stopping,
+        _ => ServiceState::Unknown,
+    }
 }
 
 /// systemd's `JobRemoved` result, as the protocol names it.
@@ -76,6 +113,16 @@ fn failed(error: zbus::Error) -> HostError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unit_states_map_to_the_protocol() {
+        assert_eq!(unit_state("active", "running"), ServiceState::Running);
+        assert_eq!(unit_state("active", "exited"), ServiceState::Exited);
+        assert_eq!(unit_state("inactive", "dead"), ServiceState::Stopped);
+        assert_eq!(unit_state("failed", "failed"), ServiceState::Failed);
+        assert_eq!(unit_state("activating", "start"), ServiceState::Starting);
+        assert_eq!(unit_state("maintenance", "x"), ServiceState::Unknown);
+    }
 
     #[test]
     fn job_results_map_to_the_protocol() {

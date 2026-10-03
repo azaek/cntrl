@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use cntrl_host::HostError;
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::frame::{
@@ -16,6 +17,7 @@ use cntrl_protocol::frame::{
     Subscribe, Welcome,
 };
 use cntrl_protocol::ops::{self, Topic};
+use cntrl_protocol::service::{ServiceList, ServiceStatus};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
@@ -737,6 +739,20 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(info).map_err(|e| CallError::internal(e.to_string()))
         }
+        ops::Call::ServiceList(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            let mut services = list_services().await?;
+            for service in &mut services {
+                service.protected = policy.protects(&service.unit);
+            }
+            serde_json::to_value(ServiceList { services })
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
         // privd checks the policy again and audits its own decision.
         ops::Call::ServiceRestart(service) => {
             let call = Call::ServiceRestart {
@@ -747,6 +763,24 @@ async fn execute(
             ipc::call_within(privd, call, limit).await
         }
     }
+}
+
+/// The services at system scope. Listing needs no root, so the agent does it.
+#[cfg(target_os = "linux")]
+async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+    cntrl_host::systemd::Systemd::connect().await?.list().await
+}
+
+#[cfg(target_os = "macos")]
+async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+    tokio::task::spawn_blocking(cntrl_host::launchd::list)
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+    Err(HostError::Unsupported)
 }
 
 /// Records one of the agent's decisions in the audit log. A read goes ahead

@@ -871,6 +871,99 @@
       ],
       "description": "The OS, from os-release."
     },
+    "ServiceList": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServiceStatus"
+          }
+        }
+      },
+      "required": [
+        "services"
+      ],
+      "description": "`service.list`: the services the device's service manager knows at system\nscope (systemd's system units; launchd's system domain), by name."
+    },
+    "ServiceStatus": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string",
+          "description": "The name `service.restart` takes: a unit such as `nginx.service`, or a\nlaunchd label."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What it is, when the service manager says: systemd's description.\nlaunchd keeps none."
+        },
+        "state": {
+          "$ref": "#/$defs/ServiceState"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The service manager's own words for the state, such as systemd's\n`active (exited)` or launchd's last exit status."
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "The main process, while it runs and the service manager reports it."
+        },
+        "protected": {
+          "type": "boolean",
+          "description": "The device policy keeps service actions off it."
+        }
+      },
+      "required": [
+        "unit",
+        "state",
+        "protected"
+      ],
+      "description": "One service and how it is."
+    },
+    "ServiceState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "starting",
+            "stopping",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "running",
+          "description": "Its process is running."
+        },
+        {
+          "type": "string",
+          "const": "exited",
+          "description": "It ran and finished cleanly, such as a oneshot unit or an on-demand job\nbetween requests."
+        },
+        {
+          "type": "string",
+          "const": "stopped",
+          "description": "Loaded but not running, and not since it last stopped cleanly."
+        },
+        {
+          "type": "string",
+          "const": "failed",
+          "description": "It stopped with an error."
+        }
+      ],
+      "description": "A service's state across service managers."
+    },
     "ServiceRef": {
       "type": "object",
       "properties": {

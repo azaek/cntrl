@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cntrl_protocol::service::JobResult;
+use cntrl_protocol::service::{JobResult, ServiceState, ServiceStatus};
 
 use crate::HostError;
 
@@ -40,6 +40,58 @@ pub fn restart(label: &str) -> Result<JobResult, HostError> {
             JobState::Starting => return Ok(JobResult::Timeout),
         }
     }
+}
+
+/// The jobs in the system domain, where LaunchDaemons live, by label, each with
+/// `protected: false` for the caller to fill in. Listing needs no root. It
+/// blocks, so call it on a blocking thread.
+pub fn list() -> Result<Vec<ServiceStatus>, HostError> {
+    let output = launchctl(&["print", "system"])?;
+    if !output.status.success() {
+        return Err(HostError::Failed(message(&output)));
+    }
+    let mut services = services(&String::from_utf8_lossy(&output.stdout));
+    services.sort_by(|a, b| a.unit.cmp(&b.unit));
+    Ok(services)
+}
+
+/// Reads the `services = { … }` block of `launchctl print`: a line per job with
+/// its PID (0 when it isn't running), its last exit status (`-` before it has
+/// exited; `(pe)` and other markers are undocumented) and its label.
+fn services(printed: &str) -> Vec<ServiceStatus> {
+    printed
+        .lines()
+        .skip_while(|line| line.trim() != "services = {")
+        .skip(1)
+        .take_while(|line| line.trim() != "}")
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid: u32 = fields.next()?.parse().ok()?;
+            let status = fields.next()?;
+            let label = fields.next()?;
+            if fields.next().is_some() {
+                return None;
+            }
+            let (state, detail) = match status.parse::<i64>() {
+                _ if pid > 0 => (ServiceState::Running, None),
+                Ok(0) => (ServiceState::Exited, Some("exited 0".to_owned())),
+                Ok(code) if code < 0 => (
+                    ServiceState::Failed,
+                    Some(format!("killed by signal {}", -code)),
+                ),
+                Ok(code) => (ServiceState::Failed, Some(format!("exited {code}"))),
+                Err(_) => (ServiceState::Stopped, None),
+            };
+            Some(ServiceStatus {
+                unit: label.to_owned(),
+                description: None,
+                state,
+                detail,
+                pid: (pid > 0).then_some(pid),
+                protected: false,
+            })
+        })
+        .collect()
 }
 
 /// Where jobs live for this process: the system domain for root, else the
@@ -117,6 +169,52 @@ mod tests {
         let fresh = "\tstate = not running\n\tlast exit code = (never exited)\n";
         assert_eq!(state(fresh), JobState::Starting);
         assert_eq!(state("\tstate = spawn scheduled\n"), JobState::Starting);
+    }
+
+    #[test]
+    fn reads_the_services_block() {
+        let printed = "system = {\n\ttype = system\n\tservices = {\n\t\t     214      - \tcom.apple.runningboardd\n\t\t       0      0 \tpw.cntrl.privd\n\t\t       0      1 \tcom.example.broken\n\t\t       0     -9 \tcom.example.killed\n\t\t       0   (pe) \tcom.apple.lskdd\n\t}\n\tdisabled services = {\n\t\t\"com.openssh.sshd\" => enabled\n\t}\n}";
+        let services = services(printed);
+        let states: Vec<_> = services
+            .iter()
+            .map(|s| (s.unit.as_str(), s.state, s.pid, s.detail.as_deref()))
+            .collect();
+        assert_eq!(
+            states,
+            [
+                (
+                    "com.apple.runningboardd",
+                    ServiceState::Running,
+                    Some(214),
+                    None
+                ),
+                (
+                    "pw.cntrl.privd",
+                    ServiceState::Exited,
+                    None,
+                    Some("exited 0")
+                ),
+                (
+                    "com.example.broken",
+                    ServiceState::Failed,
+                    None,
+                    Some("exited 1")
+                ),
+                (
+                    "com.example.killed",
+                    ServiceState::Failed,
+                    None,
+                    Some("killed by signal 9")
+                ),
+                ("com.apple.lskdd", ServiceState::Stopped, None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn lists_this_macs_system_domain() {
+        let services = list().expect("launchctl print system");
+        assert!(services.iter().any(|s| s.unit.starts_with("com.apple.")));
     }
 
     /// Restarts a throwaway job in this user's GUI domain:

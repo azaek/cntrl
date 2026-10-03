@@ -14,6 +14,17 @@
       }
     },
     {
+      "name": "service.list",
+      "capability": "services.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceList"
+      }
+    },
+    {
       "name": "service.restart",
       "capability": "services.manage",
       "since": 1,

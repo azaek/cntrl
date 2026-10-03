@@ -339,11 +339,51 @@ export interface ServiceJob {
 }
 
 /**
+ * `service.list`: the services the device's service manager knows at system
+ * scope (systemd's system units; launchd's system domain), by name.
+ */
+export interface ServiceList {
+    services: ServiceStatus[];
+}
+
+/**
  * Names one service: a systemd unit such as `nginx.service`, or on macOS a
  * launchd job's label, such as `homebrew.mxcl.nginx`.
  */
 export interface ServiceRef {
     unit: string;
+}
+
+/** A service's state across service managers. */
+export type ServiceState =
+    | ("starting" | "stopping" | "unknown")
+    | "running"
+    | "exited"
+    | "stopped"
+    | "failed";
+
+/** One service and how it is. */
+export interface ServiceStatus {
+    /**
+     * The name `service.restart` takes: a unit such as `nginx.service`, or a
+     * launchd label.
+     */
+    unit: string;
+    /**
+     * What it is, when the service manager says: systemd's description.
+     * launchd keeps none.
+     */
+    description?: string | null;
+    state: ServiceState;
+    /**
+     * The service manager's own words for the state, such as systemd's
+     * `active (exited)` or launchd's last exit status.
+     */
+    detail?: string | null;
+    /** The main process, while it runs and the service manager reports it. */
+    pid?: number | null;
+    /** The device policy keeps service actions off it. */
+    protected: boolean;
 }
 
 /** Signature algorithm of the device key. */
