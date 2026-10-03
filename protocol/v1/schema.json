@@ -487,6 +487,13 @@
           },
           "description": "Subscriptions to restore after a reconnect.",
           "default": []
+        },
+        "credential": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A renewed connection credential; the agent keeps it for its next connect."
         }
       },
       "required": [
@@ -1102,6 +1109,10 @@
         "gateway_url": {
           "type": "string",
           "description": "Where the agent connects."
+        },
+        "credential": {
+          "type": "string",
+          "description": "The connection credential: a ticket the gateway checks before a\nconnection reaches its hub, sent as `Authorization: Bearer`. Opaque to the\nagent; the gateway renews it in a `welcome`."
         }
       },
       "required": [
@@ -1109,7 +1120,8 @@
         "key_id",
         "audit_key_id",
         "generation",
-        "gateway_url"
+        "gateway_url",
+        "credential"
       ],
       "description": "What a successful enrollment returns."
     },

@@ -17,7 +17,6 @@ use axum::serve::IncomingStream;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixListener;
-use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
@@ -34,8 +33,6 @@ pub struct AgentState {
     config_path: PathBuf,
     health: Arc<Health>,
     uplink: Arc<Uplink>,
-    /// One enrollment at a time.
-    enrolling: Mutex<()>,
 }
 
 impl AgentState {
@@ -50,7 +47,6 @@ impl AgentState {
             config_path,
             health,
             uplink,
-            enrolling: Mutex::new(()),
         }
     }
 
@@ -172,7 +168,8 @@ async fn enroll_device(
             "enrolling changes who controls this machine; run `sudo cntrl enroll`".to_owned(),
         ));
     }
-    let _one_at_a_time = state.enrolling.lock().await;
+    // One enrollment at a time, and none while the uplink saves a credential.
+    let _identity = state.uplink.lock_identity().await;
     let outcome = enroll::enroll(&state.config, command)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;

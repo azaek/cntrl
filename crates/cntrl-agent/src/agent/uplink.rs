@@ -18,7 +18,7 @@ use futures_util::{SinkExt, StreamExt};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Mutex, MutexGuard, Notify, watch};
 use tokio::time::{MissedTickBehavior, timeout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{self, HeaderValue};
@@ -80,6 +80,8 @@ pub struct Uplink {
     status: watch::Sender<UplinkStatus>,
     /// Signalled after an enrollment, so the uplink reconnects as the new identity.
     enrolled: Notify,
+    /// Held while the identity file is written.
+    identity: Mutex<()>,
 }
 
 impl Uplink {
@@ -87,7 +89,13 @@ impl Uplink {
         Self {
             status: watch::Sender::new(UplinkStatus::NotEnrolled),
             enrolled: Notify::new(),
+            identity: Mutex::new(()),
         }
+    }
+
+    /// Serializes writes to the identity file: enrollments and credential renewals.
+    pub async fn lock_identity(&self) -> MutexGuard<'_, ()> {
+        self.identity.lock().await
     }
 
     pub fn status(&self) -> UplinkStatus {
@@ -127,6 +135,10 @@ enum End {
     /// Don't reconnect until the device is enrolled again.
     Stop {
         reason: String,
+    },
+    /// The gateway rejected the connection's credentials (close 4001).
+    Rejected {
+        stable: bool,
     },
 }
 
@@ -173,9 +185,12 @@ pub async fn run(
             attempt,
         });
 
-        match session(&config, &identity, &url, &uplink, &token).await {
+        let retry = match session(&config, &identity, &url, &uplink, &token).await {
             End::Shutdown => return Ok(()),
-            End::Reenrolled => attempt = 0,
+            End::Reenrolled => {
+                attempt = 0;
+                continue;
+            }
             End::Stop { reason } => {
                 warn!("uplink stopped: {reason}");
                 uplink.set(UplinkStatus::Stopped { reason });
@@ -183,28 +198,42 @@ pub async fn run(
                     return Ok(());
                 }
                 attempt = 0;
+                continue;
             }
+            // A stale credential, such as one naming a workspace the device left,
+            // is dropped, and the agent reconnects at once through the lookup.
+            End::Rejected { .. } if identity.credential.is_some() => {
+                info!("the gateway rejected the connection credential; reconnecting without it");
+                save_credential(&config.state_dir, &uplink, &identity, None).await;
+                continue;
+            }
+            End::Rejected { stable } => (
+                "the gateway rejected this device's credentials".to_owned(),
+                AUTH_RETRY,
+                stable,
+            ),
             End::Retry {
                 reason,
                 at_least,
                 stable,
-            } => {
-                if stable {
-                    attempt = 0;
-                }
-                let delay = backoff(attempt).max(at_least);
-                attempt = attempt.saturating_add(1);
-                info!(retry_in_s = delay.as_secs(), "uplink down: {reason}");
-                uplink.set(UplinkStatus::Retrying {
-                    reason,
-                    retry_at_ms: now_ms().saturating_add(millis(delay)),
-                });
-                tokio::select! {
-                    () = tokio::time::sleep(delay) => {}
-                    () = uplink.enrolled.notified() => attempt = 0,
-                    () = token.cancelled() => return Ok(()),
-                }
-            }
+            } => (reason, at_least, stable),
+        };
+
+        let (reason, at_least, stable) = retry;
+        if stable {
+            attempt = 0;
+        }
+        let delay = backoff(attempt).max(at_least);
+        attempt = attempt.saturating_add(1);
+        info!(retry_in_s = delay.as_secs(), "uplink down: {reason}");
+        uplink.set(UplinkStatus::Retrying {
+            reason,
+            retry_at_ms: now_ms().saturating_add(millis(delay)),
+        });
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            () = uplink.enrolled.notified() => attempt = 0,
+            () = token.cancelled() => return Ok(()),
         }
     }
 }
@@ -237,7 +266,7 @@ async fn session(
             reason: format!("{url} isn't a gateway URL"),
         };
     };
-    let request = match connect_request(url, &identity.device_id) {
+    let request = match connect_request(url, &identity.device_id, identity.credential.as_deref()) {
         Ok(request) => request,
         Err(reason) => return End::Stop { reason },
     };
@@ -313,6 +342,15 @@ async fn session(
         Err(_) => return retry("the gateway sent no welcome"),
     };
 
+    if let Some(credential) = &welcome.credential {
+        save_credential(
+            &config.state_dir,
+            uplink,
+            identity,
+            Some(credential.clone()),
+        )
+        .await;
+    }
     info!(session = %welcome.session, gateway = url, "uplink online");
     uplink.set(UplinkStatus::Online {
         gateway: url.to_owned(),
@@ -451,13 +489,52 @@ async fn policy(privd_socket: &Path) -> PolicyState {
     }
 }
 
-fn connect_request(url: &str, device_id: &str) -> Result<http::Request<()>, String> {
+/// Keeps a renewed credential, or forgets a rejected one, unless the device was
+/// enrolled again meanwhile.
+async fn save_credential(
+    state_dir: &Path,
+    uplink: &Uplink,
+    session: &Identity,
+    credential: Option<String>,
+) {
+    let _identity = uplink.lock_identity().await;
+    let current = match identity::load(state_dir) {
+        Ok(Some(current)) => current,
+        Ok(None) => return,
+        Err(e) => {
+            warn!("can't update the connection credential: {e}");
+            return;
+        }
+    };
+    if current.device_id != session.device_id || current.key_id != session.key_id {
+        return;
+    }
+    let updated = Identity {
+        credential,
+        ..current
+    };
+    if let Err(e) = identity::save(state_dir, &updated) {
+        warn!("can't save the connection credential: {e}");
+    }
+}
+
+fn connect_request(
+    url: &str,
+    device_id: &str,
+    credential: Option<&str>,
+) -> Result<http::Request<()>, String> {
     let mut request = url
         .into_client_request()
         .map_err(|e| format!("{url} isn't a gateway URL: {e}"))?;
     let device = HeaderValue::from_str(device_id)
         .map_err(|_| format!("the device ID {device_id:?} isn't a valid header value"))?;
     let headers = request.headers_mut();
+    // Without a usable credential the gateway falls back to the device ID.
+    if let Some(credential) = credential
+        && let Ok(value) = HeaderValue::from_str(&format!("Bearer {credential}"))
+    {
+        headers.insert("authorization", value);
+    }
     headers.insert(
         "sec-websocket-protocol",
         HeaderValue::from_static(SUBPROTOCOL),
@@ -540,10 +617,7 @@ fn after_close(frame: Option<CloseFrame>, stable: bool) -> End {
             "another connection with this device's identity replaced this one".to_owned(),
             AUTH_RETRY,
         ),
-        close::CREDENTIAL_EXPIRED => wait(
-            "the gateway rejected this device's credentials".to_owned(),
-            AUTH_RETRY,
-        ),
+        close::CREDENTIAL_EXPIRED => End::Rejected { stable },
         close::TRY_LATER => wait("the gateway is busy".to_owned(), Duration::from_secs(30)),
         _ if said.is_empty() => wait(
             format!("the gateway closed the link ({code})"),
@@ -647,18 +721,30 @@ mod tests {
     }
 
     #[test]
-    fn credential_closes_wait_at_least_five_minutes() {
-        for code in [close::CREDENTIAL_EXPIRED, close::REPLACED] {
-            let frame = CloseFrame {
-                code: CloseCode::from(code),
-                reason: "".into(),
-            };
-            let end = after_close(Some(frame), false);
-            assert!(
-                matches!(end, End::Retry { at_least, .. } if at_least == AUTH_RETRY),
-                "{code}"
-            );
-        }
+    fn credential_closes_are_rejections_and_replacements_wait() {
+        let close = |code: u16| CloseFrame {
+            code: CloseCode::from(code),
+            reason: "".into(),
+        };
+        assert!(matches!(
+            after_close(Some(close(close::CREDENTIAL_EXPIRED)), true),
+            End::Rejected { stable: true }
+        ));
+        assert!(matches!(
+            after_close(Some(close(close::REPLACED)), false),
+            End::Retry { at_least, .. } if at_least == AUTH_RETRY
+        ));
+    }
+
+    #[test]
+    fn the_credential_goes_in_the_authorization_header() {
+        let url = "ws://localhost:8787/v1/agent";
+        let request = connect_request(url, "dev_01", Some("v1.e30.c2ln")).expect("request");
+        let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok());
+        assert_eq!(header("authorization"), Some("Bearer v1.e30.c2ln"));
+        assert_eq!(header("cntrl-device"), Some("dev_01"));
+        let request = connect_request(url, "dev_01", None).expect("request");
+        assert!(request.headers().get("authorization").is_none());
     }
 
     #[test]

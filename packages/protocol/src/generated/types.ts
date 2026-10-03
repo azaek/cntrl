@@ -96,6 +96,12 @@ export interface EnrollResponse {
     generation: number;
     /** Where the agent connects. */
     gateway_url: string;
+    /**
+     * The connection credential: a ticket the gateway checks before a
+     * connection reaches its hub, sent as `Authorization: Bearer`. Opaque to the
+     * agent; the gateway renews it in a `welcome`.
+     */
+    credential: string;
 }
 
 /** Why a request failed. */
@@ -358,4 +364,6 @@ export interface Welcome {
     limits: Limits;
     /** Subscriptions to restore after a reconnect. */
     subs?: Subscribe[];
+    /** A renewed connection credential; the agent keeps it for its next connect. */
+    credential?: string | null;
 }

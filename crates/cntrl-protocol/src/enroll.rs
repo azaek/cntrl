@@ -124,6 +124,10 @@ pub struct EnrollResponse {
     pub generation: u64,
     /// Where the agent connects.
     pub gateway_url: String,
+    /// The connection credential: a ticket the gateway checks before a
+    /// connection reaches its hub, sent as `Authorization: Bearer`. Opaque to the
+    /// agent; the gateway renews it in a `welcome`.
+    pub credential: String,
 }
 
 /// Why an enrollment failed.

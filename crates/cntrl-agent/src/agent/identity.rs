@@ -22,6 +22,9 @@ pub struct Identity {
     pub console_url: String,
     pub fingerprint: String,
     pub enrolled_at_ms: u64,
+    /// The gateway's connection credential, renewed on connect. Opaque here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
 }
 
 /// The saved identity, or `None` before enrollment.
@@ -61,6 +64,7 @@ mod tests {
             console_url: "http://localhost:8787".into(),
             fingerprint: "SHA256:abc".into(),
             enrolled_at_ms: 1,
+            credential: Some("v1.e30.c2ln".into()),
         };
         save(dir.path(), &identity).expect("save");
         assert_eq!(load(dir.path()).expect("load"), Some(identity));

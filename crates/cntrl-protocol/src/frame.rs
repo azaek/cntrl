@@ -145,6 +145,9 @@ pub struct Welcome {
     /// Subscriptions to restore after a reconnect.
     #[serde(default)]
     pub subs: Vec<Subscribe>,
+    /// A renewed connection credential; the agent keeps it for its next connect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
 }
 
 /// How often the agent pings, and how long it waits for a pong.

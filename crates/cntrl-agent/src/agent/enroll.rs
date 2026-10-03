@@ -92,6 +92,7 @@ pub async fn enroll(config: &Config, command: EnrollCommand) -> Result<EnrollOut
         console_url: config.console.url.clone(),
         fingerprint: device_key.fingerprint(),
         enrolled_at_ms: now_ms(),
+        credential: Some(response.credential),
     };
     identity::save(state_dir, &identity)?;
 
