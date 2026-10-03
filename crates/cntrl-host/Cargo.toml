@@ -18,5 +18,11 @@ cntrl-protocol.workspace = true
 # Parsing only, no OS calls, so the Linux backend builds and tests anywhere.
 procfs-core = { version = "0.18", default-features = false }
 
+# systemd over D-Bus, for services.
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = "0.3"
+zbus = { version = "5.19", default-features = false, features = ["tokio"] }
+zbus_systemd = { version = "0.26200", default-features = false, features = ["systemd1", "zbus-async-tokio"] }
+
 [lints]
 workspace = true

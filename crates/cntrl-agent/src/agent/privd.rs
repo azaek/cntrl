@@ -12,19 +12,26 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use cntrl_host::HostError;
+use cntrl_host::services::service_unit;
+use cntrl_protocol::codes::ErrorCode;
+use cntrl_protocol::frame::Actor;
+use cntrl_protocol::service::{JobResult, ServiceJob};
 use serde_json::{Value, json};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{error, info, warn};
 
 use super::audit::AuditLog;
 use super::config::Config;
-use super::ipc::{self, Call, Request, Response};
+use super::ipc::{self, Call, CallError, Request, Response};
 use super::keys::SigningKey;
 use super::{local_api, logging, policy};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
 const AUDIT_KEY_FILE: &str = "audit.key";
+/// How long privd waits for systemd's verdict on a job.
+const JOB_LIMIT: Duration = Duration::from_secs(300);
 
 struct State {
     audit: Mutex<AuditLog>,
@@ -150,28 +157,103 @@ async fn handle(stream: UnixStream, state: &Arc<State>) {
     }
 }
 
-async fn respond(state: &Arc<State>, call: Call) -> Result<Value, String> {
+async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
     let state = Arc::clone(state);
     match call {
         Call::Ping => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
         Call::PolicyShow => serde_json::to_value(policy::load(&state.policy_path, state.owner))
-            .map_err(|e| e.to_string()),
-        Call::AuditAppend { kind, data } => {
-            blocking(move || {
-                let mut log = state.audit.lock().unwrap_or_else(PoisonError::into_inner);
-                log.append("agent", &kind, data)
-                    .map(|(seq, hash)| json!({ "seq": seq, "hash": hash }))
-            })
-            .await
-        }
-        Call::AuditKey => {
-            blocking(move || {
-                SigningKey::load_or_generate(&state.audit_key_path)
-                    .map(|key| json!({ "key": key.public_key(), "fingerprint": key.fingerprint() }))
-            })
-            .await
-        }
+            .map_err(|e| CallError::internal(e.to_string())),
+        Call::AuditAppend { kind, data } => blocking(move || {
+            let mut log = state.audit.lock().unwrap_or_else(PoisonError::into_inner);
+            log.append("agent", &kind, data)
+                .map(|(seq, hash)| json!({ "seq": seq, "hash": hash }))
+        })
+        .await
+        .map_err(CallError::internal),
+        Call::AuditKey => blocking(move || {
+            SigningKey::load_or_generate(&state.audit_key_path)
+                .map(|key| json!({ "key": key.public_key(), "fingerprint": key.fingerprint() }))
+        })
+        .await
+        .map_err(CallError::internal),
+        Call::ServiceRestart {
+            request_id,
+            unit,
+            actor,
+        } => restart_service(state, request_id, unit, actor).await,
     }
+}
+
+/// Restarts a unit for Console. privd checks the policy itself, whatever the
+/// agent decided, and audits its decision, synced to disk, before acting.
+async fn restart_service(
+    state: Arc<State>,
+    id: String,
+    unit: String,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    let unit = service_unit(&unit)?;
+    let policy = policy::load(&state.policy_path, state.owner);
+    let refusal = if !policy.allows("services.manage") {
+        Some("the device policy doesn't allow services.manage".to_owned())
+    } else if policy.protects(&unit) {
+        Some(format!("the device policy protects {unit}"))
+    } else {
+        None
+    };
+    let request = json!({ "id": id, "op": "service.restart", "unit": unit, "actor": actor });
+    if let Some(reason) = refusal {
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    let outcome = tokio::time::timeout(JOB_LIMIT, restart(&unit))
+        .await
+        .unwrap_or_else(|_| {
+            Err(HostError::Failed(format!(
+                "systemd gave no result within {JOB_LIMIT:?}"
+            )))
+        });
+    let (record, answer) = match outcome {
+        Ok(result) => (
+            json!({ "id": id, "result": result }),
+            serde_json::to_value(ServiceJob { unit, result })
+                .map_err(|e| CallError::internal(e.to_string())),
+        ),
+        Err(e) => (json!({ "id": id, "error": e.to_string() }), Err(e.into())),
+    };
+    audit(&state, "request.completed", record).await?;
+    answer
+}
+
+#[cfg(target_os = "linux")]
+async fn restart(unit: &str) -> Result<JobResult, HostError> {
+    cntrl_host::systemd::Systemd::connect()
+        .await?
+        .restart(unit)
+        .await
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn restart(_unit: &str) -> Result<JobResult, HostError> {
+    Err(HostError::Unsupported)
+}
+
+/// Appends one of privd's own records to the audit log, synced to disk.
+async fn audit(state: &Arc<State>, kind: &'static str, data: Value) -> Result<(), CallError> {
+    let state = Arc::clone(state);
+    blocking(move || {
+        let mut log = state.audit.lock().unwrap_or_else(PoisonError::into_inner);
+        log.append("privd", kind, data).map(|_| Value::Null)
+    })
+    .await
+    .map(drop)
+    .map_err(CallError::internal)
 }
 
 /// Runs file work on the blocking pool.

@@ -1,5 +1,5 @@
 //! The CLI commands that talk to the running agent or read its files:
-//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check` and
+//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check|allow` and
 //! `cntrl audit verify`.
 
 use std::fs;
@@ -116,6 +116,38 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, force: bool) -> Ex
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
         Err(e) => fail(&e),
     }
+}
+
+/// `cntrl policy allow`: adds a capability to the policy file, then has the
+/// running agent reconnect, so Console sees the new policy in its hello.
+pub fn allow_capability(config: &Config, capability: &str) -> ExitCode {
+    let path = &config.paths.policy;
+    // privd reads the file as root, so root must own it.
+    match policy::allow(path, 0, capability) {
+        Ok(false) => {
+            println!("{capability} is already allowed.");
+            return ExitCode::SUCCESS;
+        }
+        Ok(true) => println!("Allowed {capability} in {}.", path.display()),
+        Err(e) => return fail(&e),
+    }
+    let reload = request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/policy/reload",
+        Vec::new(),
+    );
+    match block_on(reload) {
+        Ok((status, _)) if status.is_success() => {
+            println!("The agent is reconnecting with the new policy.");
+        }
+        Ok((_, bytes)) => eprintln!(
+            "The agent didn't reload: {}",
+            String::from_utf8_lossy(&bytes).trim()
+        ),
+        Err(_) => println!("The agent isn't running; it reads the policy when it starts."),
+    }
+    ExitCode::SUCCESS
 }
 
 fn read_token(file: Option<&Path>) -> Result<String, String> {

@@ -68,15 +68,11 @@ pub fn backend() -> Arc<dyn Stats> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Arc::new(Unsupported)
+        Arc::new(crate::Unsupported)
     }
 }
 
-/// The backend for an OS that has none yet.
-#[derive(Debug, Default)]
-pub struct Unsupported;
-
-impl Stats for Unsupported {
+impl Stats for crate::Unsupported {
     fn read(&self) -> Result<StatsReading, HostError> {
         Err(HostError::Unsupported)
     }
@@ -176,6 +172,6 @@ mod tests {
 
     #[test]
     fn unsupported_says_so() {
-        assert_eq!(Unsupported.read(), Err(HostError::Unsupported));
+        assert_eq!(crate::Unsupported.read(), Err(HostError::Unsupported));
     }
 }

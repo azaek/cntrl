@@ -12,17 +12,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::frame::{
-    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, OutboxState, Response, SigAlg, Subscribe,
-    Welcome,
+    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, OutboxState, Request, Response, SigAlg,
+    Subscribe, Welcome,
 };
-use cntrl_protocol::ops::Topic;
+use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, MutexGuard, Notify, watch};
+use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, watch};
+use tokio::task::AbortHandle;
 use tokio::time::{MissedTickBehavior, timeout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{self, HeaderValue};
@@ -35,7 +36,7 @@ use tracing::{debug, info, warn};
 
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
-use super::ipc::{self, Call};
+use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
 use super::policy::PolicyState;
 use super::stats::Latest;
@@ -85,6 +86,9 @@ pub struct Uplink {
     status: watch::Sender<UplinkStatus>,
     /// Signalled after an enrollment, so the uplink reconnects as the new identity.
     enrolled: Notify,
+    /// Signalled after a policy change, so the uplink reconnects and Console
+    /// sees the new policy in the hello.
+    policy_changed: Notify,
     /// Held while the identity file is written.
     identity: Mutex<()>,
 }
@@ -94,6 +98,7 @@ impl Uplink {
         Self {
             status: watch::Sender::new(UplinkStatus::NotEnrolled),
             enrolled: Notify::new(),
+            policy_changed: Notify::new(),
             identity: Mutex::new(()),
         }
     }
@@ -110,6 +115,11 @@ impl Uplink {
     /// Tells the uplink the identity changed.
     pub fn enrolled(&self) {
         self.enrolled.notify_one();
+    }
+
+    /// Tells the uplink the policy changed.
+    pub fn policy_changed(&self) {
+        self.policy_changed.notify_one();
     }
 
     fn set(&self, status: UplinkStatus) {
@@ -131,8 +141,8 @@ pub struct UplinkConfig {
 /// How a session ended, and what to do next.
 enum End {
     Shutdown,
-    /// The device was enrolled again: reconnect now, as the new identity.
-    Reenrolled,
+    /// The identity or the policy changed: reconnect now.
+    Reconnect,
     Retry {
         reason: String,
         at_least: Duration,
@@ -194,7 +204,7 @@ pub async fn run(
 
         let retry = match session(&config, &identity, &url, &uplink, &token).await {
             End::Shutdown => return Ok(()),
-            End::Reenrolled => {
+            End::Reconnect => {
                 attempt = 0;
                 continue;
             }
@@ -364,15 +374,15 @@ async fn session(
         session: welcome.session.clone(),
         since_ms: now_ms(),
     });
-    online(&mut ws, &welcome, &policy, &config.stats, uplink, token).await
+    online(&mut ws, &welcome, Arc::new(policy), config, uplink, token).await
 }
 
 /// The connected session: heartbeats, and frames from Console.
 async fn online(
     ws: &mut Ws,
     welcome: &Welcome,
-    policy: &PolicyState,
-    stats: &Latest,
+    policy: Arc<PolicyState>,
+    config: &UplinkConfig,
     uplink: &Uplink,
     token: &CancellationToken,
 ) -> End {
@@ -385,10 +395,21 @@ async fn online(
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_pong = Instant::now();
-    let mut subs = Subscriptions::default();
+    let (answers, mut answered) = mpsc::channel(ANSWER_QUEUE);
+    let mut session = Session {
+        requests: Requests::new(answers, welcome.limits.max_inflight as usize),
+        subs: Subscriptions::default(),
+        policy,
+        config,
+    };
     // A reconnecting session gets its subscriptions back in the welcome.
     for subscribe in welcome.subs.iter().cloned() {
-        if let Err(end) = subs.open(ws, subscribe, policy, stats).await {
+        let stats = &session.config.stats;
+        if let Err(end) = session
+            .subs
+            .open(ws, subscribe, &session.policy, stats)
+            .await
+        {
             return end;
         }
     }
@@ -421,7 +442,7 @@ async fn online(
                         }
                     }
                     json => {
-                        if let Some(end) = handle(ws, json, stable(), &mut subs, policy, stats).await {
+                        if let Some(end) = handle(ws, json, stable(), &mut session).await {
                             return end;
                         }
                     }
@@ -443,14 +464,25 @@ async fn online(
                     };
                 }
             },
-            Some(sample) = next_sample(&mut subs.stats), if subs.stats.is_some() => {
-                if let Err(end) = subs.publish(ws, &sample).await {
+            Some(sample) = next_sample(&mut session.subs.stats), if session.subs.stats.is_some() => {
+                if let Err(end) = session.subs.publish(ws, &sample).await {
+                    return end;
+                }
+            }
+            Some(answer) = answered.recv() => {
+                if let Some(answer) = session.requests.finish(answer)
+                    && let Err(end) = send(ws, &Frame::Res(answer)).await
+                {
                     return end;
                 }
             }
             () = uplink.enrolled.notified() => {
                 close_link(ws, close::DISCONNECTED_BY_DEVICE, "enrolled again").await;
-                return End::Reenrolled;
+                return End::Reconnect;
+            }
+            () = uplink.policy_changed.notified() => {
+                close_link(ws, close::DISCONNECTED_BY_DEVICE, "policy changed").await;
+                return End::Reconnect;
             }
             () = token.cancelled() => {
                 close_link(ws, close::RESTARTING, "agent stopping").await;
@@ -460,15 +492,17 @@ async fn online(
     }
 }
 
+/// What an online session serves from and keeps track of.
+struct Session<'a> {
+    requests: Requests,
+    subs: Subscriptions,
+    /// The policy the hello reported; a change reconnects.
+    policy: Arc<PolicyState>,
+    config: &'a UplinkConfig,
+}
+
 /// Handles a frame from Console; `Some` ends the session.
-async fn handle(
-    ws: &mut Ws,
-    json: &str,
-    stable: bool,
-    subs: &mut Subscriptions,
-    policy: &PolicyState,
-    stats: &Latest,
-) -> Option<End> {
+async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>) -> Option<End> {
     let frame = match serde_json::from_str::<Frame>(json) {
         Ok(frame) => frame,
         Err(e) => {
@@ -477,15 +511,17 @@ async fn handle(
         }
     };
     let reply = match frame {
-        // Operations land with the capabilities.
-        Frame::Req(request) => Response::err(
-            request.id,
-            ErrorCode::UnknownOp,
-            "this agent doesn't run operations yet",
-        ),
-        Frame::Sub(subscribe) => return subs.open(ws, subscribe, policy, stats).await.err(),
+        Frame::Req(request) => {
+            let privd = &session.config.privd_socket;
+            session.requests.start(request, &session.policy, privd)?
+        }
+        Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
+        Frame::Sub(subscribe) => {
+            let (policy, stats) = (&session.policy, &session.config.stats);
+            return session.subs.open(ws, subscribe, policy, stats).await.err();
+        }
         Frame::Unsub(unsubscribe) => {
-            subs.close(&unsubscribe.id);
+            session.subs.close(&unsubscribe.id);
             return None;
         }
         Frame::Goaway(goaway) => return Some(go_away(ws, &goaway, stable).await),
@@ -495,6 +531,162 @@ async fn handle(
         }
     };
     send(ws, &Frame::Res(reply)).await.err()
+}
+
+/// How many finished requests may wait for the session to send their answers.
+const ANSWER_QUEUE: usize = 64;
+/// Bounds for a request's `deadline_ms`.
+const DEADLINE_MIN: Duration = Duration::from_secs(1);
+const DEADLINE_MAX: Duration = Duration::from_secs(600);
+
+/// The session's running requests. Each runs in its own task and hands its
+/// answer back through a channel, so a slow operation never holds up the link.
+struct Requests {
+    running: HashMap<String, AbortHandle>,
+    answers: mpsc::Sender<Response>,
+    /// The most that may run at once: the hub's `limits.max_inflight`.
+    limit: usize,
+}
+
+impl Requests {
+    fn new(answers: mpsc::Sender<Response>, limit: usize) -> Self {
+        Self {
+            running: HashMap::new(),
+            answers,
+            limit,
+        }
+    }
+
+    /// Starts a request. Refusals that need no work come back at once.
+    fn start(
+        &mut self,
+        request: Request,
+        policy: &Arc<PolicyState>,
+        privd: &Path,
+    ) -> Option<Response> {
+        let refuse = |code, msg: String| Some(Response::err(request.id.clone(), code, msg));
+        if self.running.contains_key(&request.id) {
+            return refuse(
+                ErrorCode::BadRequest,
+                format!("{} is already running", request.id),
+            );
+        }
+        if self.running.len() >= self.limit {
+            return refuse(
+                ErrorCode::Busy,
+                format!("{} requests are running", self.limit),
+            );
+        }
+        if request.ver != 1 {
+            let msg = format!("{} has no version {}", request.op, request.ver);
+            return refuse(ErrorCode::UnsupportedVersion, msg);
+        }
+        let call = match ops::Call::decode(&request.op, request.data.clone()) {
+            Ok(call) => call,
+            Err(e) => return refuse(e.code(), e.to_string()),
+        };
+        let id = request.id.clone();
+        let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
+        let task = tokio::spawn(async move {
+            let answer = answer(request, call, &policy, &privd).await;
+            // A closed channel means the session ended; nobody is waiting.
+            let _ = answers.send(answer).await;
+        });
+        self.running.insert(id, task.abort_handle());
+        None
+    }
+
+    /// Cancels a running request; a finished or unknown one is ignored.
+    fn cancel(&mut self, id: &str) -> Option<Response> {
+        let task = self.running.remove(id)?;
+        task.abort();
+        Some(Response::err(id, ErrorCode::Cancelled, "cancelled"))
+    }
+
+    /// A finished request's answer, unless it was cancelled meanwhile.
+    fn finish(&mut self, answer: Response) -> Option<Response> {
+        self.running.remove(&answer.id).map(|_| answer)
+    }
+}
+
+impl Drop for Requests {
+    fn drop(&mut self) {
+        // The session is over, so the answers would have nowhere to go. privd
+        // finishes and audits whatever it already started.
+        for task in self.running.values() {
+            task.abort();
+        }
+    }
+}
+
+/// Runs one request within its deadline.
+async fn answer(request: Request, call: ops::Call, policy: &PolicyState, privd: &Path) -> Response {
+    let limit =
+        Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
+    match timeout(limit, execute(&request, call, policy, privd, limit)).await {
+        Ok(Ok(data)) => Response::ok(request.id, data),
+        Ok(Err(e)) => Response::err(request.id, e.code, e.msg),
+        Err(_) => Response::err(
+            request.id,
+            ErrorCode::Timeout,
+            format!("no result within {limit:?}"),
+        ),
+    }
+}
+
+/// Checks the policy, then runs the operation. Every operation needs an arm
+/// here, so a new one doesn't compile until it's handled.
+async fn execute(
+    request: &Request,
+    call: ops::Call,
+    policy: &PolicyState,
+    privd: &Path,
+    limit: Duration,
+) -> Result<serde_json::Value, CallError> {
+    let summary = serde_json::json!({ "id": request.id, "op": request.op, "actor": request.actor });
+    let capability = call.capability();
+    if !policy.allows(capability) {
+        let reason = format!("the device policy doesn't allow {capability}");
+        let record = serde_json::json!({ "request": summary, "reason": reason });
+        audit(privd, "request.denied", record).await;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    match call {
+        ops::Call::SystemInfo(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            let system = cntrl_host::system::backend();
+            let info = tokio::task::spawn_blocking(move || system.info(env!("CARGO_PKG_VERSION")))
+                .await
+                .map_err(|e| CallError::internal(e.to_string()))??;
+            serde_json::to_value(info).map_err(|e| CallError::internal(e.to_string()))
+        }
+        // privd checks the policy again and audits its own decision.
+        ops::Call::ServiceRestart(service) => {
+            let call = Call::ServiceRestart {
+                request_id: request.id.clone(),
+                unit: service.unit,
+                actor: request.actor.clone(),
+            };
+            ipc::call_within(privd, call, limit).await
+        }
+    }
+}
+
+/// Records one of the agent's decisions in the audit log. A read goes ahead
+/// even if the log can't be written; the failure is logged instead.
+async fn audit(privd: &Path, kind: &str, data: serde_json::Value) {
+    let call = Call::AuditAppend {
+        kind: kind.to_owned(),
+        data,
+    };
+    if let Err(e) = ipc::call_once(privd, call).await {
+        warn!("can't audit a request: {e}");
+    }
 }
 
 /// How much earlier than due a sample may be taken and still go out, in

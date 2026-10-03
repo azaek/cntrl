@@ -146,6 +146,7 @@ pub async fn serve(
     let app = Router::new()
         .route("/v1/status", get(status))
         .route("/v1/enroll", post(enroll_device))
+        .route("/v1/policy/reload", post(reload_policy))
         .with_state(state);
     axum::serve(listener, app.into_make_service_with_connect_info::<Peer>())
         .with_graceful_shutdown(async move { token.cancelled().await })
@@ -175,6 +176,21 @@ async fn enroll_device(
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     state.uplink.enrolled();
     Ok(Json(outcome))
+}
+
+/// `cntrl policy allow` changed the policy: reconnect, so the hello carries it.
+async fn reload_policy(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if peer.uid != Some(0) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only root changes the policy; run `sudo cntrl policy allow`".to_owned(),
+        ));
+    }
+    state.uplink.policy_changed();
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

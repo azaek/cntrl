@@ -62,6 +62,9 @@ pub fn main() -> ExitCode {
         }
         Command::Policy(PolicyCommand::Show) => client::print_policy(&config, false),
         Command::Policy(PolicyCommand::Check) => client::print_policy(&config, true),
+        Command::Policy(PolicyCommand::Allow { capability }) => {
+            client::allow_capability(&config, &capability)
+        }
         Command::Audit(AuditCommand::Verify) => client::print_audit_verify(&config),
     }
 }

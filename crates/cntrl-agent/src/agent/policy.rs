@@ -4,17 +4,29 @@
 //! denies every remote action until it's fixed.
 
 use std::collections::BTreeSet;
-use std::fs;
-use std::io;
-use std::os::unix::fs::MetadataExt;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use super::digest::sha256_hex;
+use cntrl_host::services::service_unit;
 use cntrl_protocol::OpInfo;
 use cntrl_protocol::capability;
 use cntrl_protocol::frame::{Caps, PolicySummary};
 use cntrl_protocol::ops::{OPS, TOPICS};
 use serde::{Deserialize, Serialize};
+
+/// Units protected unless the policy file lists its own: losing SSH can lock
+/// the owner out.
+const DEFAULT_PROTECTED: &[&str] = &["ssh.service", "sshd.service"];
+/// The agent's own units, always protected: a restart through the agent would
+/// end the request that asked for it.
+const ALWAYS_PROTECTED: &[&str] = &[
+    "cntrl-agent.service",
+    "cntrl-privd.service",
+    "cntrl-privd.socket",
+];
 
 /// Where the policy in force came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +72,19 @@ impl PolicyState {
         matches!(self, Self::Valid { policy } if policy.allow.contains(capability))
     }
 
+    /// Whether service actions must leave `unit` alone. An invalid policy
+    /// protects everything.
+    pub fn protects(&self, unit: &str) -> bool {
+        let Self::Valid { policy } = self else {
+            return true;
+        };
+        let unit = service_unit(unit).unwrap_or_else(|_| unit.to_owned());
+        policy
+            .protect
+            .iter()
+            .any(|entry| service_unit(entry).is_ok_and(|entry| entry == unit))
+    }
+
     /// The operations and topics this policy lets Console call, for the hello.
     pub fn caps(&self) -> Caps {
         let allowed = |registry: &[OpInfo]| {
@@ -91,7 +116,7 @@ impl PolicyState {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct PolicyFile {
     version: u32,
@@ -103,14 +128,15 @@ struct PolicyFile {
     update: UpdateSection,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ServicesSection {
-    #[serde(default)]
-    protect: Vec<String>,
+    /// Absent means [`DEFAULT_PROTECTED`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protect: Option<Vec<String>>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct UpdateSection {
     #[serde(default)]
@@ -147,6 +173,76 @@ pub fn load(path: &Path, owner: u32) -> PolicyState {
     }
 }
 
+/// Adds `capability` to the policy file at `path`, starting from the built-in
+/// policy when there's no file. Returns whether anything changed. The file is
+/// rewritten whole, so comments in it are lost; the old file is kept beside it
+/// as `policy.toml.bak`.
+pub fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
+    if !capability::is_capability(capability) {
+        let all = capability::CAPABILITIES.join(", ");
+        return Err(format!(
+            "`{capability}` isn't a capability; there are {all}"
+        ));
+    }
+    let policy = match load(path, owner) {
+        PolicyState::Valid { policy } => policy,
+        PolicyState::Invalid { reason } => return Err(format!("fix the policy first: {reason}")),
+    };
+    if policy.allow.contains(capability) {
+        return Ok(false);
+    }
+    let file = PolicyFile {
+        version: 1,
+        allow: policy
+            .allow
+            .into_iter()
+            .chain([capability.to_owned()])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        services: ServicesSection {
+            protect: Some(policy.protect.into_iter().collect()),
+        },
+        update: UpdateSection {
+            mode: policy.update,
+        },
+    };
+    let text = toml::to_string(&file).map_err(|e| e.to_string())?;
+    let text = format!(
+        "# The device policy. Only root changes it: edit this file, or run\n\
+         # `sudo cntrl policy allow <capability>`, which rewrites it.\n{text}"
+    );
+    write_atomically(path, &text)?;
+    Ok(true)
+}
+
+/// Replaces `path` through a temporary file, so a reader never sees half of it.
+fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
+    let context = |e: io::Error| {
+        let hint = if e.kind() == io::ErrorKind::PermissionDenied {
+            " (run it with sudo)"
+        } else {
+            ""
+        };
+        format!("can't write {}: {e}{hint}", path.display())
+    };
+    if path.exists() {
+        fs::copy(path, path.with_extension("toml.bak")).map_err(context)?;
+    }
+    let temporary = path.with_extension("toml.new");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .open(&temporary)
+        .map_err(context)?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(context)?;
+    fs::rename(&temporary, path).map_err(context)
+}
+
 fn parse(text: &str) -> Result<Policy, String> {
     let file: PolicyFile = toml::from_str(text).map_err(|e| e.to_string())?;
     if file.version != 1 {
@@ -159,12 +255,13 @@ fn parse(text: &str) -> Result<Policy, String> {
     {
         return Err(format!("unknown capability `{unknown}`"));
     }
-    Ok(build(
-        Source::File,
-        file.allow,
-        file.services.protect,
-        file.update.mode,
-    ))
+    let protect = file.services.protect.unwrap_or_else(|| {
+        DEFAULT_PROTECTED
+            .iter()
+            .map(|unit| (*unit).to_owned())
+            .collect()
+    });
+    Ok(build(Source::File, file.allow, protect, file.update.mode))
 }
 
 fn default_policy() -> Policy {
@@ -172,12 +269,19 @@ fn default_policy() -> Policy {
         .iter()
         .map(|name| (*name).to_owned())
         .collect();
-    build(Source::Default, allow, Vec::new(), UpdateMode::default())
+    let protect = DEFAULT_PROTECTED
+        .iter()
+        .map(|unit| (*unit).to_owned())
+        .collect();
+    build(Source::Default, allow, protect, UpdateMode::default())
 }
 
 fn build(source: Source, allow: Vec<String>, protect: Vec<String>, update: UpdateMode) -> Policy {
     let allow: BTreeSet<String> = allow.into_iter().collect();
-    let protect: BTreeSet<String> = protect.into_iter().collect();
+    let protect: BTreeSet<String> = protect
+        .into_iter()
+        .chain(ALWAYS_PROTECTED.iter().map(|unit| (*unit).to_owned()))
+        .collect();
     let normalized = serde_json::json!({
         "version": 1,
         "allow": allow,
@@ -235,6 +339,82 @@ mod tests {
         let state = load(&path, own_uid(&path));
         assert!(state.allows("services.manage"));
         assert!(!state.allows("power.reboot"));
+    }
+
+    #[test]
+    fn ssh_and_the_agent_are_protected_by_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_policy(
+            dir.path(),
+            "version = 1\nallow = [\"services.manage\"]\n",
+            0o644,
+        );
+        let state = load(&path, own_uid(&path));
+        assert!(state.protects("sshd"));
+        assert!(state.protects("ssh.service"));
+        assert!(state.protects("cntrl-agent.service"));
+        assert!(!state.protects("nginx"));
+    }
+
+    #[test]
+    fn a_protect_list_replaces_the_defaults_but_not_the_agent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let text = "version = 1\n[services]\nprotect = [\"nginx\"]\n";
+        let path = write_policy(dir.path(), text, 0o644);
+        let state = load(&path, own_uid(&path));
+        assert!(state.protects("nginx.service"));
+        assert!(!state.protects("sshd"));
+        assert!(state.protects("cntrl-privd"));
+    }
+
+    #[test]
+    fn allow_starts_from_the_built_in_policy() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("policy.toml");
+        let owner = fs::metadata(dir.path()).expect("temp dir").uid();
+        assert_eq!(allow(&path, owner, "services.manage"), Ok(true));
+        let state = load(&path, owner);
+        assert!(state.allows("services.manage"));
+        assert!(state.allows("system.read"));
+        assert!(state.protects("sshd"));
+        assert_eq!(allow(&path, owner, "services.manage"), Ok(false));
+        assert!(!dir.path().join("policy.toml.bak").exists());
+    }
+
+    #[test]
+    fn allow_keeps_the_rest_of_the_file_and_a_backup() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let text = "version = 1\nallow = []\n[services]\nprotect = [\"nginx\"]\n[update]\nmode = \"off\"\n";
+        let path = write_policy(dir.path(), text, 0o644);
+        let owner = own_uid(&path);
+        assert_eq!(allow(&path, owner, "power.reboot"), Ok(true));
+        let policy = match load(&path, owner) {
+            PolicyState::Valid { policy } => Some(policy),
+            PolicyState::Invalid { .. } => None,
+        }
+        .expect("the rewritten policy is valid");
+        assert!(policy.allow.contains("power.reboot"));
+        assert!(policy.protect.contains("nginx"));
+        assert_eq!(policy.update, UpdateMode::Off);
+        let backup = fs::read_to_string(dir.path().join("policy.toml.bak")).expect("a backup");
+        assert_eq!(backup, text);
+    }
+
+    #[test]
+    fn allow_refuses_unknown_capabilities_and_invalid_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_policy(dir.path(), "version = 2\n", 0o644);
+        let owner = own_uid(&path);
+        assert!(allow(&path, owner, "root.everything").is_err());
+        assert!(allow(&path, owner, "services.manage").is_err());
+    }
+
+    #[test]
+    fn an_invalid_policy_protects_everything() {
+        let state = PolicyState::Invalid {
+            reason: "test".to_owned(),
+        };
+        assert!(state.protects("nginx"));
     }
 
     #[test]

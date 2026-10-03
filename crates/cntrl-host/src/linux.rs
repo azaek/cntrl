@@ -1,13 +1,18 @@
-//! The Linux backend, reading procfs. Parsing is plain Rust, so this builds and
-//! its tests run on any OS; [`crate::stats::backend`] picks it only on Linux.
+//! The Linux backend, reading procfs and os-release. Parsing is plain Rust, so
+//! this builds and its tests run on any OS; the `backend()` functions pick it
+//! only on Linux.
 
+use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 
 use cntrl_protocol::stats::{LoadAverage, MemoryStats};
+use cntrl_protocol::system::{OsInfo, SystemInfo};
 use procfs_core::{CpuTime, ExplicitSystemInfo, FromRead, FromReadSI, KernelStats, Meminfo};
 
 use crate::HostError;
 use crate::stats::{CpuTicks, Stats, StatsReading, round};
+use crate::system::System;
 
 /// Only raw tick counts are read from `/proc/stat`, so the conversions these
 /// values drive never run.
@@ -61,6 +66,91 @@ impl Stats for LinuxStats {
     }
 }
 
+/// The machine from procfs and os-release(5), under a root directory.
+#[derive(Debug, Clone)]
+pub struct LinuxSystem {
+    root: PathBuf,
+}
+
+impl Default for LinuxSystem {
+    fn default() -> Self {
+        Self::at("/")
+    }
+}
+
+impl LinuxSystem {
+    /// Reads from another root, such as a test fixture.
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    fn read(&self, path: &str) -> Result<String, HostError> {
+        fs::read_to_string(self.root.join(path))
+            .map(|text| text.trim().to_owned())
+            .map_err(|e| HostError::Failed(format!("can't read /{path}: {e}")))
+    }
+}
+
+impl System for LinuxSystem {
+    fn info(&self, agent_version: &str) -> Result<SystemInfo, HostError> {
+        let stat = KernelStats::from_file(self.root.join("proc/stat"), &SYSTEM_INFO)
+            .map_err(|e| HostError::Failed(e.to_string()))?;
+        // os-release(5): /etc first, then the vendor's copy.
+        let os_release = self
+            .read("etc/os-release")
+            .or_else(|_| self.read("usr/lib/os-release"))?;
+        Ok(SystemInfo {
+            hostname: self.read("proc/sys/kernel/hostname")?,
+            os: os_info(&os_release),
+            arch: std::env::consts::ARCH.to_owned(),
+            kernel: self.read("proc/sys/kernel/osrelease")?,
+            boot_time: stat.btime,
+            agent_version: agent_version.to_owned(),
+        })
+    }
+}
+
+/// Reads os-release(5): `KEY=value` lines, with values optionally quoted shell
+/// style. Missing keys take the defaults the man page gives.
+fn os_info(text: &str) -> OsInfo {
+    let mut fields: HashMap<&str, String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.trim(), unquote(value.trim())))
+        .collect();
+    OsInfo {
+        id: fields.remove("ID").unwrap_or_else(|| "linux".to_owned()),
+        name: fields
+            .remove("PRETTY_NAME")
+            .unwrap_or_else(|| "Linux".to_owned()),
+        version: fields.remove("VERSION_ID"),
+    }
+}
+
+/// Strips matching quotes; inside double quotes, a backslash escapes the next
+/// character.
+fn unquote(value: &str) -> String {
+    let quoted = |q: char| value.len() >= 2 && value.starts_with(q) && value.ends_with(q);
+    if quoted('\'') {
+        return value[1..value.len() - 1].to_owned();
+    }
+    if !quoted('"') {
+        return value.to_owned();
+    }
+    let mut out = String::new();
+    let mut chars = value[1..value.len() - 1].chars();
+    while let Some(c) = chars.next() {
+        out.push(if c == '\\' {
+            chars.next().unwrap_or(c)
+        } else {
+            c
+        });
+    }
+    out
+}
+
 /// Splits `/proc/stat`'s `cpu` line into busy and idle ticks. Idle and iowait
 /// count as idle. Steal counts as busy: the guest wanted the CPU and the host
 /// gave it elsewhere. guest and guest_nice are already inside user and nice, so
@@ -81,7 +171,9 @@ fn cpu_ticks(t: &CpuTime) -> CpuTicks {
 mod tests {
     use super::*;
 
-    /// Captured from Docker Desktop's Linux VM, kernel 7.0.
+    /// Captured from a Debian 13 container in Docker Desktop's Linux VM,
+    /// kernel 7.0.
+    const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/host");
     const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/host/proc");
 
     fn total(stat: &str) -> CpuTicks {
@@ -119,6 +211,32 @@ mod tests {
                 idle: 8000
             }
         );
+    }
+
+    #[test]
+    fn describes_a_real_machine() {
+        let info = LinuxSystem::at(ROOT)
+            .info("1.2.3")
+            .expect("the fixture reads");
+        assert_eq!(info.hostname, "cntrl-mac-docker");
+        assert_eq!(info.kernel, "7.0.14-linuxkit");
+        assert_eq!(info.boot_time, 1_791_017_471);
+        assert_eq!(info.os.id, "debian");
+        assert_eq!(info.os.name, "Debian GNU/Linux 13 (trixie)");
+        assert_eq!(info.os.version.as_deref(), Some("13"));
+        assert_eq!(info.agent_version, "1.2.3");
+    }
+
+    #[test]
+    fn os_release_quoting_and_defaults() {
+        let arch = os_info("NAME=\"Arch Linux\"\nPRETTY_NAME='Arch Linux'\nID=arch\n# comment\n");
+        assert_eq!(arch.id, "arch");
+        assert_eq!(arch.name, "Arch Linux");
+        assert_eq!(arch.version, None);
+        let escaped = os_info(r#"PRETTY_NAME="Say \"hi\" \\o/""#);
+        assert_eq!(escaped.name, r#"Say "hi" \o/"#);
+        let empty = os_info("");
+        assert_eq!((empty.id.as_str(), empty.name.as_str()), ("linux", "Linux"));
     }
 
     #[test]

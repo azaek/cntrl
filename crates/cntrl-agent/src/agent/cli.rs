@@ -66,6 +66,12 @@ pub enum PolicyCommand {
     Show,
     /// Check the policy file and exit: 0 when it's valid, 1 when it isn't.
     Check,
+    /// Allow a capability, such as `services.manage`: rewrites the policy file
+    /// and reconnects the agent. Needs root.
+    Allow {
+        /// The capability to allow.
+        capability: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
