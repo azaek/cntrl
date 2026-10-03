@@ -10,6 +10,7 @@ pub mod linux;
 pub mod machine;
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod processes;
 pub mod services;
 pub mod stats;
 pub mod system;

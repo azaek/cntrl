@@ -19,6 +19,7 @@ mod logging;
 mod outbox;
 mod policy;
 mod privd;
+mod processes;
 mod stats;
 mod supervisor;
 mod systemd;
@@ -99,6 +100,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let health = Arc::new(Health::new());
         let uplink = Arc::new(Uplink::new());
         let latest_stats = Arc::new(stats::Latest::new(None));
+        let latest_processes = Arc::new(processes::Latest::new(None));
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
         let privd_socket = config.paths.privd_socket.clone();
@@ -107,6 +109,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             privd_socket: privd_socket.clone(),
             gateway_url: config.console.gateway_url.clone(),
             stats: Arc::clone(&latest_stats),
+            processes: Arc::clone(&latest_processes),
             outbox: Arc::clone(&outbox),
         };
         let state = Arc::new(AgentState::new(
@@ -131,6 +134,10 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         supervisor.spawn(
             "stats",
             stats::run(host_stats, latest_stats, Arc::clone(&outbox), token.clone()),
+        );
+        supervisor.spawn(
+            "processes",
+            processes::run(latest_processes, privd_socket.clone(), token.clone()),
         );
         supervisor.spawn(
             "checkpoints",

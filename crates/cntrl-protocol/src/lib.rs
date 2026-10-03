@@ -9,6 +9,7 @@ pub mod codes;
 pub mod enroll;
 pub mod frame;
 pub mod ops;
+pub mod process;
 pub mod records;
 mod registry;
 pub mod service;

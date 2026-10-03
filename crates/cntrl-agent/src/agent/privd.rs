@@ -17,6 +17,7 @@ use cntrl_host::services::service_name;
 use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
 use cntrl_protocol::service::{JobResult, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
@@ -34,9 +35,9 @@ const IDLE_CHECK: Duration = Duration::from_secs(5);
 const AUDIT_KEY_FILE: &str = "audit.key";
 /// The account the agent runs as, which the installer creates.
 #[cfg(target_os = "macos")]
-const AGENT_USER: &str = "_cntrl";
+pub(super) const AGENT_USER: &str = "_cntrl";
 #[cfg(not(target_os = "macos"))]
-const AGENT_USER: &str = "cntrl";
+pub(super) const AGENT_USER: &str = "cntrl";
 /// How long privd waits for systemd's verdict on a job.
 const JOB_LIMIT: Duration = Duration::from_secs(300);
 
@@ -47,6 +48,11 @@ struct State {
     /// The user privd runs as; the policy file must belong to it.
     owner: u32,
     allowed: Vec<u32>,
+    /// The agent's user, whose processes privd won't stop.
+    agent: Option<u32>,
+    /// The process table's reader, made on first use; on macOS only privd
+    /// sees every process (D24).
+    processes: Mutex<Option<cntrl_host::processes::Sampler>>,
 }
 
 pub fn main(config: &Config) -> ExitCode {
@@ -81,13 +87,16 @@ async fn serve(config: &Config) -> Result<(), String> {
         .map_err(|e| format!("can't create {}: {e}", state_dir.display()))?;
     let owner = own_uid();
     let mut allowed = vec![0, owner];
-    allowed.extend(uid_of(AGENT_USER));
+    let agent = uid_of(AGENT_USER);
+    allowed.extend(agent);
     let state = Arc::new(State {
         audit: Mutex::new(audit),
         policy_path: config.paths.policy.clone(),
         audit_key_path: state_dir.join(AUDIT_KEY_FILE),
         owner,
         allowed,
+        agent,
+        processes: Mutex::new(None),
     });
     let activity = Arc::new(Activity::new());
     info!("privd started");
@@ -218,6 +227,31 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             force,
             actor,
         } => quit_app(state, request_id, app, user, force, actor).await,
+        Call::ProcessList => {
+            if !policy::load(&state.policy_path, state.owner).allows("processes.read") {
+                let reason = "the device policy doesn't allow processes.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            blocking(move || {
+                let mut reader = state
+                    .processes
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let processes = reader
+                    .get_or_insert_with(cntrl_host::processes::Sampler::new)
+                    .read();
+                Ok(json!({ "processes": processes }))
+            })
+            .await
+            .map_err(CallError::internal)
+        }
+        Call::ProcessSignal {
+            request_id,
+            pid,
+            started,
+            force,
+            actor,
+        } => stop_process(state, request_id, pid, started, force, actor).await,
         Call::ServiceListSessions => {
             if !policy::load(&state.policy_path, state.owner).allows("services.read") {
                 let reason = "the device policy doesn't allow services.read";
@@ -231,6 +265,76 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             .map_err(CallError::internal)
         }
     }
+}
+
+/// Stops a process for Console, under `processes.signal` (D24). privd checks
+/// the policy itself, refuses what has to keep running, and audits before
+/// acting. A process that isn't running, or whose PID is another's now, is
+/// left for `stop` to report.
+async fn stop_process(
+    state: Arc<State>,
+    id: String,
+    pid: u32,
+    started: u64,
+    force: bool,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    let target = tokio::task::spawn_blocking(move || cntrl_host::processes::target(pid))
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))?;
+    let policy = policy::load(&state.policy_path, state.owner);
+    let refusal = if !policy.allows("processes.signal") {
+        Some("the device policy doesn't allow processes.signal".to_owned())
+    } else {
+        target.as_ref().and_then(|target| {
+            if pid <= 1 || target.kernel {
+                Some(format!("process {pid} is part of the operating system"))
+            } else if pid == std::process::id()
+                || target.uid.is_some_and(|uid| state.agent == Some(uid))
+            {
+                Some("that's the cntrl agent, which stops with its service".to_owned())
+            } else {
+                target
+                    .unit
+                    .as_ref()
+                    .filter(|unit| policy.protects(unit))
+                    .map(|unit| format!("it runs in {unit}, which the device policy protects"))
+            }
+        })
+    };
+    let request = json!({
+        "id": id,
+        "op": "process.signal",
+        "pid": pid,
+        "started": started,
+        "force": force,
+        "unit": target.as_ref().and_then(|target| target.unit.clone()),
+        "actor": actor,
+    });
+    if let Some(reason) = refusal {
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    let outcome =
+        tokio::task::spawn_blocking(move || cntrl_host::processes::stop(pid, started, force))
+            .await
+            .map_err(|e| CallError::internal(e.to_string()))?;
+    let (record, answer) = match outcome {
+        Ok(result) => (
+            json!({ "id": id, "result": result }),
+            serde_json::to_value(ProcessSignalResult { pid, result })
+                .map_err(|e| CallError::internal(e.to_string())),
+        ),
+        Err(e) => (json!({ "id": id, "error": e.to_string() }), Err(e.into())),
+    };
+    audit(&state, "request.completed", record).await?;
+    answer
 }
 
 /// Quits an app for Console, under `processes.signal`. As with restarts,

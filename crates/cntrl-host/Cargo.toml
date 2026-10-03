@@ -18,11 +18,12 @@ cntrl-protocol.workspace = true
 # Parsing only, no OS calls, so the Linux backend builds and tests anywhere.
 procfs-core = { version = "0.18", default-features = false }
 
-# Host stats and system info on macOS, as the research recommends for
-# non-Linux hosts.
-[target.'cfg(target_os = "macos")'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# The process table on both (angle 06), plus host stats and system info on
+# macOS, as the research recommends for non-Linux hosts. rustix signals
+# processes, through a pidfd on Linux.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "event"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
 
 # systemd over D-Bus, for services.
 [target.'cfg(target_os = "linux")'.dependencies]

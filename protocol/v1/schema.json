@@ -1073,6 +1073,74 @@
         }
       ]
     },
+    "ProcessSignal": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Its start time from the process table, in Unix seconds. A process that\nstarted at another time has taken the PID over, and is left alone."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Kill it at once with SIGKILL, losing anything unsaved. Otherwise it gets\nSIGTERM and a few seconds to exit."
+        }
+      },
+      "required": [
+        "pid",
+        "started"
+      ],
+      "description": "`process.signal`: one process to stop, as the process table named it."
+    },
+    "ProcessSignalResult": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "result": {
+          "$ref": "#/$defs/StopResult"
+        }
+      },
+      "required": [
+        "pid",
+        "result"
+      ],
+      "description": "How a stop went."
+    },
+    "StopResult": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "stopped",
+          "description": "It exited."
+        },
+        {
+          "type": "string",
+          "const": "still_running",
+          "description": "It's still running after the wait: it may be ignoring SIGTERM."
+        },
+        {
+          "type": "string",
+          "const": "not_running",
+          "description": "It had already exited, or its PID now names another process."
+        }
+      ]
+    },
     "ServiceRef": {
       "type": "object",
       "properties": {
@@ -1224,6 +1292,144 @@
         "available"
       ],
       "description": "Memory at sample time."
+    },
+    "ProcessesParams": {
+      "type": "object",
+      "properties": {
+        "sort": {
+          "$ref": "#/$defs/ProcessSort",
+          "description": "Highest CPU first (the default), or highest memory.",
+          "default": "cpu"
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "At most this many rows, 1 to 500; 50 when absent."
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Keeps the processes whose name, user or unit contains it, ignoring\ncase, or whose PID it is."
+        }
+      },
+      "description": "What a `processes` subscription asks for."
+    },
+    "ProcessSort": {
+      "type": "string",
+      "enum": [
+        "cpu",
+        "memory"
+      ]
+    },
+    "ProcessesSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the table was read, in Unix milliseconds."
+        },
+        "total": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Processes on the machine."
+        },
+        "matched": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Processes that matched the query, before the limit."
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProcessInfo"
+          }
+        }
+      },
+      "required": [
+        "ts",
+        "total",
+        "matched",
+        "processes"
+      ],
+      "description": "One `processes` event: the top of the process table, as the subscription\nasked for it."
+    },
+    "ProcessInfo": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "parent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Who it runs as."
+        },
+        "cpu": {
+          "type": "number",
+          "format": "double",
+          "description": "CPU since the previous reading, as a percentage of one core, so it can\npass 100 on a machine with several."
+        },
+        "memory": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Resident memory, in bytes."
+        },
+        "started": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it started, in Unix seconds. With `pid`, it names the process to\n`process.signal`."
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The systemd unit it runs in, on Linux."
+        },
+        "kernel": {
+          "type": "boolean",
+          "description": "A kernel thread, which can't be stopped."
+        },
+        "protected": {
+          "type": "boolean",
+          "description": "The device won't stop it: it's part of the operating system, it's the\nagent, or its unit is one the device policy protects."
+        }
+      },
+      "required": [
+        "pid",
+        "name",
+        "cpu",
+        "memory",
+        "started"
+      ],
+      "description": "One process, with its threads folded in."
     },
     "EnrollRequest": {
       "type": "object",

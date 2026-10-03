@@ -17,6 +17,7 @@ use cntrl_protocol::frame::{
     Subscribe, Welcome,
 };
 use cntrl_protocol::ops::{self, Topic};
+use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceList, ServiceStatus};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
@@ -42,6 +43,7 @@ use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
 use super::outbox::Outbox;
 use super::policy::PolicyState;
+use super::processes::{self, Table};
 use super::stats::Latest;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -139,6 +141,8 @@ pub struct UplinkConfig {
     pub gateway_url: Option<String>,
     /// The sampler's latest sample, for the `stats` topic.
     pub stats: Arc<Latest>,
+    /// The latest process table, for the `processes` topic.
+    pub processes: Arc<processes::Latest>,
     /// Records for Console, sent and acknowledged over the link.
     pub outbox: Arc<Outbox>,
 }
@@ -416,10 +420,10 @@ async fn online(
     }
     // A reconnecting session gets its subscriptions back in the welcome.
     for subscribe in welcome.subs.iter().cloned() {
-        let stats = &session.config.stats;
+        let latest = (&*session.config.stats, &*session.config.processes);
         if let Err(end) = session
             .subs
-            .open(ws, subscribe, &session.policy, stats)
+            .open(ws, subscribe, &session.policy, latest)
             .await
         {
             return end;
@@ -480,8 +484,13 @@ async fn online(
                     };
                 }
             },
-            Some(sample) = next_sample(&mut session.subs.stats), if session.subs.stats.is_some() => {
+            Some(sample) = next_value(&mut session.subs.stats), if session.subs.stats.is_some() => {
                 if let Err(end) = session.subs.publish(ws, &sample).await {
+                    return end;
+                }
+            }
+            Some(table) = next_value(&mut session.subs.processes), if session.subs.processes.is_some() => {
+                if let Err(end) = session.subs.publish_table(ws, &table, &session.policy).await {
                     return end;
                 }
             }
@@ -591,8 +600,9 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
         Frame::Sub(subscribe) => {
-            let (policy, stats) = (&session.policy, &session.config.stats);
-            return session.subs.open(ws, subscribe, policy, stats).await.err();
+            let policy = &session.policy;
+            let latest = (&*session.config.stats, &*session.config.processes);
+            return session.subs.open(ws, subscribe, policy, latest).await.err();
         }
         Frame::Unsub(unsubscribe) => {
             session.subs.close(&unsubscribe.id);
@@ -765,6 +775,16 @@ async fn execute(
             };
             ipc::call_within(privd, call, limit).await
         }
+        ops::Call::ProcessSignal(signal) => {
+            let call = Call::ProcessSignal {
+                request_id: request.id.clone(),
+                pid: signal.pid,
+                started: signal.started,
+                force: signal.force,
+                actor: request.actor.clone(),
+            };
+            ipc::call_within(privd, call, limit).await
+        }
         ops::Call::ServiceRestart(service) => {
             let call = Call::ServiceRestart {
                 request_id: request.id.clone(),
@@ -841,22 +861,35 @@ async fn audit(privd: &Path, kind: &str, data: serde_json::Value) {
 const DUE_SLACK_MS: u64 = 500;
 
 /// A session's open subscriptions. Every `stats` subscription shares one
-/// receiver of the sampler's latest sample, held only while any is open, so the
-/// sampler speeds up only while someone watches.
+/// receiver of the sampler's latest sample, and every `processes` one a
+/// receiver of the latest process table, each held only while such a
+/// subscription is open, so the samplers work only while someone watches.
 #[derive(Default)]
 struct Subscriptions {
     stats: Option<watch::Receiver<Option<Arc<StatsSample>>>>,
+    processes: Option<watch::Receiver<Option<Arc<Table>>>>,
     open: HashMap<String, Subscription>,
 }
 
-/// One open `stats` subscription. It's scheduled by the samples' own times, so
-/// events stay evenly spaced whenever they're delivered.
+/// One open subscription. It's scheduled by the samples' own times, so events
+/// stay evenly spaced whenever they're delivered.
 struct Subscription {
+    topic: Watching,
     every_ms: u64,
     /// The earliest sample time the next event may carry, in Unix milliseconds.
     next_ts: u64,
     seq: u64,
 }
+
+/// What a subscription watches. Each `processes` subscription gets its own
+/// view of the table.
+enum Watching {
+    Stats,
+    Processes(ProcessesParams),
+}
+
+/// A process table this recent goes to a new subscription at once.
+const FRESH_TABLE_MS: u64 = 3_000;
 
 impl Subscriptions {
     /// Answers a `sub`: opens the subscription, or refuses it with the reason.
@@ -865,7 +898,7 @@ impl Subscriptions {
         ws: &mut Ws,
         subscribe: Subscribe,
         policy: &PolicyState,
-        stats: &Latest,
+        (stats, tables): (&Latest, &processes::Latest),
     ) -> Result<(), End> {
         let refuse = |code, msg: String| Frame::Res(Response::err(subscribe.id.clone(), code, msg));
         if subscribe.ver != 1 {
@@ -894,65 +927,155 @@ impl Subscriptions {
                 )
                 .await?;
                 let mut sub = Subscription {
+                    topic: Watching::Stats,
                     every_ms: u64::from(every_ms),
                     next_ts: 0,
                     seq: 0,
                 };
                 // A new chart shouldn't wait for the next sample.
                 if let Some(sample) = latest {
-                    send_event(ws, &subscribe.id, &mut sub, &sample).await?;
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
                 }
                 debug!(id = %subscribe.id, every_ms, "stats subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+            Topic::Processes(params) => {
+                let limit = params
+                    .limit
+                    .unwrap_or(cntrl_host::processes::DEFAULT_LIMIT)
+                    .clamp(1, cntrl_host::processes::MAX_LIMIT);
+                let params = ProcessesParams {
+                    limit: Some(limit),
+                    ..params
+                };
+                let receiver = self.processes.get_or_insert_with(|| tables.subscribe());
+                let latest = receiver.borrow().clone();
+                let accepted = encode(&params)?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let mut sub = Subscription {
+                    topic: Watching::Processes(params),
+                    every_ms: millis(processes::INTERVAL),
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(table) =
+                    latest.filter(|table| now_ms().saturating_sub(table.ts) < FRESH_TABLE_MS)
+                {
+                    let view = sub.view(&table, policy);
+                    if let Some(view) = view {
+                        send_event(ws, &subscribe.id, &mut sub, table.ts, &view).await?;
+                    }
+                }
+                debug!(id = %subscribe.id, "processes subscription opened");
                 self.open.insert(subscribe.id, sub);
             }
         }
         Ok(())
     }
 
-    /// Ends a subscription; an unknown ID is ignored.
+    /// Ends a subscription; an unknown ID is ignored. A sampler's receiver goes
+    /// with the last subscription that needed it.
     fn close(&mut self, id: &str) {
         if self.open.remove(id).is_some() {
             debug!(id, "subscription closed");
         }
-        if self.open.is_empty() {
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::Stats))
+        {
             self.stats = None;
+        }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::Processes(_)))
+        {
+            self.processes = None;
         }
     }
 
-    /// Sends a new sample to every subscription that's due.
+    /// Sends a new sample to every `stats` subscription that's due.
     async fn publish(&mut self, ws: &mut Ws, sample: &StatsSample) -> Result<(), End> {
         for (id, sub) in &mut self.open {
-            if sample.ts >= sub.next_ts {
-                send_event(ws, id, sub, sample).await?;
+            if matches!(sub.topic, Watching::Stats) && sample.ts >= sub.next_ts {
+                send_event(ws, id, sub, sample.ts, sample).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Sends each `processes` subscription that's due its view of a new table.
+    async fn publish_table(
+        &mut self,
+        ws: &mut Ws,
+        table: &Table,
+        policy: &PolicyState,
+    ) -> Result<(), End> {
+        for (id, sub) in &mut self.open {
+            if table.ts < sub.next_ts {
+                continue;
+            }
+            if let Some(view) = sub.view(table, policy) {
+                send_event(ws, id, sub, table.ts, &view).await?;
             }
         }
         Ok(())
     }
 }
 
+impl Subscription {
+    /// A `processes` subscription's view of a table, with what privd would
+    /// refuse to stop marked, so Console doesn't offer it; `None` for other
+    /// topics.
+    fn view(
+        &self,
+        table: &Table,
+        policy: &PolicyState,
+    ) -> Option<cntrl_protocol::process::ProcessesSample> {
+        let Watching::Processes(params) = &self.topic else {
+            return None;
+        };
+        let mut view = cntrl_host::processes::view(&table.processes, params, table.ts);
+        for process in &mut view.processes {
+            process.protected = process.pid <= 1
+                || process.kernel
+                || process.user.as_deref() == Some(super::privd::AGENT_USER)
+                || process
+                    .unit
+                    .as_deref()
+                    .is_some_and(|unit| policy.protects(unit));
+        }
+        Some(view)
+    }
+}
+
 /// Sends one event and schedules the subscription's next.
-async fn send_event(
+async fn send_event<T: Serialize>(
     ws: &mut Ws,
     id: &str,
     sub: &mut Subscription,
-    sample: &StatsSample,
+    ts: u64,
+    data: &T,
 ) -> Result<(), End> {
     let event = Event {
         sub: id.to_owned(),
         seq: sub.seq,
-        data: encode(sample)?,
+        data: encode(data)?,
     };
     send(ws, &Frame::Evt(event)).await?;
     sub.seq += 1;
-    sub.next_ts = sample.ts + sub.every_ms.saturating_sub(DUE_SLACK_MS);
+    sub.next_ts = ts + sub.every_ms.saturating_sub(DUE_SLACK_MS);
     Ok(())
 }
 
-/// The sampler's next sample; `None` if it stopped.
-async fn next_sample(
-    stats: &mut Option<watch::Receiver<Option<Arc<StatsSample>>>>,
-) -> Option<Arc<StatsSample>> {
-    let receiver = stats.as_mut()?;
+/// A sampler's next value; `None` if it stopped.
+async fn next_value<T>(latest: &mut Option<watch::Receiver<Option<Arc<T>>>>) -> Option<Arc<T>> {
+    let receiver = latest.as_mut()?;
     receiver.changed().await.ok()?;
     receiver.borrow_and_update().clone()
 }

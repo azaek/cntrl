@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
+use cntrl_protocol::process::ProcessesSample;
 use cntrl_protocol::records::{AuditCheckpoint, StatsRecord};
 use cntrl_protocol::{ErrorCode, Frame};
 use serde_json::{Value, json};
@@ -121,4 +122,16 @@ fn every_capability_named_by_the_registry_exists() {
             "{capability}"
         );
     }
+}
+
+#[test]
+fn the_processes_event_decodes() {
+    let text = fs::read_to_string(frames_dir().join("evt-processes.json")).expect("read the frame");
+    let Frame::Evt(event) = serde_json::from_str(&text).expect("a frame") else {
+        panic!("evt-processes.json isn't an event");
+    };
+    let sample: ProcessesSample = serde_json::from_value(event.data).expect("a processes sample");
+    assert_eq!(sample.processes.len(), 2);
+    assert_eq!(sample.processes[0].unit.as_deref(), Some("nginx.service"));
+    assert!(!sample.processes[0].kernel);
 }

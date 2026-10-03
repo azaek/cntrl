@@ -64,6 +64,21 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Actor>,
     },
+    /// The whole process table. On macOS only root can read other users'
+    /// processes, so the agent asks privd (D24).
+    ProcessList,
+    /// Stops a process for a request from Console, if it's still the one that
+    /// started at `started`. privd checks the policy itself and audits its
+    /// decision before acting.
+    ProcessSignal {
+        request_id: String,
+        pid: u32,
+        started: u64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+    },
     /// A signed checkpoint over the audit log's head, or `null` when the log
     /// hasn't grown since the checkpoint at `after`.
     AuditCheckpoint {
@@ -254,6 +269,14 @@ mod tests {
                 device_id: "dev_1".to_owned(),
                 key_id: "key_1".to_owned(),
                 after: Some(3),
+            },
+            Call::ProcessList,
+            Call::ProcessSignal {
+                request_id: "req_4".to_owned(),
+                pid: 4211,
+                started: 1_791_000_000,
+                force: false,
+                actor: None,
             },
         ];
         for call in calls {

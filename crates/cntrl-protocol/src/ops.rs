@@ -26,6 +26,14 @@ define_ops! {
         capability: "processes.signal",
         since: 1,
     },
+    /// Stops a process, if it's still the one that started at `started`:
+    /// SIGTERM and a wait, or with `force`, SIGKILL.
+    ProcessSignal = "process.signal" {
+        params: crate::process::ProcessSignal,
+        result: crate::process::ProcessSignalResult,
+        capability: "processes.signal",
+        since: 1,
+    },
     /// Restarts one service, a systemd unit or on macOS a launchd job, and waits
     /// for the result.
     ServiceRestart = "service.restart" {
@@ -42,6 +50,14 @@ define_topics! {
         params: crate::stats::StatsParams,
         event: crate::stats::StatsSample,
         capability: "system.read",
+        since: 1,
+    },
+    /// The process table, highest CPU or memory first, read every 2 s only
+    /// while someone is subscribed.
+    Processes = "processes" {
+        params: crate::process::ProcessesParams,
+        event: crate::process::ProcessesSample,
+        capability: "processes.read",
         since: 1,
     },
 }

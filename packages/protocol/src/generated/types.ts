@@ -331,6 +331,86 @@ export interface PreviousDevice {
     sig: string;
 }
 
+/** One process, with its threads folded in. */
+export interface ProcessInfo {
+    pid: number;
+    parent?: number | null;
+    name: string;
+    /** Who it runs as. */
+    user?: string | null;
+    /**
+     * CPU since the previous reading, as a percentage of one core, so it can
+     * pass 100 on a machine with several.
+     */
+    cpu: number;
+    /** Resident memory, in bytes. */
+    memory: number;
+    /**
+     * When it started, in Unix seconds. With `pid`, it names the process to
+     * `process.signal`.
+     */
+    started: number;
+    /** The systemd unit it runs in, on Linux. */
+    unit?: string | null;
+    /** A kernel thread, which can't be stopped. */
+    kernel?: boolean;
+    /**
+     * The device won't stop it: it's part of the operating system, it's the
+     * agent, or its unit is one the device policy protects.
+     */
+    protected?: boolean;
+}
+
+/** `process.signal`: one process to stop, as the process table named it. */
+export interface ProcessSignal {
+    pid: number;
+    /**
+     * Its start time from the process table, in Unix seconds. A process that
+     * started at another time has taken the PID over, and is left alone.
+     */
+    started: number;
+    /**
+     * Kill it at once with SIGKILL, losing anything unsaved. Otherwise it gets
+     * SIGTERM and a few seconds to exit.
+     */
+    force?: boolean;
+}
+
+/** How a stop went. */
+export interface ProcessSignalResult {
+    pid: number;
+    result: StopResult;
+}
+
+export type ProcessSort = "cpu" | "memory";
+
+/** What a `processes` subscription asks for. */
+export interface ProcessesParams {
+    /** Highest CPU first (the default), or highest memory. */
+    sort?: ProcessSort;
+    /** At most this many rows, 1 to 500; 50 when absent. */
+    limit?: number | null;
+    /**
+     * Keeps the processes whose name, user or unit contains it, ignoring
+     * case, or whose PID it is.
+     */
+    query?: string | null;
+}
+
+/**
+ * One `processes` event: the top of the process table, as the subscription
+ * asked for it.
+ */
+export interface ProcessesSample {
+    /** When the table was read, in Unix milliseconds. */
+    ts: number;
+    /** Processes on the machine. */
+    total: number;
+    /** Processes that matched the query, before the limit. */
+    matched: number;
+    processes: ProcessInfo[];
+}
+
 /** Progress on a running request, before its {@link Response}. */
 export interface Progress {
     id: string;
@@ -483,6 +563,8 @@ export interface StatsSample {
     cpu: CpuStats;
     memory: MemoryStats;
 }
+
+export type StopResult = "unknown" | "stopped" | "still_running" | "not_running";
 
 /** Starts a live topic. */
 export interface Subscribe {

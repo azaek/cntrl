@@ -36,6 +36,17 @@
       }
     },
     {
+      "name": "process.signal",
+      "capability": "processes.signal",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ProcessSignal"
+      },
+      "result": {
+        "$ref": "#/$defs/ProcessSignalResult"
+      }
+    },
+    {
       "name": "service.restart",
       "capability": "services.manage",
       "since": 1,
@@ -57,6 +68,17 @@
       },
       "event": {
         "$ref": "#/$defs/StatsSample"
+      }
+    },
+    {
+      "name": "processes",
+      "capability": "processes.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ProcessesParams"
+      },
+      "event": {
+        "$ref": "#/$defs/ProcessesSample"
       }
     }
   ]
