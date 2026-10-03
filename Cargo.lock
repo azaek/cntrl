@@ -244,6 +244,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "clap",
+ "cntrl-host",
  "cntrl-protocol",
  "futures-util",
  "http-body-util",
@@ -269,6 +270,10 @@ dependencies = [
 [[package]]
 name = "cntrl-host"
 version = "0.1.0"
+dependencies = [
+ "cntrl-protocol",
+ "procfs-core",
+]
 
 [[package]]
 name = "cntrl-protocol"
@@ -519,6 +524,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "http"
@@ -912,6 +923,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6401bf7b6af22f78b563665d15a22e9aef27775b79b149a66ca022468a4e405"
+dependencies = [
+ "bitflags",
+ "hex",
 ]
 
 [[package]]

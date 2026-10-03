@@ -4,6 +4,7 @@
 //! "stop" (revoked, locked, unsupported version) park it until the device is
 //! enrolled again; it never ends the agent.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,8 +12,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::frame::{
-    AgentInfo, Frame, GoAway, Hello, HelloAuth, OutboxState, Response, SigAlg, Welcome,
+    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, OutboxState, Response, SigAlg, Subscribe,
+    Welcome,
 };
+use cntrl_protocol::ops::Topic;
+use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -34,6 +38,7 @@ use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call};
 use super::keys::SigningKey;
 use super::policy::PolicyState;
+use super::stats::Latest;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the gateway has to send its challenge, then its welcome.
@@ -113,12 +118,14 @@ impl Uplink {
     }
 }
 
-/// What the uplink reads from the configuration.
+/// What the uplink reads from the configuration, and the stats it serves.
 pub struct UplinkConfig {
     pub state_dir: PathBuf,
     pub privd_socket: PathBuf,
     /// Replaces the gateway URL from enrollment.
     pub gateway_url: Option<String>,
+    /// The sampler's latest sample, for the `stats` topic.
+    pub stats: Arc<Latest>,
 }
 
 /// How a session ended, and what to do next.
@@ -357,11 +364,18 @@ async fn session(
         session: welcome.session.clone(),
         since_ms: now_ms(),
     });
-    online(&mut ws, &welcome, uplink, token).await
+    online(&mut ws, &welcome, &policy, &config.stats, uplink, token).await
 }
 
 /// The connected session: heartbeats, and frames from Console.
-async fn online(ws: &mut Ws, welcome: &Welcome, uplink: &Uplink, token: &CancellationToken) -> End {
+async fn online(
+    ws: &mut Ws,
+    welcome: &Welcome,
+    policy: &PolicyState,
+    stats: &Latest,
+    uplink: &Uplink,
+    token: &CancellationToken,
+) -> End {
     let interval = Duration::from_millis(u64::from(welcome.hb.interval_ms))
         .clamp(HEARTBEAT_MIN, HEARTBEAT_MAX);
     let pong_timeout = Duration::from_millis(u64::from(welcome.hb.timeout_ms))
@@ -371,6 +385,13 @@ async fn online(ws: &mut Ws, welcome: &Welcome, uplink: &Uplink, token: &Cancell
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_pong = Instant::now();
+    let mut subs = Subscriptions::default();
+    // A reconnecting session gets its subscriptions back in the welcome.
+    for subscribe in welcome.subs.iter().cloned() {
+        if let Err(end) = subs.open(ws, subscribe, policy, stats).await {
+            return end;
+        }
+    }
 
     loop {
         tokio::select! {
@@ -400,7 +421,7 @@ async fn online(ws: &mut Ws, welcome: &Welcome, uplink: &Uplink, token: &Cancell
                         }
                     }
                     json => {
-                        if let Some(end) = handle(ws, json, stable()).await {
+                        if let Some(end) = handle(ws, json, stable(), &mut subs, policy, stats).await {
                             return end;
                         }
                     }
@@ -422,6 +443,11 @@ async fn online(ws: &mut Ws, welcome: &Welcome, uplink: &Uplink, token: &Cancell
                     };
                 }
             },
+            Some(sample) = next_sample(&mut subs.stats), if subs.stats.is_some() => {
+                if let Err(end) = subs.publish(ws, &sample).await {
+                    return end;
+                }
+            }
             () = uplink.enrolled.notified() => {
                 close_link(ws, close::DISCONNECTED_BY_DEVICE, "enrolled again").await;
                 return End::Reenrolled;
@@ -435,7 +461,14 @@ async fn online(ws: &mut Ws, welcome: &Welcome, uplink: &Uplink, token: &Cancell
 }
 
 /// Handles a frame from Console; `Some` ends the session.
-async fn handle(ws: &mut Ws, json: &str, stable: bool) -> Option<End> {
+async fn handle(
+    ws: &mut Ws,
+    json: &str,
+    stable: bool,
+    subs: &mut Subscriptions,
+    policy: &PolicyState,
+    stats: &Latest,
+) -> Option<End> {
     let frame = match serde_json::from_str::<Frame>(json) {
         Ok(frame) => frame,
         Err(e) => {
@@ -444,17 +477,17 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool) -> Option<End> {
         }
     };
     let reply = match frame {
-        // Operations and topics land with the capabilities.
+        // Operations land with the capabilities.
         Frame::Req(request) => Response::err(
             request.id,
             ErrorCode::UnknownOp,
             "this agent doesn't run operations yet",
         ),
-        Frame::Sub(subscribe) => Response::err(
-            subscribe.id,
-            ErrorCode::UnknownOp,
-            "this agent doesn't serve topics yet",
-        ),
+        Frame::Sub(subscribe) => return subs.open(ws, subscribe, policy, stats).await.err(),
+        Frame::Unsub(unsubscribe) => {
+            subs.close(&unsubscribe.id);
+            return None;
+        }
         Frame::Goaway(goaway) => return Some(go_away(ws, &goaway, stable).await),
         other => {
             debug!(?other, "ignoring a frame");
@@ -462,6 +495,134 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool) -> Option<End> {
         }
     };
     send(ws, &Frame::Res(reply)).await.err()
+}
+
+/// How much earlier than due a sample may be taken and still go out, in
+/// milliseconds. Samples are about a second apart, so without slack a
+/// subscription every second would skip every other one.
+const DUE_SLACK_MS: u64 = 500;
+
+/// A session's open subscriptions. Every `stats` subscription shares one
+/// receiver of the sampler's latest sample, held only while any is open, so the
+/// sampler speeds up only while someone watches.
+#[derive(Default)]
+struct Subscriptions {
+    stats: Option<watch::Receiver<Option<Arc<StatsSample>>>>,
+    open: HashMap<String, Subscription>,
+}
+
+/// One open `stats` subscription. It's scheduled by the samples' own times, so
+/// events stay evenly spaced whenever they're delivered.
+struct Subscription {
+    every_ms: u64,
+    /// The earliest sample time the next event may carry, in Unix milliseconds.
+    next_ts: u64,
+    seq: u64,
+}
+
+impl Subscriptions {
+    /// Answers a `sub`: opens the subscription, or refuses it with the reason.
+    async fn open(
+        &mut self,
+        ws: &mut Ws,
+        subscribe: Subscribe,
+        policy: &PolicyState,
+        stats: &Latest,
+    ) -> Result<(), End> {
+        let refuse = |code, msg: String| Frame::Res(Response::err(subscribe.id.clone(), code, msg));
+        if subscribe.ver != 1 {
+            let msg = format!("{} has no version {}", subscribe.topic, subscribe.ver);
+            return send(ws, &refuse(ErrorCode::UnsupportedVersion, msg)).await;
+        }
+        let topic = match Topic::decode(&subscribe.topic, subscribe.data) {
+            Ok(topic) => topic,
+            Err(e) => return send(ws, &refuse(e.code(), e.to_string())).await,
+        };
+        if !policy.allows(topic.capability()) {
+            let msg = format!("the device policy doesn't allow {}", topic.capability());
+            return send(ws, &refuse(ErrorCode::PolicyDenied, msg)).await;
+        }
+        match topic {
+            Topic::Stats(params) => {
+                let every_ms = params.interval_ms.unwrap_or(1_000).max(1_000);
+                let receiver = self.stats.get_or_insert_with(|| stats.subscribe());
+                let latest = receiver.borrow().clone();
+                let accepted = encode(&StatsParams {
+                    interval_ms: Some(every_ms),
+                })?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let mut sub = Subscription {
+                    every_ms: u64::from(every_ms),
+                    next_ts: 0,
+                    seq: 0,
+                };
+                // A new chart shouldn't wait for the next sample.
+                if let Some(sample) = latest {
+                    send_event(ws, &subscribe.id, &mut sub, &sample).await?;
+                }
+                debug!(id = %subscribe.id, every_ms, "stats subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+        }
+        Ok(())
+    }
+
+    /// Ends a subscription; an unknown ID is ignored.
+    fn close(&mut self, id: &str) {
+        if self.open.remove(id).is_some() {
+            debug!(id, "subscription closed");
+        }
+        if self.open.is_empty() {
+            self.stats = None;
+        }
+    }
+
+    /// Sends a new sample to every subscription that's due.
+    async fn publish(&mut self, ws: &mut Ws, sample: &StatsSample) -> Result<(), End> {
+        for (id, sub) in &mut self.open {
+            if sample.ts >= sub.next_ts {
+                send_event(ws, id, sub, sample).await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Sends one event and schedules the subscription's next.
+async fn send_event(
+    ws: &mut Ws,
+    id: &str,
+    sub: &mut Subscription,
+    sample: &StatsSample,
+) -> Result<(), End> {
+    let event = Event {
+        sub: id.to_owned(),
+        seq: sub.seq,
+        data: encode(sample)?,
+    };
+    send(ws, &Frame::Evt(event)).await?;
+    sub.seq += 1;
+    sub.next_ts = sample.ts + sub.every_ms.saturating_sub(DUE_SLACK_MS);
+    Ok(())
+}
+
+/// The sampler's next sample; `None` if it stopped.
+async fn next_sample(
+    stats: &mut Option<watch::Receiver<Option<Arc<StatsSample>>>>,
+) -> Option<Arc<StatsSample>> {
+    let receiver = stats.as_mut()?;
+    receiver.changed().await.ok()?;
+    receiver.borrow_and_update().clone()
+}
+
+fn encode<T: Serialize>(value: &T) -> Result<serde_json::Value, End> {
+    serde_json::to_value(value).map_err(|e| End::Stop {
+        reason: format!("can't encode a frame: {e}"),
+    })
 }
 
 /// The gateway is draining: leave, and come back inside its window.

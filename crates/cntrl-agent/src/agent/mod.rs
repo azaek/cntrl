@@ -16,6 +16,7 @@ mod local_api;
 mod logging;
 mod policy;
 mod privd;
+mod stats;
 mod supervisor;
 mod systemd;
 mod uplink;
@@ -90,11 +91,13 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         };
         let health = Arc::new(Health::new());
         let uplink = Arc::new(Uplink::new());
+        let latest_stats = Arc::new(stats::Latest::new(None));
         let privd_socket = config.paths.privd_socket.clone();
         let uplink_config = UplinkConfig {
             state_dir: config.paths.state_dir.clone(),
             privd_socket: privd_socket.clone(),
             gateway_url: config.console.gateway_url.clone(),
+            stats: Arc::clone(&latest_stats),
         };
         let state = Arc::new(AgentState::new(
             config,
@@ -114,6 +117,10 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             health::heartbeat(Arc::clone(&health), token.clone()),
         );
         supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
+        supervisor.spawn(
+            "stats",
+            stats::run(cntrl_host::stats::backend(), latest_stats, token.clone()),
+        );
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 
         record_start(&privd_socket).await;
