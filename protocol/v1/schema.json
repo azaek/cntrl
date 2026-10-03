@@ -992,6 +992,143 @@
         "available"
       ],
       "description": "Memory at sample time."
+    },
+    "EnrollRequest": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "device_key": {
+          "$ref": "#/$defs/PublicKey"
+        },
+        "audit_key": {
+          "$ref": "#/$defs/PublicKey"
+        },
+        "host": {
+          "$ref": "#/$defs/HostInfo"
+        },
+        "pop": {
+          "type": "string",
+          "description": "The device key's signature over [`signing_string`], base64url without\npadding."
+        }
+      },
+      "required": [
+        "token",
+        "device_key",
+        "audit_key",
+        "host",
+        "pop"
+      ],
+      "description": "`POST /v1/enroll`."
+    },
+    "PublicKey": {
+      "type": "object",
+      "properties": {
+        "alg": {
+          "$ref": "#/$defs/SigAlg"
+        },
+        "key": {
+          "type": "string",
+          "description": "The uncompressed P-256 point, base64url without padding."
+        }
+      },
+      "required": [
+        "alg",
+        "key"
+      ],
+      "description": "A public key."
+    },
+    "HostInfo": {
+      "type": "object",
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "machine_id_hash": {
+          "type": "string",
+          "description": "SHA-256 of the machine ID, never the raw ID."
+        },
+        "agent_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostname",
+        "os",
+        "arch",
+        "machine_id_hash",
+        "agent_version"
+      ],
+      "description": "The machine being enrolled."
+    },
+    "EnrollResponse": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "key_id": {
+          "type": "string",
+          "description": "ID of the device key, carried in every hello."
+        },
+        "audit_key_id": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Key generation counter; starts at 1."
+        },
+        "gateway_url": {
+          "type": "string",
+          "description": "Where the agent connects."
+        }
+      },
+      "required": [
+        "device_id",
+        "key_id",
+        "audit_key_id",
+        "generation",
+        "gateway_url"
+      ],
+      "description": "What a successful enrollment returns."
+    },
+    "EnrollError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/EnrollErrorCode"
+        },
+        "msg": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "msg"
+      ],
+      "description": "Why an enrollment failed."
+    },
+    "EnrollErrorCode": {
+      "type": "string",
+      "enum": [
+        "bad_request",
+        "invalid_token",
+        "token_expired",
+        "token_used",
+        "bad_signature",
+        "internal",
+        "unknown"
+      ],
+      "description": "Machine-readable reason in an [`EnrollError`]."
     }
   }
 }

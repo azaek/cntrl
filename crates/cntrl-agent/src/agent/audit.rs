@@ -12,7 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
+
+use super::digest::sha256_hex;
 
 /// The `prev` of the first record.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -115,13 +116,6 @@ fn check_chain(reader: impl BufRead) -> Result<(u64, String), String> {
         next_seq += 1;
     }
     Ok((next_seq, head))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn now_ms() -> u64 {

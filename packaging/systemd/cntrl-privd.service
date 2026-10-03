@@ -11,6 +11,8 @@ Type=simple
 ExecStart=/usr/local/bin/cntrl-agent privd
 LogsDirectory=cntrl
 LogsDirectoryMode=0700
+StateDirectory=cntrl-privd
+StateDirectoryMode=0700
 UMask=0077
 
 PrivateNetwork=yes

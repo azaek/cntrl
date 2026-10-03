@@ -33,6 +33,16 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Enroll this machine with Console, using a single-use token read from
+    /// stdin or a file. Needs root.
+    Enroll {
+        /// Read the token from this file instead of stdin.
+        #[arg(long)]
+        token_file: Option<PathBuf>,
+        /// Replace an existing enrollment.
+        #[arg(long)]
+        force_reenroll: bool,
+    },
     /// Work with the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -42,12 +52,6 @@ pub enum Command {
     /// Work with the local audit log.
     #[command(subcommand)]
     Audit(AuditCommand),
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AuditCommand {
-    /// Check the audit log's hash chain: 0 when it's intact, 1 when it isn't.
-    Verify,
 }
 
 #[derive(Debug, Subcommand)]
@@ -62,4 +66,10 @@ pub enum PolicyCommand {
     Show,
     /// Check the policy file and exit: 0 when it's valid, 1 when it isn't.
     Check,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuditCommand {
+    /// Check the audit log's hash chain: 0 when it's intact, 1 when it isn't.
+    Verify,
 }

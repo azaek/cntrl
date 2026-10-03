@@ -13,6 +13,7 @@ publish.workspace = true
 # to run, so `cargo build --workspace` works on every developer machine.
 [target.'cfg(unix)'.dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.22"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 cntrl-protocol.workspace = true
@@ -21,6 +22,8 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 listenfd = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+ring = "0.17"
 sd-notify = "0.4"
 serde.workspace = true
 serde_json.workspace = true

@@ -4,6 +4,7 @@
 
 pub mod capability;
 pub mod codes;
+pub mod enroll;
 pub mod frame;
 pub mod ops;
 mod registry;

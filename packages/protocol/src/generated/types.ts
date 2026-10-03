@@ -59,6 +59,40 @@ export interface CpuStats {
     load: LoadAverage;
 }
 
+/** Why an enrollment failed. */
+export interface EnrollError {
+    code: EnrollErrorCode;
+    msg: string;
+}
+
+/** Machine-readable reason in an {@link EnrollError}. */
+export type EnrollErrorCode = "bad_request" | "invalid_token" | "token_expired" | "token_used" | "bad_signature" | "internal" | "unknown";
+
+/** `POST /v1/enroll`. */
+export interface EnrollRequest {
+    token: string;
+    device_key: PublicKey;
+    audit_key: PublicKey;
+    host: HostInfo;
+    /**
+     * The device key's signature over {@link signing_string}, base64url without
+     * padding.
+     */
+    pop: string;
+}
+
+/** What a successful enrollment returns. */
+export interface EnrollResponse {
+    device_id: string;
+    /** ID of the device key, carried in every hello. */
+    key_id: string;
+    audit_key_id: string;
+    /** Key generation counter; starts at 1. */
+    generation: number;
+    /** Where the agent connects. */
+    gateway_url: string;
+}
+
 /** Why a request failed. */
 export interface ErrorBody {
     code: ErrorCode;
@@ -139,6 +173,16 @@ export interface HelloAuth {
     sig: string;
 }
 
+/** The machine being enrolled. */
+export interface HostInfo {
+    hostname: string;
+    os: string;
+    arch: string;
+    /** SHA-256 of the machine ID, never the raw ID. */
+    machine_id_hash: string;
+    agent_version: string;
+}
+
 /** A job result, as systemd reports it in `JobRemoved`. */
 export type JobResult = "done" | "canceled" | "timeout" | "failed" | "dependency" | "skipped" | "unknown";
 
@@ -199,6 +243,13 @@ export interface PolicySummary {
 export interface Progress {
     id: string;
     data?: unknown;
+}
+
+/** A public key. */
+export interface PublicKey {
+    alg: SigAlg;
+    /** The uncompressed P-256 point, base64url without padding. */
+    key: string;
 }
 
 /** A random delay between `min_ms` and `max_ms` spreads reconnects out. */

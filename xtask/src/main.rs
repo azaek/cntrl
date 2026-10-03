@@ -37,6 +37,9 @@ fn codegen(check: bool) -> Result<(), String> {
     generator.subschema_for::<Frame>();
     let ops = ops::op_schemas(&mut generator);
     let topics = ops::topic_schemas(&mut generator);
+    generator.subschema_for::<cntrl_protocol::enroll::EnrollRequest>();
+    generator.subschema_for::<cntrl_protocol::enroll::EnrollResponse>();
+    generator.subschema_for::<cntrl_protocol::enroll::EnrollError>();
     let defs = generator.definitions().clone();
 
     let schema = json!({

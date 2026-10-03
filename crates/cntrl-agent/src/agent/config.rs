@@ -1,6 +1,6 @@
 //! The agent config: `/etc/cntrl/agent.toml`, then `CNTRL_*` environment
-//! variables. A missing file means defaults. A file that can't be read or
-//! parsed stops the agent and is never rewritten.
+//! variables. A missing file means defaults. A file that can't be read or parsed
+//! stops the agent and is never rewritten.
 
 use std::fmt;
 use std::fs;
@@ -14,6 +14,7 @@ use serde::Deserialize;
 pub struct Config {
     pub log: LogConfig,
     pub paths: Paths,
+    pub console: ConsoleConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -35,12 +36,14 @@ impl Default for LogConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Paths {
-    /// The local API socket that `cntrl status` talks to.
+    /// The local API socket that the `cntrl` CLI talks to.
     pub agent_socket: PathBuf,
     /// The privileged helper's socket.
     pub privd_socket: PathBuf,
-    /// Device identity and agent state.
+    /// The agent's identity and device key.
     pub state_dir: PathBuf,
+    /// privd's own state, including the audit key; root only.
+    pub privd_state_dir: PathBuf,
     /// The device policy, owned by root.
     pub policy: PathBuf,
     /// The local audit log.
@@ -53,8 +56,24 @@ impl Default for Paths {
             agent_socket: "/run/cntrl-agent/agent.sock".into(),
             privd_socket: "/run/cntrl-privd/privd.sock".into(),
             state_dir: "/var/lib/cntrl".into(),
+            privd_state_dir: "/var/lib/cntrl-privd".into(),
             policy: "/etc/cntrl/policy.toml".into(),
             audit_dir: "/var/log/cntrl/audit".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ConsoleConfig {
+    /// Base URL of Console's API, where enrollment goes.
+    pub url: String,
+}
+
+impl Default for ConsoleConfig {
+    fn default() -> Self {
+        Self {
+            url: "https://console.cntrl.pw".to_owned(),
         }
     }
 }
@@ -116,8 +135,11 @@ mod tests {
 
     #[test]
     fn set_values_override_defaults() {
-        let config = Config::parse("[log]\nlevel = \"debug\"\n").expect("parses");
+        let config =
+            Config::parse("[log]\nlevel = \"debug\"\n[console]\nurl = \"http://localhost:8787\"\n")
+                .expect("parses");
         assert_eq!(config.log.level, "debug");
+        assert_eq!(config.console.url, "http://localhost:8787");
         assert_eq!(config.paths, Paths::default());
     }
 

@@ -1,0 +1,16 @@
+{
+  "token": "cntrl_et_k3x9m2q7v4ab_11396526eb407de1324a7d6581e3a68e8e074bec3d67d4ae3ca3ee8d661156e04398d487",
+  "bad_checksum_token": "cntrl_et_k3x9m2q7v4ab_11396526eb407de1324a7d6581e3a68e8e074bec3d67d4ae3ca3ee8d661156e000000000",
+  "token_id": "k3x9m2q7v4ab",
+  "token_secret": "11396526eb407de1324a7d6581e3a68e8e074bec3d67d4ae3ca3ee8d661156e0",
+  "device_key": "BHh0ZXN0LWRldmljZS1rZXktbm90LWEtcmVhbC1wb2ludC1qdXN0LWJ5dGVzLWZvci10ZXN0cw",
+  "audit_key": "BHh0ZXN0LWF1ZGl0LWtleS1ub3QtYS1yZWFsLXBvaW50LWp1c3QtYnl0ZXMtZm9yLXRlc3RzLQ",
+  "host": {
+    "hostname": "web-1",
+    "os": "linux",
+    "arch": "x86_64",
+    "machine_id_hash": "3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9",
+    "agent_version": "0.1.0"
+  },
+  "signing_string": "cntrl-enroll-v1\nk3x9m2q7v4ab\nBHh0ZXN0LWRldmljZS1rZXktbm90LWEtcmVhbC1wb2ludC1qdXN0LWJ5dGVzLWZvci10ZXN0cw\nBHh0ZXN0LWF1ZGl0LWtleS1ub3QtYS1yZWFsLXBvaW50LWp1c3QtYnl0ZXMtZm9yLXRlc3RzLQ\nweb-1\n3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9"
+}

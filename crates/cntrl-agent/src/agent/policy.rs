@@ -9,9 +9,9 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use super::digest::sha256_hex;
 use cntrl_protocol::capability;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Where the policy in force came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,8 +152,7 @@ fn build(source: Source, allow: Vec<String>, protect: Vec<String>, update: Updat
         "protect": protect,
         "update": update,
     });
-    let digest = Sha256::digest(normalized.to_string().as_bytes());
-    let hash = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    let hash = sha256_hex(normalized.to_string().as_bytes());
     Policy {
         source,
         allow,

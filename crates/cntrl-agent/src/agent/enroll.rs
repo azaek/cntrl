@@ -1,0 +1,144 @@
+//! Enrollment, as the running agent does it when `cntrl enroll` hands it a
+//! token: a new device key, privd's audit key, one signed `POST /v1/enroll`, and
+//! on success the identity saved beside the key. A failure leaves an earlier
+//! identity untouched.
+
+use std::fs;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use cntrl_protocol::enroll::{
+    self, EnrollError, EnrollRequest, EnrollResponse, EnrollToken, PublicKey,
+};
+use cntrl_protocol::frame::SigAlg;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use super::config::Config;
+use super::host;
+use super::identity::{self, DEVICE_KEY_FILE, Identity};
+use super::ipc::{self, Call};
+use super::keys::SigningKey;
+
+/// What `cntrl enroll` sends the agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollCommand {
+    pub token: String,
+    /// Replace an existing enrollment.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// What the agent answers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollOutcome {
+    pub device_id: String,
+    pub fingerprint: String,
+    pub gateway_url: String,
+}
+
+pub async fn enroll(config: &Config, command: EnrollCommand) -> Result<EnrollOutcome, String> {
+    let state_dir = &config.paths.state_dir;
+    if let Some(existing) = identity::load(state_dir)?
+        && !command.force
+    {
+        return Err(format!(
+            "already enrolled as {}; pass --force-reenroll to replace it",
+            existing.device_id
+        ));
+    }
+    let token_text = command.token.trim();
+    let token = EnrollToken::parse(token_text).map_err(|e| e.to_string())?;
+
+    let new_key_path = state_dir.join(format!("{DEVICE_KEY_FILE}.new"));
+    let device_key = SigningKey::generate(&new_key_path)?;
+    let audit = ipc::call_once(&config.paths.privd_socket, Call::AuditKey).await?;
+    let audit_key = audit["key"]
+        .as_str()
+        .ok_or("privd sent no audit key")?
+        .to_owned();
+
+    let host = host::host_info();
+    let device_public = device_key.public_key();
+    let signed = enroll::signing_string(&token.id, &device_public, &audit_key, &host);
+    let request = EnrollRequest {
+        token: token_text.to_owned(),
+        device_key: PublicKey {
+            alg: SigAlg::Es256,
+            key: device_public,
+        },
+        audit_key: PublicKey {
+            alg: SigAlg::Es256,
+            key: audit_key,
+        },
+        host,
+        pop: device_key.sign(signed.as_bytes())?,
+    };
+    let response = match post_enroll(&config.console.url, &request).await {
+        Ok(response) => response,
+        Err(e) => {
+            let _ = fs::remove_file(&new_key_path);
+            return Err(e);
+        }
+    };
+
+    fs::rename(&new_key_path, state_dir.join(DEVICE_KEY_FILE))
+        .map_err(|e| format!("can't install the device key: {e}"))?;
+    let identity = Identity {
+        device_id: response.device_id,
+        key_id: response.key_id,
+        audit_key_id: response.audit_key_id,
+        generation: response.generation,
+        gateway_url: response.gateway_url,
+        console_url: config.console.url.clone(),
+        fingerprint: device_key.fingerprint(),
+        enrolled_at_ms: now_ms(),
+    };
+    identity::save(state_dir, &identity)?;
+
+    let record = Call::AuditAppend {
+        kind: "agent.enrolled".to_owned(),
+        data: json!({ "device_id": identity.device_id, "fingerprint": identity.fingerprint }),
+    };
+    if let Err(e) = ipc::call_once(&config.paths.privd_socket, record).await {
+        tracing::warn!("couldn't record the enrollment in the audit log: {e}");
+    }
+    tracing::info!(device_id = identity.device_id, "enrolled");
+    Ok(EnrollOutcome {
+        device_id: identity.device_id,
+        fingerprint: identity.fingerprint,
+        gateway_url: identity.gateway_url,
+    })
+}
+
+async fn post_enroll(console_url: &str, request: &EnrollRequest) -> Result<EnrollResponse, String> {
+    let url = format!("{}/v1/enroll", console_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent(concat!("cntrl-agent/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(&url)
+        .json(request)
+        .send()
+        .await
+        .map_err(|e| format!("can't reach Console at {url}: {e}"))?;
+    let status = response.status();
+    if status.is_success() {
+        return response
+            .json::<EnrollResponse>()
+            .await
+            .map_err(|e| format!("unexpected answer from Console: {e}"));
+    }
+    match response.json::<EnrollError>().await {
+        Ok(error) => Err(format!("Console refused the enrollment: {}", error.msg)),
+        Err(_) => Err(format!("Console answered {status}")),
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}

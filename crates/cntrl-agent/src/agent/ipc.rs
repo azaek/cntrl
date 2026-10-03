@@ -29,6 +29,8 @@ pub enum Call {
         kind: String,
         data: Value,
     },
+    /// The public half of privd's audit key, created on first use.
+    AuditKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

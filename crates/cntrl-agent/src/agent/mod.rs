@@ -5,8 +5,13 @@ mod audit;
 mod cli;
 mod client;
 mod config;
+mod digest;
+mod enroll;
 mod health;
+mod host;
+mod identity;
 mod ipc;
+mod keys;
 mod local_api;
 mod logging;
 mod policy;
@@ -44,6 +49,10 @@ pub fn main() -> ExitCode {
         Command::Run => run(&cli.config, config),
         Command::Privd => privd::main(&config),
         Command::Status { json } => client::print_status(&config, json),
+        Command::Enroll {
+            token_file,
+            force_reenroll,
+        } => client::run_enroll(&config, token_file.as_deref(), force_reenroll),
         Command::Config(ConfigCommand::Check) => {
             println!("{}: OK", cli.config.display());
             ExitCode::SUCCESS
@@ -80,8 +89,8 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let health = Arc::new(Health::new());
         let privd_socket = config.paths.privd_socket.clone();
         let state = Arc::new(AgentState::new(
+            config,
             config_path.to_owned(),
-            privd_socket.clone(),
             Arc::clone(&health),
         ));
 
@@ -98,7 +107,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         supervisor.spawn("watchdog", systemd::watchdog(health, token));
 
         record_start(&privd_socket).await;
-        systemd::ready("running, not enrolled");
+        systemd::ready("running");
         info!(version = env!("CARGO_PKG_VERSION"), "cntrl-agent started");
         supervisor.run_until_shutdown().await
     })
