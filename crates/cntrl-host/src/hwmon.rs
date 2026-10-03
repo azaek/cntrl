@@ -146,13 +146,14 @@ fn celsius(path: &Path) -> Option<f64> {
     (-40.0 < degrees && degrees < 125.0).then_some(degrees)
 }
 
-fn read(path: &Path) -> Option<String> {
+pub(crate) fn read(path: &Path) -> Option<String> {
     fs::read_to_string(path)
         .ok()
         .map(|text| text.trim().to_owned())
 }
 
-fn entries(dir: &Path) -> Vec<PathBuf> {
+/// A directory's entries, sorted; none if it can't be read.
+pub(crate) fn entries(dir: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)
         .map(|entries| {
             entries

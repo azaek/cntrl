@@ -6,8 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cntrl_protocol::stats::{
-    CpuStats, DiskIo, Filesystem, LoadAverage, MemoryStats, NetworkIo, StatsSample, SwapStats,
-    Temperature,
+    CpuStats, DiskIo, Filesystem, GpuStats, LoadAverage, MemoryStats, NetworkIo, StatsSample,
+    SwapStats, Temperature,
 };
 
 use crate::HostError;
@@ -28,10 +28,11 @@ pub struct StatsReading {
     pub swap: Option<SwapStats>,
     pub disk: Option<DiskCounters>,
     pub network: Option<NetworkCounters>,
-    /// The latest filesystems and temperatures, which are read on slower clocks
-    /// than the counters.
+    /// The latest filesystems, temperatures and GPUs, which are read on slower
+    /// clocks than the counters.
     pub filesystems: Vec<Filesystem>,
     pub temperatures: Vec<Temperature>,
+    pub gpus: Vec<GpuStats>,
 }
 
 /// CPU time across all cores since boot, in the OS's ticks.
@@ -80,6 +81,7 @@ impl StatsReading {
                 }),
             filesystems: self.filesystems.clone(),
             temperatures: self.temperatures.clone(),
+            gpus: self.gpus.clone(),
         }
     }
 }

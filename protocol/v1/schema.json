@@ -1333,6 +1333,13 @@
             "$ref": "#/$defs/Temperature"
           },
           "description": "Temperature sensors, as of the last look; the agent looks every 5 s."
+        },
+        "gpus": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GpuStats"
+          },
+          "description": "GPUs, as of the last look; the agent looks every 2 s."
         }
       },
       "required": [
@@ -1552,6 +1559,58 @@
         }
       ],
       "description": "What a temperature sensor measures."
+    },
+    "GpuStats": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Such as `NVIDIA GeForce RTX 4090` or `Apple M4`."
+        },
+        "busy": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "memory_used": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Memory in use; on Apple silicon, what the GPU has of the shared memory."
+        },
+        "memory_total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "power": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "Watts."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "description": "A GPU's readings. Each is absent where its driver doesn't give it: Apple\nsilicon shares the system's memory, so it has no total, and only some\ndrivers report temperature and power."
     },
     "ProcessesParams": {
       "type": "object",

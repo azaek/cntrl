@@ -41,6 +41,9 @@ pub struct StatsSample {
     /// Temperature sensors, as of the last look; the agent looks every 5 s.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub temperatures: Vec<Temperature>,
+    /// GPUs, as of the last look; the agent looks every 2 s.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gpus: Vec<GpuStats>,
 }
 
 /// CPU use over the sample interval.
@@ -136,4 +139,26 @@ pub enum SensorKind {
     /// Anything else, including kinds from newer agents.
     #[serde(other)]
     Other,
+}
+
+/// A GPU's readings. Each is absent where its driver doesn't give it: Apple
+/// silicon shares the system's memory, so it has no total, and only some
+/// drivers report temperature and power.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GpuStats {
+    /// Such as `NVIDIA GeForce RTX 4090` or `Apple M4`.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy: Option<f64>,
+    /// Memory in use; on Apple silicon, what the GPU has of the shared memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_used: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// Watts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<f64>,
 }

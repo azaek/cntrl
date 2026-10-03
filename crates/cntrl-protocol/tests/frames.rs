@@ -150,11 +150,12 @@ fn stats_events_decode_old_and_new() {
     // A 0.1.3 agent's sample has none of the newer fields.
     let old = sample("evt.json");
     assert!(old.swap.is_none() && old.disk_io.is_none() && old.network.is_none());
-    assert!(old.filesystems.is_empty() && old.temperatures.is_empty());
+    assert!(old.filesystems.is_empty() && old.temperatures.is_empty() && old.gpus.is_empty());
     let new = sample("evt-stats-full.json");
     assert_eq!(new.disk_io.map(|io| io.write), Some(1_048_576));
     assert_eq!(new.filesystems[1].name.as_deref(), Some("Backup"));
     assert_eq!(new.temperatures[0].sensor, SensorKind::Cpu);
+    assert_eq!(new.gpus[1].memory_total, None);
     // A sensor kind from a newer agent reads as other.
     let kind: SensorKind = serde_json::from_value(json!("battery")).expect("parses");
     assert_eq!(kind, SensorKind::Other);

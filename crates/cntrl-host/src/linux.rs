@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use cntrl_protocol::stats::{LoadAverage, MemoryStats, SwapStats, Temperature};
+use cntrl_protocol::stats::{GpuStats, LoadAverage, MemoryStats, SwapStats, Temperature};
 use cntrl_protocol::system::{CpuInfo, OsInfo, SystemInfo};
 use procfs_core::net::InterfaceDeviceStatus;
 use procfs_core::{
@@ -17,6 +17,7 @@ use procfs_core::{
 };
 
 use crate::HostError;
+use crate::gpu::{self, NvidiaSmi};
 use crate::hwmon;
 use crate::mounts::LinuxFilesystems;
 use crate::stats::{CpuTicks, DiskCounters, Every, NetworkCounters, Stats, StatsReading, round};
@@ -26,6 +27,7 @@ use crate::system::System;
 /// (angle 09).
 const FILESYSTEMS_EVERY: Duration = Duration::from_secs(10);
 const TEMPERATURES_EVERY: Duration = Duration::from_secs(5);
+const GPUS_EVERY: Duration = Duration::from_secs(2);
 
 /// `/proc/diskstats` counts in 512-byte sectors whatever the device's sector
 /// size (kernel `admin-guide/iostats`).
@@ -48,6 +50,9 @@ pub struct LinuxStats {
     root: PathBuf,
     filesystems: LinuxFilesystems,
     temperatures: Mutex<Every<Vec<Temperature>>>,
+    amd: Mutex<Every<Vec<GpuStats>>>,
+    /// Only where NVIDIA's driver is loaded.
+    nvidia: Option<NvidiaSmi>,
 }
 
 impl Default for LinuxStats {
@@ -63,6 +68,8 @@ impl LinuxStats {
         Self {
             filesystems: LinuxFilesystems::new(root.join("proc/self/mountinfo"), FILESYSTEMS_EVERY),
             temperatures: Mutex::new(Every::new(TEMPERATURES_EVERY)),
+            amd: Mutex::new(Every::new(GPUS_EVERY)),
+            nvidia: gpu::nvidia_driver(&root.join("proc")).then(NvidiaSmi::default),
             root,
         }
     }
@@ -144,6 +151,14 @@ impl Stats for LinuxStats {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(|| hwmon::temperatures(&self.root.join("sys")));
+        let mut gpus = self
+            .amd
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(|| gpu::amd(&self.root.join("sys")));
+        if let Some(nvidia) = &self.nvidia {
+            gpus.extend(nvidia.get());
+        }
         Ok(StatsReading {
             cpu: cpu_ticks(&stat.total),
             load: LoadAverage {
@@ -165,6 +180,7 @@ impl Stats for LinuxStats {
             network: self.network_counters(),
             filesystems: self.filesystems.get(),
             temperatures,
+            gpus,
         })
     }
 }

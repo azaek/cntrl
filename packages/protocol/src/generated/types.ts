@@ -258,6 +258,23 @@ export interface GoAway {
     reconnect_after: ReconnectWindow;
 }
 
+/**
+ * A GPU's readings. Each is absent where its driver doesn't give it: Apple
+ * silicon shares the system's memory, so it has no total, and only some
+ * drivers report temperature and power.
+ */
+export interface GpuStats {
+    /** Such as `NVIDIA GeForce RTX 4090` or `Apple M4`. */
+    name: string;
+    busy?: number | null;
+    /** Memory in use; on Apple silicon, what the GPU has of the shared memory. */
+    memory_used?: number | null;
+    memory_total?: number | null;
+    temperature?: number | null;
+    /** Watts. */
+    power?: number | null;
+}
+
 /** How often the agent pings, and how long it waits for a pong. */
 export interface HeartbeatConfig {
     interval_ms: number;
@@ -634,6 +651,8 @@ export interface StatsSample {
     filesystems?: Filesystem[];
     /** Temperature sensors, as of the last look; the agent looks every 5 s. */
     temperatures?: Temperature[];
+    /** GPUs, as of the last look; the agent looks every 2 s. */
+    gpus?: GpuStats[];
 }
 
 export type StopResult = "unknown" | "stopped" | "still_running" | "not_running";

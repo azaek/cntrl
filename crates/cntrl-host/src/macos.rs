@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use cntrl_protocol::stats::{
-    Filesystem, LoadAverage, MemoryStats, SensorKind, SwapStats, Temperature,
+    Filesystem, GpuStats, LoadAverage, MemoryStats, SensorKind, SwapStats, Temperature,
 };
 use cntrl_protocol::system::{CpuInfo, OsInfo, SystemInfo};
 use sysinfo::{
@@ -15,6 +15,7 @@ use sysinfo::{
 };
 
 use crate::HostError;
+use crate::gpu;
 use crate::mounts::{Stuck, remote_space};
 use crate::stats::{
     Background, CpuTicks, DiskCounters, Every, NetworkCounters, Stats, StatsReading, round,
@@ -25,6 +26,7 @@ use crate::system::System;
 /// (angle 09).
 const FILESYSTEMS_EVERY: Duration = Duration::from_secs(10);
 const TEMPERATURES_EVERY: Duration = Duration::from_secs(5);
+const GPUS_EVERY: Duration = Duration::from_secs(2);
 
 /// Network volumes, whose space comes from statvfs with a timeout rather than
 /// from sysinfo, since their server can stop answering.
@@ -56,6 +58,7 @@ struct CpuState {
     networks: Networks,
     components: Components,
     temperatures: Every<Vec<Temperature>>,
+    gpus: Every<Vec<GpuStats>>,
 }
 
 impl Default for MacStats {
@@ -72,6 +75,7 @@ impl Default for MacStats {
                 networks: Networks::new(),
                 components: Components::new(),
                 temperatures: Every::new(TEMPERATURES_EVERY),
+                gpus: Every::new(GPUS_EVERY),
             }),
             filesystems: Background::new(FILESYSTEMS_EVERY),
             stuck: Stuck::default(),
@@ -196,6 +200,7 @@ impl Stats for MacStats {
             networks,
             components,
             temperatures: slow_temperatures,
+            gpus,
         } = &mut *state;
         system.refresh_cpu_usage();
         system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
@@ -236,6 +241,15 @@ impl Stats for MacStats {
             network: network_counters(networks),
             filesystems: self.filesystems.get(move || filesystems(&stuck)),
             temperatures: slow_temperatures.get(|| temperatures(components)),
+            // ioreg answers in about 10 ms and needs no root (angle 09).
+            gpus: gpus.get(|| {
+                output(
+                    "/usr/sbin/ioreg",
+                    &["-r", "-c", "IOAccelerator", "-d", "1", "-w0"],
+                )
+                .map(|listing| gpu::mac(&listing))
+                .unwrap_or_default()
+            }),
         })
     }
 }
@@ -391,6 +405,8 @@ mod tests {
         assert!(reading.disk.is_some(), "disk counters");
         let cpu = reading.temperatures.first().expect("a CPU temperature");
         assert_eq!((cpu.sensor, cpu.label.as_str()), (SensorKind::Cpu, "CPU"));
+        let gpu = reading.gpus.first().expect("a GPU from ioreg");
+        assert!(!gpu.name.is_empty() && gpu.busy.is_some(), "{gpu:?}");
         // Filesystems arrive from the background read.
         let deadline = Instant::now() + Duration::from_secs(10);
         let filesystems = loop {

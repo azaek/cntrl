@@ -28,7 +28,10 @@ AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-PrivateDevices=yes
+# Only NVIDIA's devices, so nvidia-smi can read its GPUs (angle 09); every
+# other device stays out of reach, as PrivateDevices= would keep it.
+DevicePolicy=closed
+DeviceAllow=char-nvidia* rw
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
