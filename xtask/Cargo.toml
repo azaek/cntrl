@@ -10,6 +10,10 @@ homepage.workspace = true
 publish.workspace = true
 
 [dependencies]
+cntrl-protocol = { workspace = true, features = ["schema"] }
+schemars.workspace = true
+# Keeps schema properties in declaration order in the generated files.
+serde_json = { workspace = true, features = ["preserve_order"] }
 
 [lints]
 workspace = true

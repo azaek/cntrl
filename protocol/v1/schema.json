@@ -1,0 +1,997 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cntrl.pw/protocol/v1/schema.json",
+  "title": "cntrl agent protocol v1",
+  "$ref": "#/$defs/Frame",
+  "$defs": {
+    "Frame": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Challenge",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "challenge"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Hello",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "hello"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Welcome",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "welcome"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Request",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "req"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Response",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "res"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Progress",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "prog"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Cancel",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "cancel"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Subscribe",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "sub"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Event",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "evt"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Unsubscribe",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "unsub"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Records",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "rec"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Ack",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "ack"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        },
+        {
+          "$ref": "#/$defs/GoAway",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "goaway"
+            }
+          },
+          "required": [
+            "t"
+          ]
+        }
+      ],
+      "description": "Any frame of protocol v1."
+    },
+    "Challenge": {
+      "type": "object",
+      "properties": {
+        "sid": {
+          "type": "string",
+          "description": "Session ID, also covered by the signature."
+        },
+        "nonce": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sid",
+        "nonce"
+      ],
+      "description": "The gateway's first frame. The agent signs `nonce` in its [`Hello`]."
+    },
+    "AgentInfo": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "boot_id": {
+          "type": "string",
+          "description": "Changes on every boot."
+        },
+        "machine_id_hash": {
+          "type": "string",
+          "description": "SHA-256 of the machine ID, never the raw ID."
+        }
+      },
+      "required": [
+        "version",
+        "os",
+        "arch",
+        "boot_id",
+        "machine_id_hash"
+      ],
+      "description": "The agent build and the machine it runs on."
+    },
+    "HelloAuth": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "key_id": {
+          "type": "string"
+        },
+        "alg": {
+          "$ref": "#/$defs/SigAlg"
+        },
+        "gen": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Key generation counter. A mismatch locks the device (close 4403)."
+        },
+        "sig": {
+          "type": "string",
+          "description": "Signature over the challenge's sid and nonce, the gateway host, the IDs\nand `gen`, base64url without padding."
+        }
+      },
+      "required": [
+        "device_id",
+        "key_id",
+        "alg",
+        "gen",
+        "sig"
+      ],
+      "description": "Proof of possession of the device key."
+    },
+    "SigAlg": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "Unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "ES256",
+          "description": "ECDSA with P-256 and SHA-256."
+        }
+      ],
+      "description": "Signature algorithm of the device key."
+    },
+    "Caps": {
+      "type": "object",
+      "properties": {
+        "ops": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "topics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "default": {}
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "ops"
+      ],
+      "description": "What the device's policy lets Console call: operation and topic names with\nthe version of each, plus optional protocol features."
+    },
+    "PolicySummary": {
+      "type": "object",
+      "properties": {
+        "hash": {
+          "type": "string",
+          "description": "SHA-256 of the normalized policy."
+        }
+      },
+      "required": [
+        "hash"
+      ],
+      "description": "The device policy in force, by hash."
+    },
+    "OutboxState": {
+      "type": "object",
+      "properties": {
+        "next_seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "oldest_unacked": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "next_seq"
+      ],
+      "description": "Where the agent's outbox stands."
+    },
+    "Hello": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Protocol major version."
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentInfo"
+        },
+        "auth": {
+          "$ref": "#/$defs/HelloAuth"
+        },
+        "caps": {
+          "$ref": "#/$defs/Caps"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicySummary"
+        },
+        "outbox": {
+          "$ref": "#/$defs/OutboxState"
+        }
+      },
+      "required": [
+        "v",
+        "agent",
+        "auth",
+        "caps",
+        "policy",
+        "outbox"
+      ],
+      "description": "The agent's first frame: who it is, proof of its device key, and what its\npolicy lets Console call."
+    },
+    "HeartbeatConfig": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "interval_ms",
+        "timeout_ms"
+      ],
+      "description": "How often the agent pings, and how long it waits for a pong."
+    },
+    "Limits": {
+      "type": "object",
+      "properties": {
+        "max_frame_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_inflight": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_rec_batch": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "max_frame_bytes",
+        "max_inflight",
+        "max_rec_batch"
+      ],
+      "description": "Limits the gateway enforces on this session."
+    },
+    "Subscribe": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "ver": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "data": {
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "topic",
+        "ver"
+      ],
+      "description": "Starts a live topic."
+    },
+    "Welcome": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string"
+        },
+        "hb": {
+          "$ref": "#/$defs/HeartbeatConfig"
+        },
+        "acked_upto": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Highest outbox `seq` Console already has; the agent resends the rest."
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "subs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Subscribe"
+          },
+          "description": "Subscriptions to restore after a reconnect.",
+          "default": []
+        }
+      },
+      "required": [
+        "session",
+        "hb",
+        "limits"
+      ],
+      "description": "The gateway's answer to a valid [`Hello`]."
+    },
+    "Actor": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "id": {
+          "type": "string"
+        },
+        "via": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What carried the request, such as the dashboard or a named API token."
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "description": "Who asked for a request."
+    },
+    "ActorKind": {
+      "type": "string",
+      "enum": [
+        "user",
+        "api_token",
+        "system",
+        "unknown"
+      ],
+      "description": "The kind of [`Actor`]."
+    },
+    "Request": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ULID, also the audit ID on both sides."
+        },
+        "op": {
+          "type": "string"
+        },
+        "ver": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "data": {
+          "default": null
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who asked, recorded for audit and never used for authorization."
+        },
+        "idem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Retries of non-idempotent operations reuse this key, so they act once."
+        }
+      },
+      "required": [
+        "id",
+        "op",
+        "ver",
+        "deadline_ms"
+      ],
+      "description": "A call to one operation."
+    },
+    "ErrorBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "msg": {
+          "type": "string"
+        },
+        "retry": {
+          "type": "boolean",
+          "description": "Whether retrying the same request may succeed.",
+          "default": false
+        }
+      },
+      "required": [
+        "code",
+        "msg"
+      ],
+      "description": "Why a request failed."
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "bad_request",
+        "unknown_op",
+        "unsupported_version",
+        "policy_denied",
+        "not_found",
+        "busy",
+        "timeout",
+        "cancelled",
+        "internal",
+        "device_offline",
+        "link_lost",
+        "unknown"
+      ],
+      "description": "Why an operation failed. Stable within a protocol major version; a code from\na newer revision decodes as `Unknown`."
+    },
+    "Response": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "data": true,
+        "err": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ok"
+      ],
+      "description": "The final answer to a [`Request`]."
+    },
+    "Progress": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "data": {
+          "default": null
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "Progress on a running request, before its [`Response`]."
+    },
+    "Cancel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "Asks to stop a running request. It is still answered by a [`Response`], with\n`cancelled` if it stopped in time."
+    },
+    "Event": {
+      "type": "object",
+      "properties": {
+        "sub": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "data": true
+      },
+      "required": [
+        "sub",
+        "seq",
+        "data"
+      ],
+      "description": "One message on a subscription."
+    },
+    "Unsubscribe": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "Ends a subscription."
+    },
+    "OutboxRecord": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "type": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "data": true
+      },
+      "required": [
+        "seq",
+        "type",
+        "data"
+      ],
+      "description": "One outbox record."
+    },
+    "RecordKind": {
+      "type": "string",
+      "enum": [
+        "audit_checkpoint",
+        "metrics",
+        "unknown"
+      ],
+      "description": "What an outbox record holds."
+    },
+    "Records": {
+      "type": "object",
+      "properties": {
+        "recs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutboxRecord"
+          }
+        }
+      },
+      "required": [
+        "recs"
+      ],
+      "description": "Records from the agent's outbox, delivered at least once."
+    },
+    "Ack": {
+      "type": "object",
+      "properties": {
+        "upto": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "upto"
+      ],
+      "description": "Confirms every record up to and including `upto`."
+    },
+    "ReconnectWindow": {
+      "type": "object",
+      "properties": {
+        "min_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "min_ms",
+        "max_ms"
+      ],
+      "description": "A random delay between `min_ms` and `max_ms` spreads reconnects out."
+    },
+    "GoAway": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "reconnect_after": {
+          "$ref": "#/$defs/ReconnectWindow"
+        }
+      },
+      "required": [
+        "reason",
+        "reconnect_after"
+      ],
+      "description": "Asks the agent to disconnect and come back within a window, for example\nduring a gateway deploy."
+    },
+    "NoParams": {
+      "type": "object",
+      "description": "Parameters of operations that take none: `{}` or an absent `data`."
+    },
+    "SystemInfo": {
+      "type": "object",
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/OsInfo"
+        },
+        "arch": {
+          "type": "string",
+          "description": "CPU architecture as Rust names it, such as `x86_64` or `aarch64`."
+        },
+        "kernel": {
+          "type": "string",
+          "description": "Kernel release, as `uname -r` prints it."
+        },
+        "boot_time": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the machine booted, in Unix seconds."
+        },
+        "agent_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostname",
+        "os",
+        "arch",
+        "kernel",
+        "boot_time",
+        "agent_version"
+      ],
+      "description": "What `system.info` returns."
+    },
+    "OsInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "`ID`, such as `ubuntu`."
+        },
+        "name": {
+          "type": "string",
+          "description": "`PRETTY_NAME`, such as `Ubuntu 24.04.1 LTS`."
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`VERSION_ID`, such as `24.04`; absent on rolling releases."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "description": "The OS, from os-release."
+    },
+    "ServiceRef": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "description": "Names one systemd unit, such as `nginx.service`."
+    },
+    "ServiceJob": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/JobResult"
+        }
+      },
+      "required": [
+        "unit",
+        "result"
+      ],
+      "description": "The outcome of a unit job."
+    },
+    "JobResult": {
+      "type": "string",
+      "enum": [
+        "done",
+        "canceled",
+        "timeout",
+        "failed",
+        "dependency",
+        "skipped",
+        "unknown"
+      ],
+      "description": "A job result, as systemd reports it in `JobRemoved`."
+    },
+    "StatsParams": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Sample interval; the agent raises anything below 1,000 ms to 1,000 ms."
+        }
+      },
+      "description": "Parameters of the `stats` topic."
+    },
+    "StatsSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the sample was taken."
+        },
+        "cpu": {
+          "$ref": "#/$defs/CpuStats"
+        },
+        "memory": {
+          "$ref": "#/$defs/MemoryStats"
+        }
+      },
+      "required": [
+        "ts",
+        "cpu",
+        "memory"
+      ],
+      "description": "One live sample."
+    },
+    "CpuStats": {
+      "type": "object",
+      "properties": {
+        "busy": {
+          "type": "number",
+          "format": "double",
+          "description": "Busy time across all cores."
+        },
+        "load": {
+          "$ref": "#/$defs/LoadAverage"
+        }
+      },
+      "required": [
+        "busy",
+        "load"
+      ],
+      "description": "CPU use over the sample interval."
+    },
+    "LoadAverage": {
+      "type": "object",
+      "properties": {
+        "one": {
+          "type": "number",
+          "format": "double"
+        },
+        "five": {
+          "type": "number",
+          "format": "double"
+        },
+        "fifteen": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "one",
+        "five",
+        "fifteen"
+      ],
+      "description": "Load averages over 1, 5 and 15 minutes."
+    },
+    "MemoryStats": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "available": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "What the kernel estimates new work can use (`MemAvailable`)."
+        }
+      },
+      "required": [
+        "total",
+        "available"
+      ],
+      "description": "Memory at sample time."
+    }
+  }
+}

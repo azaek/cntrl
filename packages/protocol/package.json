@@ -1,0 +1,24 @@
+{
+    "name": "@cntrl-pw/protocol",
+    "version": "0.1.0",
+    "description": "TypeScript types for the cntrl agent protocol, generated from its Rust source of truth.",
+    "type": "module",
+    "license": "MIT",
+    "private": true,
+    "sideEffects": false,
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/azaek/cntrl.git",
+        "directory": "packages/protocol"
+    },
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "check-types": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@cntrl-pw/tsconfig": "workspace:*",
+        "typescript": "catalog:"
+    }
+}

@@ -1,0 +1,1 @@
+{"t":"evt","sub":"01JC0000000000000000000SUB","seq":7,"data":{"ts":1791000000000,"cpu":{"busy":0.27,"load":{"one":0.52,"five":0.41,"fifteen":0.33}},"memory":{"total":8329629696,"available":5368709120}}}

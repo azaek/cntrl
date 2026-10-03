@@ -1,0 +1,1 @@
+{"t":"req","id":"01JC0000000000000000000RQB","op":"service.restart","ver":1,"deadline_ms":60000,"data":{"unit":"nginx.service"},"actor":{"kind":"user","id":"usr_01JC000000000000000000USR","via":"dashboard"},"idem":"01JC0000000000000000000RQB"}

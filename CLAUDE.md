@@ -52,11 +52,13 @@ pnpm ui               # Add shadcn to @cntrl-pw/ui
 
 The root `Cargo.toml` is a Cargo workspace for the agent crates in `crates/` and for `xtask/`. It excludes `apps/bridge/src-tauri`, which stays its own workspace; keep that exclude, because Bridge's build depends on it.
 
-| Crate | Purpose |
-| --- | --- |
+| Crate            | Purpose                                                          |
+| ---------------- | ---------------------------------------------------------------- |
 | `cntrl-protocol` | Agent wire protocol: envelope, operations, error and close codes |
-| `cntrl-host` | Host capabilities: one trait per capability, a backend per OS |
-| `cntrl-agent` | The headless server-management agent (Linux first) |
+| `cntrl-host`     | Host capabilities: one trait per capability, a backend per OS    |
+| `cntrl-agent`    | The headless server-management agent (Linux first)               |
+
+`cntrl-protocol` is the protocol's source of truth. `cargo xtask codegen` turns it into `protocol/v1/` (JSON Schema and the operations table) and `packages/protocol` (`@cntrl-pw/protocol`, the TypeScript types); never edit those generated files by hand. Golden frames in `testdata/protocol/v1/frames/` must round-trip through the Rust types; add one for every new frame shape.
 
 ```bash
 cargo fmt --all

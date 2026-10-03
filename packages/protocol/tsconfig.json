@@ -1,0 +1,7 @@
+{
+  "extends": "@cntrl-pw/tsconfig/base.json",
+  "compilerOptions": {
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts"]
+}

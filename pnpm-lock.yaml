@@ -674,6 +674,15 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
+  packages/protocol:
+    devDependencies:
+      '@cntrl-pw/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/tsconfig
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
   packages/sdk:
     dependencies:
       '@tanstack/react-query':

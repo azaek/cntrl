@@ -1,0 +1,41 @@
+{
+  "protocol_version": 1,
+  "subprotocol": "cntrl.agent.v1.json",
+  "ops": [
+    {
+      "name": "system.info",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SystemInfo"
+      }
+    },
+    {
+      "name": "service.restart",
+      "capability": "services.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ServiceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceJob"
+      }
+    }
+  ],
+  "topics": [
+    {
+      "name": "stats",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/StatsParams"
+      },
+      "event": {
+        "$ref": "#/$defs/StatsSample"
+      }
+    }
+  ]
+}

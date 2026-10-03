@@ -1,58 +1,85 @@
-# Checks the Rust workspace: the cntrl agent and its crates.
-# Bridge builds in its own workflow; the last step only proves the root
-# workspace doesn't capture apps/bridge/src-tauri.
+# Checks the Rust workspace (the cntrl agent and its crates) and the protocol
+# package generated from it. Bridge builds in its own workflow; the last Rust
+# step only proves the root workspace doesn't capture apps/bridge/src-tauri.
 name: Agent
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "clippy.toml"
-      - "crates/**"
-      - "xtask/**"
-      - ".github/workflows/agent.yml"
-  pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "clippy.toml"
-      - "crates/**"
-      - "xtask/**"
-      - ".github/workflows/agent.yml"
+    push:
+        branches: [main]
+        paths:
+            - "Cargo.toml"
+            - "Cargo.lock"
+            - ".cargo/**"
+            - "clippy.toml"
+            - "crates/**"
+            - "xtask/**"
+            - "protocol/**"
+            - "testdata/**"
+            - "packages/protocol/**"
+            - ".github/workflows/agent.yml"
+    pull_request:
+        paths:
+            - "Cargo.toml"
+            - "Cargo.lock"
+            - ".cargo/**"
+            - "clippy.toml"
+            - "crates/**"
+            - "xtask/**"
+            - "protocol/**"
+            - "testdata/**"
+            - "packages/protocol/**"
+            - ".github/workflows/agent.yml"
 
 env:
-  CARGO_TERM_COLOR: always
+    CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    rust:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
 
-      - name: Cache
-        uses: swatinem/rust-cache@v2
+            - name: Cache
+              uses: swatinem/rust-cache@v2
 
-      - name: Format
-        run: cargo fmt --all --check
+            - name: Format
+              run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+            - name: Clippy
+              run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --workspace
+            - name: Test
+              run: cargo test --workspace
 
-      - name: Generated files are current
-        run: cargo xtask codegen --check
+            - name: Generated files are current
+              run: cargo xtask codegen --check
 
-      - name: Bridge stays its own workspace
-        run: cargo metadata --manifest-path apps/bridge/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+            - name: Bridge stays its own workspace
+              run: cargo metadata --manifest-path apps/bridge/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+
+    protocol-types:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+
+            - name: Install Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+
+            - name: Install
+              run: pnpm install --frozen-lockfile --filter "@cntrl-pw/protocol..."
+
+            - name: Type-check the generated package
+              run: pnpm --filter @cntrl-pw/protocol check-types
