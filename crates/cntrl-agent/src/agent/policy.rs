@@ -10,7 +10,10 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use super::digest::sha256_hex;
+use cntrl_protocol::OpInfo;
 use cntrl_protocol::capability;
+use cntrl_protocol::frame::{Caps, PolicySummary};
+use cntrl_protocol::ops::{OPS, TOPICS};
 use serde::{Deserialize, Serialize};
 
 /// Where the policy in force came from.
@@ -53,9 +56,38 @@ pub enum PolicyState {
 
 impl PolicyState {
     /// Whether the policy allows `capability`.
-    #[cfg(test)]
     pub fn allows(&self, capability: &str) -> bool {
         matches!(self, Self::Valid { policy } if policy.allow.contains(capability))
+    }
+
+    /// The operations and topics this policy lets Console call, for the hello.
+    pub fn caps(&self) -> Caps {
+        let allowed = |registry: &[OpInfo]| {
+            registry
+                .iter()
+                .filter(|info| self.allows(info.capability))
+                .map(|info| (info.name.to_owned(), info.since))
+                .collect()
+        };
+        Caps {
+            ops: allowed(OPS),
+            topics: allowed(TOPICS),
+            features: Vec::new(),
+        }
+    }
+
+    /// The policy's hash, or why none is in force.
+    pub fn summary(&self) -> PolicySummary {
+        match self {
+            Self::Valid { policy } => PolicySummary {
+                hash: policy.hash.clone(),
+                error: None,
+            },
+            Self::Invalid { reason } => PolicySummary {
+                hash: String::new(),
+                error: Some(reason.clone()),
+            },
+        }
     }
 }
 
@@ -203,6 +235,28 @@ mod tests {
         let state = load(&path, own_uid(&path));
         assert!(state.allows("services.manage"));
         assert!(!state.allows("power.reboot"));
+    }
+
+    #[test]
+    fn caps_list_only_what_the_policy_allows() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_policy(
+            dir.path(),
+            "version = 1\nallow = [\"system.read\"]\n",
+            0o644,
+        );
+        let state = load(&path, own_uid(&path));
+        let caps = state.caps();
+        assert_eq!(caps.ops.get("system.info"), Some(&1));
+        assert!(!caps.ops.contains_key("service.restart"));
+        assert_eq!(caps.topics.get("stats"), Some(&1));
+        assert!(state.summary().error.is_none());
+
+        let denied = PolicyState::Invalid {
+            reason: "broken".to_owned(),
+        };
+        assert!(denied.caps().ops.is_empty() && denied.caps().topics.is_empty());
+        assert_eq!(denied.summary().error.as_deref(), Some("broken"));
     }
 
     #[test]

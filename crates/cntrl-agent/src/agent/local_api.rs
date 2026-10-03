@@ -26,22 +26,30 @@ use super::health::Health;
 use super::identity;
 use super::ipc::{self, Call};
 use super::policy::PolicyState;
+use super::uplink::{Uplink, UplinkStatus};
 
 /// What the local API reads from the running agent.
 pub struct AgentState {
     config: Config,
     config_path: PathBuf,
     health: Arc<Health>,
+    uplink: Arc<Uplink>,
     /// One enrollment at a time.
     enrolling: Mutex<()>,
 }
 
 impl AgentState {
-    pub fn new(config: Config, config_path: PathBuf, health: Arc<Health>) -> Self {
+    pub fn new(
+        config: Config,
+        config_path: PathBuf,
+        health: Arc<Health>,
+        uplink: Arc<Uplink>,
+    ) -> Self {
         Self {
             config,
             config_path,
             health,
+            uplink,
             enrolling: Mutex::new(()),
         }
     }
@@ -69,11 +77,7 @@ impl AgentState {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             pid: std::process::id(),
             uptime_s: self.health.uptime().as_secs(),
-            uplink: if device_id.is_some() {
-                Uplink::Enrolled
-            } else {
-                Uplink::NotEnrolled
-            },
+            uplink: self.uplink.status(),
             device_id,
             config: self.config_path.display().to_string(),
             privd,
@@ -87,19 +91,11 @@ pub struct Status {
     pub version: String,
     pub pid: u32,
     pub uptime_s: u64,
-    pub uplink: Uplink,
+    pub uplink: UplinkStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     pub config: String,
     pub privd: PrivdStatus,
-}
-
-/// The connection to Console.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Uplink {
-    NotEnrolled,
-    Enrolled,
 }
 
 /// Whether privd answers, and the policy it reads.
@@ -177,10 +173,11 @@ async fn enroll_device(
         ));
     }
     let _one_at_a_time = state.enrolling.lock().await;
-    enroll::enroll(&state.config, command)
+    let outcome = enroll::enroll(&state.config, command)
         .await
-        .map(Json)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    state.uplink.enrolled();
+    Ok(Json(outcome))
 }
 
 #[cfg(test)]
@@ -214,6 +211,7 @@ mod tests {
             config,
             "/etc/cntrl/agent.toml".into(),
             Arc::new(Health::new()),
+            Arc::new(Uplink::new()),
         ));
         let token = CancellationToken::new();
         let server = tokio::spawn(serve(listener, state, token.clone()));
@@ -232,7 +230,7 @@ mod tests {
 
         let status = client::get_status(&socket).await.expect("status");
         assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(status.uplink, Uplink::NotEnrolled);
+        assert_eq!(status.uplink, UplinkStatus::NotEnrolled);
         assert!(!status.privd.reachable);
 
         token.cancel();

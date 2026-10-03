@@ -63,6 +63,9 @@ pub struct Hello {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentInfo {
     pub version: String,
+    /// Rust target triple of the build, such as `x86_64-unknown-linux-gnu`. It
+    /// picks the release artifact for an update.
+    pub target: String,
     pub os: String,
     pub arch: String,
     /// Changes on every boot.
@@ -113,8 +116,11 @@ pub struct Caps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicySummary {
-    /// SHA-256 of the normalized policy.
+    /// SHA-256 of the normalized policy; empty when no valid policy is in force.
     pub hash: String,
+    /// Why no valid policy is in force. The agent then denies everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Where the agent's outbox stands.

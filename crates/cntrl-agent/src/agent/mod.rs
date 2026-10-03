@@ -18,6 +18,7 @@ mod policy;
 mod privd;
 mod supervisor;
 mod systemd;
+mod uplink;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -31,6 +32,7 @@ use config::Config;
 use health::Health;
 use local_api::AgentState;
 use supervisor::Supervisor;
+use uplink::{Uplink, UplinkConfig};
 
 /// `EX_CONFIG` from sysexits(3): the unit's `RestartPreventExitStatus=` stops
 /// systemd from restarting into the same bad config.
@@ -87,11 +89,18 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             }
         };
         let health = Arc::new(Health::new());
+        let uplink = Arc::new(Uplink::new());
         let privd_socket = config.paths.privd_socket.clone();
+        let uplink_config = UplinkConfig {
+            state_dir: config.paths.state_dir.clone(),
+            privd_socket: privd_socket.clone(),
+            gateway_url: config.console.gateway_url.clone(),
+        };
         let state = Arc::new(AgentState::new(
             config,
             config_path.to_owned(),
             Arc::clone(&health),
+            Arc::clone(&uplink),
         ));
 
         let mut supervisor = Supervisor::new();
@@ -104,7 +113,8 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             "heartbeat",
             health::heartbeat(Arc::clone(&health), token.clone()),
         );
-        supervisor.spawn("watchdog", systemd::watchdog(health, token));
+        supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
+        supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 
         record_start(&privd_socket).await;
         systemd::ready("running");

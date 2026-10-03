@@ -68,12 +68,16 @@ impl Default for Paths {
 pub struct ConsoleConfig {
     /// Base URL of Console's API, where enrollment goes.
     pub url: String,
+    /// Replaces the gateway URL from enrollment, for a staging gateway or
+    /// debugging.
+    pub gateway_url: Option<String>,
 }
 
 impl Default for ConsoleConfig {
     fn default() -> Self {
         Self {
             url: "https://console.cntrl.pw".to_owned(),
+            gateway_url: None,
         }
     }
 }

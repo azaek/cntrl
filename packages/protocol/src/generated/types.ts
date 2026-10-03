@@ -19,6 +19,11 @@ export type ActorKind = "user" | "api_token" | "system" | "unknown";
 /** The agent build and the machine it runs on. */
 export interface AgentInfo {
     version: string;
+    /**
+     * Rust target triple of the build, such as `x86_64-unknown-linux-gnu`. It
+     * picks the release artifact for an update.
+     */
+    target: string;
     os: string;
     arch: string;
     /** Changes on every boot. */
@@ -235,8 +240,10 @@ export interface OutboxState {
 
 /** The device policy in force, by hash. */
 export interface PolicySummary {
-    /** SHA-256 of the normalized policy. */
+    /** SHA-256 of the normalized policy; empty when no valid policy is in force. */
     hash: string;
+    /** Why no valid policy is in force. The agent then denies everything. */
+    error?: string | null;
 }
 
 /** Progress on a running request, before its {@link Response}. */

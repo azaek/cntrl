@@ -18,8 +18,9 @@ use tokio::net::UnixStream;
 use super::audit;
 use super::config::Config;
 use super::enroll::{EnrollCommand, EnrollOutcome};
-use super::local_api::{Status, Uplink};
+use super::local_api::Status;
 use super::policy::{self, Policy, PolicyState, Source};
+use super::uplink::{UplinkStatus, now_ms};
 
 pub fn print_status(config: &Config, json: bool) -> ExitCode {
     let status = match block_on(get_status(&config.paths.agent_socket)) {
@@ -41,9 +42,33 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
         uptime(status.uptime_s),
         status.pid
     );
-    match (status.uplink, &status.device_id) {
-        (Uplink::Enrolled, Some(device)) => println!("uplink: enrolled as {device}, not connected"),
-        _ => println!("uplink: not enrolled"),
+    match &status.uplink {
+        UplinkStatus::NotEnrolled => println!("uplink: not enrolled"),
+        UplinkStatus::Connecting { gateway, attempt } => {
+            println!("uplink: connecting to {gateway} (attempt {})", attempt + 1);
+        }
+        UplinkStatus::Online {
+            gateway,
+            session,
+            since_ms,
+        } => {
+            let up = now_ms().saturating_sub(*since_ms) / 1000;
+            println!(
+                "uplink: online at {gateway} for {} (session {session})",
+                uptime(up)
+            );
+        }
+        UplinkStatus::Retrying {
+            reason,
+            retry_at_ms,
+        } => {
+            let wait = retry_at_ms.saturating_sub(now_ms()).div_ceil(1000);
+            println!("uplink: retrying in {wait}s; {reason}");
+        }
+        UplinkStatus::Stopped { reason } => println!("uplink: stopped; {reason}"),
+    }
+    if let Some(device) = &status.device_id {
+        println!("device: {device}");
     }
     match (&status.privd.policy, &status.privd.error) {
         (Some(policy), _) => {

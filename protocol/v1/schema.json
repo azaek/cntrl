@@ -201,6 +201,10 @@
         "version": {
           "type": "string"
         },
+        "target": {
+          "type": "string",
+          "description": "Rust target triple of the build, such as `x86_64-unknown-linux-gnu`. It\npicks the release artifact for an update."
+        },
         "os": {
           "type": "string"
         },
@@ -218,6 +222,7 @@
       },
       "required": [
         "version",
+        "target",
         "os",
         "arch",
         "boot_id",
@@ -311,7 +316,14 @@
       "properties": {
         "hash": {
           "type": "string",
-          "description": "SHA-256 of the normalized policy."
+          "description": "SHA-256 of the normalized policy; empty when no valid policy is in force."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why no valid policy is in force. The agent then denies everything."
         }
       },
       "required": [
