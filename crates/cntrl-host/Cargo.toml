@@ -22,8 +22,12 @@ procfs-core = { version = "0.18", default-features = false }
 # macOS, as the research recommends for non-Linux hosts. rustix signals
 # processes, through a pidfd on Linux.
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "process", "event"] }
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "event", "fs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
+
+# Disks, network and temperatures on macOS (angle 09).
+[target.'cfg(target_os = "macos")'.dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["system", "user", "disk", "network", "component"] }
 
 # systemd over D-Bus, for services.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -33,3 +37,6 @@ zbus_systemd = { version = "0.26200", default-features = false, features = ["sys
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

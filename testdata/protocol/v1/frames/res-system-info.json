@@ -1,0 +1,1 @@
+{"t":"res","id":"01JC0000000000000000000RQS","ok":true,"data":{"hostname":"studio","os":{"id":"macos","name":"macOS 27.0","version":"27.0"},"arch":"aarch64","kernel":"27.0.0","boot_time":1791017471,"agent_version":"0.1.4","machine":"Mac mini (Mac16,10)","cpu":{"name":"Apple M4","cores":10,"threads":10,"performance_cores":4,"efficiency_cores":6}}}

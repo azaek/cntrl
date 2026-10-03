@@ -4,12 +4,14 @@
 
 use std::fmt;
 
+mod hwmon;
 #[cfg(target_os = "macos")]
 pub mod launchd;
 pub mod linux;
 pub mod machine;
 #[cfg(target_os = "macos")]
 pub mod macos;
+mod mounts;
 pub mod processes;
 pub mod services;
 pub mod stats;

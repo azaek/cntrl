@@ -317,6 +317,7 @@ dependencies = [
  "procfs-core",
  "rustix",
  "sysinfo",
+ "tempfile",
  "zbus",
  "zbus_systemd",
 ]

@@ -10,6 +10,8 @@ use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
 use cntrl_protocol::process::ProcessesSample;
 use cntrl_protocol::records::{AuditCheckpoint, StatsRecord};
+use cntrl_protocol::stats::{SensorKind, StatsSample};
+use cntrl_protocol::system::SystemInfo;
 use cntrl_protocol::{ErrorCode, Frame};
 use serde_json::{Value, json};
 
@@ -134,4 +136,46 @@ fn the_processes_event_decodes() {
     assert_eq!(sample.processes.len(), 2);
     assert_eq!(sample.processes[0].unit.as_deref(), Some("nginx.service"));
     assert!(!sample.processes[0].kernel);
+}
+
+#[test]
+fn stats_events_decode_old_and_new() {
+    let sample = |file: &str| -> StatsSample {
+        let text = fs::read_to_string(frames_dir().join(file)).expect("read the frame");
+        let Frame::Evt(event) = serde_json::from_str(&text).expect("a frame") else {
+            panic!("{file} isn't an event");
+        };
+        serde_json::from_value(event.data).expect("a stats sample")
+    };
+    // A 0.1.3 agent's sample has none of the newer fields.
+    let old = sample("evt.json");
+    assert!(old.swap.is_none() && old.disk_io.is_none() && old.network.is_none());
+    assert!(old.filesystems.is_empty() && old.temperatures.is_empty());
+    let new = sample("evt-stats-full.json");
+    assert_eq!(new.disk_io.map(|io| io.write), Some(1_048_576));
+    assert_eq!(new.filesystems[1].name.as_deref(), Some("Backup"));
+    assert_eq!(new.temperatures[0].sensor, SensorKind::Cpu);
+    // A sensor kind from a newer agent reads as other.
+    let kind: SensorKind = serde_json::from_value(json!("battery")).expect("parses");
+    assert_eq!(kind, SensorKind::Other);
+}
+
+#[test]
+fn system_info_decodes_with_and_without_hardware() {
+    let text = fs::read_to_string(frames_dir().join("res-system-info.json")).expect("read");
+    let Frame::Res(res) = serde_json::from_str(&text).expect("a frame") else {
+        panic!("res-system-info.json isn't a response");
+    };
+    let info: SystemInfo = serde_json::from_value(res.data.expect("data")).expect("system info");
+    let cpu = info.cpu.expect("cpu");
+    assert_eq!(
+        (cpu.performance_cores, cpu.efficiency_cores),
+        (Some(4), Some(6))
+    );
+    let older: SystemInfo = serde_json::from_value(json!({
+        "hostname": "web-01", "os": {"id": "debian", "name": "Debian"}, "arch": "x86_64",
+        "kernel": "6.1.0", "boot_time": 1, "agent_version": "0.1.3"
+    }))
+    .expect("a 0.1.3 agent's system info");
+    assert!(older.machine.is_none() && older.cpu.is_none());
 }

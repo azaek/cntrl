@@ -57,7 +57,8 @@ pub async fn run(
                 if let Some((earlier, at)) = &previous
                     && now.duration_since(*at) <= STALE
                 {
-                    latest.send_replace(Some(Arc::new(reading.since(earlier, now_ms()))));
+                    let elapsed = now.duration_since(*at);
+                    latest.send_replace(Some(Arc::new(reading.since(earlier, elapsed, now_ms()))));
                 }
                 previous = Some((reading, now));
             }
@@ -103,6 +104,7 @@ mod tests {
                 total: 8_000,
                 available: 6_000,
             },
+            ..StatsReading::default()
         }
     }
 

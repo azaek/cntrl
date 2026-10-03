@@ -834,6 +834,24 @@
         },
         "agent_version": {
           "type": "string"
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The machine, such as `Mac mini (Mac16,10)`, `Dell Inc. OptiPlex 7090`\nor `Raspberry Pi 4 Model B Rev 1.4`, where the OS says. From 0.1.4."
+        },
+        "cpu": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CpuInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "From 0.1.4."
         }
       },
       "required": [
@@ -870,6 +888,52 @@
         "name"
       ],
       "description": "The OS, from os-release."
+    },
+    "CpuInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Such as `Apple M4` or `AMD Ryzen 7 5800X 8-Core Processor`; ARM boards\noften don't say."
+        },
+        "cores": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Physical cores."
+        },
+        "threads": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Hardware threads, which the OS schedules as CPUs."
+        },
+        "performance_cores": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "On CPUs with two kinds of core, such as Apple silicon, how many of each."
+        },
+        "efficiency_cores": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "cores",
+        "threads"
+      ],
+      "description": "The CPU."
     },
     "ServiceList": {
       "type": "object",
@@ -1222,6 +1286,53 @@
         },
         "memory": {
           "$ref": "#/$defs/MemoryStats"
+        },
+        "swap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent when the machine has no swap."
+        },
+        "disk_io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskIo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Reads and writes across the machine's physical disks, over the sample\ninterval."
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkIo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Traffic across the machine's physical network interfaces, over the\nsample interval. Tunnels and container networks aren't added, since\ntheir traffic crosses a physical interface too."
+        },
+        "filesystems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Filesystem"
+          },
+          "description": "The machine's filesystems, as of the last look; the agent looks every\n10 s."
+        },
+        "temperatures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Temperature"
+          },
+          "description": "Temperature sensors, as of the last look; the agent looks every 5 s."
         }
       },
       "required": [
@@ -1292,6 +1403,155 @@
         "available"
       ],
       "description": "Memory at sample time."
+    },
+    "SwapStats": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "total",
+        "used"
+      ],
+      "description": "Swap at sample time."
+    },
+    "DiskIo": {
+      "type": "object",
+      "properties": {
+        "read": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "write": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "read",
+        "write"
+      ],
+      "description": "Disk throughput, in bytes per second."
+    },
+    "NetworkIo": {
+      "type": "object",
+      "properties": {
+        "received": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sent": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "received",
+        "sent"
+      ],
+      "description": "Network throughput, in bytes per second."
+    },
+    "Filesystem": {
+      "type": "object",
+      "properties": {
+        "mount": {
+          "type": "string",
+          "description": "Where it's mounted, such as `/` or `/mnt/media`."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The volume's name where the OS gives one, such as `Macintosh HD`."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Its type, such as `ext4`, `zfs`, `nfs4` or `apfs`."
+        },
+        "total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "In use. On a Mac it's the whole APFS container's use, since its volumes\nshare the space."
+        },
+        "available": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "What a user other than root can still write; on Linux the blocks kept\nfor root aren't in it, so used and available don't add up to the total."
+        }
+      },
+      "required": [
+        "mount",
+        "kind",
+        "total",
+        "used",
+        "available"
+      ],
+      "description": "A mounted filesystem."
+    },
+    "Temperature": {
+      "type": "object",
+      "properties": {
+        "sensor": {
+          "$ref": "#/$defs/SensorKind"
+        },
+        "label": {
+          "type": "string",
+          "description": "The sensor's name for people, such as `CPU` or `nvme0`."
+        },
+        "celsius": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "sensor",
+        "label",
+        "celsius"
+      ],
+      "description": "One temperature sensor's reading."
+    },
+    "SensorKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "disk",
+            "gpu"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "cpu",
+          "description": "The CPU, or the chip on Apple silicon."
+        },
+        {
+          "type": "string",
+          "const": "other",
+          "description": "Anything else, including kinds from newer agents."
+        }
+      ],
+      "description": "What a temperature sensor measures."
     },
     "ProcessesParams": {
       "type": "object",

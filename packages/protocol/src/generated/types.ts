@@ -93,6 +93,22 @@ export interface Challenge {
     nonce: string;
 }
 
+/** The CPU. */
+export interface CpuInfo {
+    /**
+     * Such as `Apple M4` or `AMD Ryzen 7 5800X 8-Core Processor`; ARM boards
+     * often don't say.
+     */
+    name?: string | null;
+    /** Physical cores. */
+    cores: number;
+    /** Hardware threads, which the OS schedules as CPUs. */
+    threads: number;
+    /** On CPUs with two kinds of core, such as Apple silicon, how many of each. */
+    performance_cores?: number | null;
+    efficiency_cores?: number | null;
+}
+
 /** CPU over a record's period. */
 export interface CpuRecord {
     /** Busy time across all cores over the whole period. */
@@ -107,6 +123,12 @@ export interface CpuStats {
     /** Busy time across all cores. */
     busy: number;
     load: LoadAverage;
+}
+
+/** Disk throughput, in bytes per second. */
+export interface DiskIo {
+    read: number;
+    write: number;
 }
 
 /** Why an enrollment failed. */
@@ -188,6 +210,27 @@ export interface Event {
     sub: string;
     seq: number;
     data: unknown;
+}
+
+/** A mounted filesystem. */
+export interface Filesystem {
+    /** Where it's mounted, such as `/` or `/mnt/media`. */
+    mount: string;
+    /** The volume's name where the OS gives one, such as `Macintosh HD`. */
+    name?: string | null;
+    /** Its type, such as `ext4`, `zfs`, `nfs4` or `apfs`. */
+    kind: string;
+    total: number;
+    /**
+     * In use. On a Mac it's the whole APFS container's use, since its volumes
+     * share the space.
+     */
+    used: number;
+    /**
+     * What a user other than root can still write; on Linux the blocks kept
+     * for root aren't in it, so used and available don't add up to the total.
+     */
+    available: number;
 }
 
 /** Any frame of protocol v1. */
@@ -285,6 +328,12 @@ export interface MemoryStats {
     total: number;
     /** What the kernel estimates new work can use (`MemAvailable`). */
     available: number;
+}
+
+/** Network throughput, in bytes per second. */
+export interface NetworkIo {
+    received: number;
+    sent: number;
 }
 
 /** Parameters of operations that take none: `{}` or an absent `data`. */
@@ -462,6 +511,9 @@ export interface Response {
     err?: ErrorBody | null;
 }
 
+/** What a temperature sensor measures. */
+export type SensorKind = ("disk" | "gpu") | "cpu" | "other";
+
 /** The outcome of a service job. */
 export interface ServiceJob {
     unit: string;
@@ -562,6 +614,26 @@ export interface StatsSample {
     ts: number;
     cpu: CpuStats;
     memory: MemoryStats;
+    /** Absent when the machine has no swap. */
+    swap?: SwapStats | null;
+    /**
+     * Reads and writes across the machine's physical disks, over the sample
+     * interval.
+     */
+    disk_io?: DiskIo | null;
+    /**
+     * Traffic across the machine's physical network interfaces, over the
+     * sample interval. Tunnels and container networks aren't added, since
+     * their traffic crosses a physical interface too.
+     */
+    network?: NetworkIo | null;
+    /**
+     * The machine's filesystems, as of the last look; the agent looks every
+     * 10 s.
+     */
+    filesystems?: Filesystem[];
+    /** Temperature sensors, as of the last look; the agent looks every 5 s. */
+    temperatures?: Temperature[];
 }
 
 export type StopResult = "unknown" | "stopped" | "still_running" | "not_running";
@@ -572,6 +644,12 @@ export interface Subscribe {
     topic: string;
     ver: number;
     data?: unknown;
+}
+
+/** Swap at sample time. */
+export interface SwapStats {
+    total: number;
+    used: number;
 }
 
 /** What `system.info` returns. */
@@ -585,6 +663,21 @@ export interface SystemInfo {
     /** When the machine booted, in Unix seconds. */
     boot_time: number;
     agent_version: string;
+    /**
+     * The machine, such as `Mac mini (Mac16,10)`, `Dell Inc. OptiPlex 7090`
+     * or `Raspberry Pi 4 Model B Rev 1.4`, where the OS says. From 0.1.4.
+     */
+    machine?: string | null;
+    /** From 0.1.4. */
+    cpu?: CpuInfo | null;
+}
+
+/** One temperature sensor's reading. */
+export interface Temperature {
+    sensor: SensorKind;
+    /** The sensor's name for people, such as `CPU` or `nvme0`. */
+    label: string;
+    celsius: number;
 }
 
 /** Ends a subscription. */
