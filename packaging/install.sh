@@ -64,7 +64,12 @@ sha256() {
 
 download() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 3 -o "$2" "$1"
+        # A bar on a terminal, since a slow link would otherwise look like a hang.
+        if [ -t 2 ]; then
+            curl -fL --retry 3 --progress-bar -o "$2" "$1"
+        else
+            curl -fsSL --retry 3 -o "$2" "$1"
+        fi
     elif command -v wget >/dev/null 2>&1; then
         wget -qO "$2" "$1"
     else
@@ -79,7 +84,8 @@ fetch() {
     [ -n "$line" ] || fail "release $CNTRL_VERSION has no build for $1"
     url=$(printf '%s\n' "$line" | awk '{ print $2 }')
     want=$(printf '%s\n' "$line" | awk '{ print $4 }')
-    say "Downloading cntrl agent $CNTRL_VERSION for $1"
+    size=$(printf '%s\n' "$line" | awk '{ printf "%.1f MB", $3 / 1048576 }')
+    say "Downloading cntrl agent $CNTRL_VERSION for $1 ($size)"
     download "$url" "$2"
     got=$(sha256 "$2")
     [ "$got" = "$want" ] || fail "the download doesn't match the release's SHA-256 (got $got)"
