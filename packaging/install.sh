@@ -1,9 +1,11 @@
 #!/bin/sh
 # Installs the cntrl agent on Linux (systemd) or macOS (launchd) and enrolls it
-# with Console (D14, D21). Console serves this script with a single-use token
-# and each build's download and SHA-256 filled in at the top:
+# with Console (D14, D21). Console serves this script with each build's
+# download and SHA-256 filled in at the top: with a single-use token for Add
+# device's command, or without one for any machine, which enrolls afterwards.
 #
 #   curl -fsSL https://gw.cntrl.pw/install/<token> | sudo sh
+#   curl -fsSL https://cntrl.pw/install.sh | sudo sh [-s -- --token <token>]
 #
 # By hand, from a release archive or from a build in this repo:
 #
@@ -209,7 +211,7 @@ main() {
         --token) CNTRL_TOKEN=${2:?--token needs a token}; shift 2 ;;
         --console) CNTRL_CONSOLE=${2:?--console needs a URL}; shift 2 ;;
         --gateway) CNTRL_GATEWAY=${2:?--gateway needs a URL}; shift 2 ;;
-        -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "unknown option $1" ;;
         esac
     done
