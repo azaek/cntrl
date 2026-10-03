@@ -8,6 +8,50 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceRef {
     pub unit: String,
+    /// Where the service runs; system-wide when absent.
+    #[serde(default, skip_serializing_if = "ServiceScope::is_system")]
+    pub scope: ServiceScope,
+    /// For `user` scope, whose session; the user at the console when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+
+/// Where a service runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceScope {
+    /// System-wide: systemd's system units, launchd's system domain.
+    #[default]
+    System,
+    /// A logged-in user's session: on macOS, their GUI domain, with their
+    /// LaunchAgents and the apps they have open.
+    User,
+}
+
+impl ServiceScope {
+    pub fn is_system(&self) -> bool {
+        *self == Self::System
+    }
+}
+
+/// What a service is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceKind {
+    /// A daemon, agent or unit that the service manager runs.
+    #[default]
+    Service,
+    /// An app open in a user's session. Its `unit` is the app's bundle ID and
+    /// its `description` the app's name.
+    App,
+}
+
+impl ServiceKind {
+    pub fn is_service(&self) -> bool {
+        *self == Self::Service
+    }
 }
 
 /// The outcome of a service job.
@@ -18,8 +62,9 @@ pub struct ServiceJob {
     pub result: JobResult,
 }
 
-/// `service.list`: the services the device's service manager knows at system
-/// scope (systemd's system units; launchd's system domain), by name.
+/// `service.list`: the services the device's service manager knows: system-wide
+/// (systemd's system units; launchd's system domain), then on macOS what runs
+/// in each logged-in user's session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceList {
@@ -47,6 +92,15 @@ pub struct ServiceStatus {
     pub pid: Option<u32>,
     /// The device policy keeps service actions off it.
     pub protected: bool,
+    /// Where it runs; system-wide when absent.
+    #[serde(default, skip_serializing_if = "ServiceScope::is_system")]
+    pub scope: ServiceScope,
+    /// For `user` scope, whose session it runs in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// What it is; a service when absent.
+    #[serde(default, skip_serializing_if = "ServiceKind::is_service")]
+    pub kind: ServiceKind,
 }
 
 /// A service's state across service managers.

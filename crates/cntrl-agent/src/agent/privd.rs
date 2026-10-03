@@ -17,7 +17,7 @@ use cntrl_host::services::service_name;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
-use cntrl_protocol::service::{JobResult, ServiceJob};
+use cntrl_protocol::service::{JobResult, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
 use tokio::net::UnixStream;
 use tracing::{error, info, warn};
@@ -203,20 +203,59 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
         Call::ServiceRestart {
             request_id,
             unit,
+            scope,
+            user,
             actor,
-        } => restart_service(state, request_id, unit, actor).await,
+        } => {
+            let target = Target { unit, scope, user };
+            restart_service(state, request_id, target, actor).await
+        }
+        Call::ServiceListSessions => {
+            if !policy::load(&state.policy_path, state.owner).allows("services.read") {
+                let reason = "the device policy doesn't allow services.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            blocking(|| {
+                let services = session_services()?;
+                Ok(json!({ "services": services }))
+            })
+            .await
+            .map_err(CallError::internal)
+        }
     }
 }
 
-/// Restarts a unit for Console. privd checks the policy itself, whatever the
-/// agent decided, and audits its decision, synced to disk, before acting.
+/// Which service a restart is for, and where it runs.
+struct Target {
+    unit: String,
+    scope: ServiceScope,
+    user: Option<String>,
+}
+
+/// What runs in each logged-in user's desktop session.
+#[cfg(target_os = "macos")]
+fn session_services() -> Result<Vec<ServiceStatus>, String> {
+    let mut services = Vec::new();
+    for (user, uid) in cntrl_host::launchd::sessions() {
+        services.extend(cntrl_host::launchd::list_session(&user, uid).map_err(|e| e.to_string())?);
+    }
+    Ok(services)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn session_services() -> Result<Vec<ServiceStatus>, String> {
+    Ok(Vec::new())
+}
+
+/// Restarts a service for Console. privd checks the policy itself, whatever
+/// the agent decided, and audits its decision, synced to disk, before acting.
 async fn restart_service(
     state: Arc<State>,
     id: String,
-    unit: String,
+    target: Target,
     actor: Option<Actor>,
 ) -> Result<Value, CallError> {
-    let unit = service_name(&unit)?;
+    let unit = service_name(&target.unit)?;
     let policy = policy::load(&state.policy_path, state.owner);
     let refusal = if !policy.allows("services.manage") {
         Some("the device policy doesn't allow services.manage".to_owned())
@@ -225,7 +264,14 @@ async fn restart_service(
     } else {
         None
     };
-    let request = json!({ "id": id, "op": "service.restart", "unit": unit, "actor": actor });
+    let request = json!({
+        "id": id,
+        "op": "service.restart",
+        "unit": unit,
+        "scope": target.scope,
+        "user": target.user,
+        "actor": actor,
+    });
     if let Some(reason) = refusal {
         audit(
             &state,
@@ -236,11 +282,11 @@ async fn restart_service(
         return Err(CallError::new(ErrorCode::PolicyDenied, reason));
     }
     audit(&state, "request.allowed", json!({ "request": request })).await?;
-    let outcome = tokio::time::timeout(JOB_LIMIT, restart(&unit))
+    let outcome = tokio::time::timeout(JOB_LIMIT, restart(&unit, target.scope, target.user))
         .await
         .unwrap_or_else(|_| {
             Err(HostError::Failed(format!(
-                "systemd gave no result within {JOB_LIMIT:?}"
+                "the service manager gave no result within {JOB_LIMIT:?}"
             )))
         });
     let (record, answer) = match outcome {
@@ -256,23 +302,64 @@ async fn restart_service(
 }
 
 #[cfg(target_os = "linux")]
-async fn restart(unit: &str) -> Result<JobResult, HostError> {
+async fn restart(
+    unit: &str,
+    scope: ServiceScope,
+    _user: Option<String>,
+) -> Result<JobResult, HostError> {
+    if !scope.is_system() {
+        return Err(HostError::Invalid(
+            "services in a user's session aren't supported on Linux yet".to_owned(),
+        ));
+    }
     cntrl_host::systemd::Systemd::connect()
         .await?
         .restart(unit)
         .await
 }
 
+/// On macOS a service in a user's session restarts in that user's GUI domain;
+/// with no user named, the one user logged in.
 #[cfg(target_os = "macos")]
-async fn restart(label: &str) -> Result<JobResult, HostError> {
+async fn restart(
+    label: &str,
+    scope: ServiceScope,
+    user: Option<String>,
+) -> Result<JobResult, HostError> {
+    use cntrl_host::launchd;
     let label = label.to_owned();
-    tokio::task::spawn_blocking(move || cntrl_host::launchd::restart(&label))
-        .await
-        .map_err(|e| HostError::Failed(e.to_string()))?
+    tokio::task::spawn_blocking(move || {
+        let domain = match scope {
+            ServiceScope::System => launchd::system_domain(),
+            ServiceScope::User => {
+                let sessions = launchd::sessions();
+                let session = match &user {
+                    Some(name) => sessions.iter().find(|(session, _)| session == name),
+                    None if sessions.len() == 1 => sessions.first(),
+                    None => None,
+                };
+                let Some((_, uid)) = session else {
+                    return Err(HostError::NotFound(match (&user, sessions.len()) {
+                        (Some(name), _) => format!("{name} has no desktop session"),
+                        (None, 0) => "nobody is logged in".to_owned(),
+                        (None, _) => "several users are logged in; name one".to_owned(),
+                    }));
+                };
+                launchd::user_domain(*uid)
+            }
+        };
+        launchd::restart(&domain, &label)
+    })
+    .await
+    .map_err(|e| HostError::Failed(e.to_string()))?
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-async fn restart(_unit: &str) -> Result<JobResult, HostError> {
+async fn restart(
+    _unit: &str,
+    _scope: ServiceScope,
+    _user: Option<String>,
+) -> Result<JobResult, HostError> {
     Err(HostError::Unsupported)
 }
 

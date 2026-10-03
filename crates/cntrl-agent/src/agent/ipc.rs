@@ -8,6 +8,7 @@ use bytes::Bytes;
 use cntrl_host::HostError;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::service::ServiceScope;
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -41,9 +42,16 @@ pub enum Call {
         /// flattened into an envelope that has one.
         request_id: String,
         unit: String,
+        #[serde(default, skip_serializing_if = "ServiceScope::is_system")]
+        scope: ServiceScope,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Actor>,
     },
+    /// What runs in each logged-in user's desktop session, which only root can
+    /// read: on macOS, their LaunchAgents and open apps.
+    ServiceListSessions,
     /// A signed checkpoint over the audit log's head, or `null` when the log
     /// hasn't grown since the checkpoint at `after`.
     AuditCheckpoint {
@@ -211,8 +219,18 @@ mod tests {
             Call::ServiceRestart {
                 request_id: "req_1".to_owned(),
                 unit: "nginx.service".to_owned(),
+                scope: ServiceScope::System,
+                user: None,
                 actor: None,
             },
+            Call::ServiceRestart {
+                request_id: "req_2".to_owned(),
+                unit: "com.azaek.tmux".to_owned(),
+                scope: ServiceScope::User,
+                user: Some("azaek".to_owned()),
+                actor: None,
+            },
+            Call::ServiceListSessions,
             Call::AuditCheckpoint {
                 device_id: "dev_1".to_owned(),
                 key_id: "key_1".to_owned(),

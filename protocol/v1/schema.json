@@ -884,7 +884,7 @@
       "required": [
         "services"
       ],
-      "description": "`service.list`: the services the device's service manager knows at system\nscope (systemd's system units; launchd's system domain), by name."
+      "description": "`service.list`: the services the device's service manager knows: system-wide\n(systemd's system units; launchd's system domain), then on macOS what runs\nin each logged-in user's session."
     },
     "ServiceStatus": {
       "type": "object",
@@ -922,6 +922,21 @@
         "protected": {
           "type": "boolean",
           "description": "The device policy keeps service actions off it."
+        },
+        "scope": {
+          "$ref": "#/$defs/ServiceScope",
+          "description": "Where it runs; system-wide when absent."
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `user` scope, whose session it runs in."
+        },
+        "kind": {
+          "$ref": "#/$defs/ServiceKind",
+          "description": "What it is; a service when absent."
         }
       },
       "required": [
@@ -964,11 +979,52 @@
       ],
       "description": "A service's state across service managers."
     },
+    "ServiceScope": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "system",
+          "description": "System-wide: systemd's system units, launchd's system domain."
+        },
+        {
+          "type": "string",
+          "const": "user",
+          "description": "A logged-in user's session: on macOS, their GUI domain, with their\nLaunchAgents and the apps they have open."
+        }
+      ],
+      "description": "Where a service runs."
+    },
+    "ServiceKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "service",
+          "description": "A daemon, agent or unit that the service manager runs."
+        },
+        {
+          "type": "string",
+          "const": "app",
+          "description": "An app open in a user's session. Its `unit` is the app's bundle ID and\nits `description` the app's name."
+        }
+      ],
+      "description": "What a service is."
+    },
     "ServiceRef": {
       "type": "object",
       "properties": {
         "unit": {
           "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/ServiceScope",
+          "description": "Where the service runs; system-wide when absent."
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `user` scope, whose session; the user at the console when absent."
         }
       },
       "required": [

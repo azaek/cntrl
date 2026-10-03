@@ -338,9 +338,13 @@ export interface ServiceJob {
     result: JobResult;
 }
 
+/** What a service is. */
+export type ServiceKind = "service" | "app";
+
 /**
- * `service.list`: the services the device's service manager knows at system
- * scope (systemd's system units; launchd's system domain), by name.
+ * `service.list`: the services the device's service manager knows: system-wide
+ * (systemd's system units; launchd's system domain), then on macOS what runs
+ * in each logged-in user's session.
  */
 export interface ServiceList {
     services: ServiceStatus[];
@@ -352,7 +356,14 @@ export interface ServiceList {
  */
 export interface ServiceRef {
     unit: string;
+    /** Where the service runs; system-wide when absent. */
+    scope?: ServiceScope;
+    /** For `user` scope, whose session; the user at the console when absent. */
+    user?: string | null;
 }
+
+/** Where a service runs. */
+export type ServiceScope = "system" | "user";
 
 /** A service's state across service managers. */
 export type ServiceState =
@@ -384,6 +395,12 @@ export interface ServiceStatus {
     pid?: number | null;
     /** The device policy keeps service actions off it. */
     protected: boolean;
+    /** Where it runs; system-wide when absent. */
+    scope?: ServiceScope;
+    /** For `user` scope, whose session it runs in. */
+    user?: string | null;
+    /** What it is; a service when absent. */
+    kind?: ServiceKind;
 }
 
 /** Signature algorithm of the device key. */

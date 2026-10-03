@@ -1,12 +1,14 @@
-//! launchd jobs, behind the `service.*` operations on macOS. privd runs as
-//! root and acts on the system domain, where LaunchDaemons live; run as
-//! another user, as in tests, it acts on that user's GUI domain instead.
+//! launchd jobs, behind the `service.*` operations on macOS: the system domain,
+//! where LaunchDaemons live, and each logged-in user's GUI domain, with their
+//! LaunchAgents and open apps. privd runs as root; run as another user, as in
+//! tests, it acts on that user's GUI domain in place of the system's.
 
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cntrl_protocol::service::{JobResult, ServiceState, ServiceStatus};
+use cntrl_protocol::service::{JobResult, ServiceKind, ServiceScope, ServiceState, ServiceStatus};
 
 use crate::HostError;
 
@@ -17,12 +19,12 @@ const POLL: Duration = Duration::from_millis(250);
 /// launchctl's exit status for a job that isn't loaded in the domain.
 const NO_SUCH_JOB: i32 = 113;
 
-/// Restarts `label` with `launchctl kickstart -k`, which stops a running
-/// instance first, then waits until launchd shows the job running, or
+/// Restarts `label` in `domain` with `launchctl kickstart -k`, which stops a
+/// running instance first, then waits until launchd shows the job running, or
 /// finished for a job that runs and exits. It blocks, so call it on a
 /// blocking thread.
-pub fn restart(label: &str) -> Result<JobResult, HostError> {
-    let target = format!("{}/{label}", domain());
+pub fn restart(domain: &str, label: &str) -> Result<JobResult, HostError> {
+    let target = format!("{domain}/{label}");
     let output = launchctl(&["kickstart", "-k", &target])?;
     if !output.status.success() {
         return Err(match output.status.code() {
@@ -89,14 +91,121 @@ fn services(printed: &str) -> Vec<ServiceStatus> {
                 detail,
                 pid: (pid > 0).then_some(pid),
                 protected: false,
+                scope: ServiceScope::System,
+                user: None,
+                kind: ServiceKind::Service,
             })
         })
         .collect()
 }
 
-/// Where jobs live for this process: the system domain for root, else the
-/// user's GUI domain.
-fn domain() -> String {
+/// The users with a desktop session, by name and ID, from the system
+/// configuration store's console user record. Empty when nobody is logged in.
+pub fn sessions() -> Vec<(String, u32)> {
+    let child = Command::new("/usr/sbin/scutil")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return Vec::new();
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b"show State:/Users/ConsoleUser\n");
+    }
+    child
+        .wait_with_output()
+        .map(|output| parse_sessions(&String::from_utf8_lossy(&output.stdout)))
+        .unwrap_or_default()
+}
+
+/// Pairs each session's `kCGSSessionUserNameKey` with its
+/// `kCGSSessionUserIDKey`, leaving out root and service accounts.
+fn parse_sessions(text: &str) -> Vec<(String, u32)> {
+    let mut sessions = Vec::new();
+    let (mut name, mut uid) = (None::<String>, None::<u32>);
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(" : ") else {
+            continue;
+        };
+        match key.trim() {
+            "kCGSSessionUserNameKey" => name = Some(value.trim().to_owned()),
+            "kCGSSessionUserIDKey" => uid = value.trim().parse().ok(),
+            _ => continue,
+        }
+        if let (Some(user), Some(id)) = (&name, uid) {
+            if id != 0 && !user.starts_with('_') {
+                sessions.push((user.clone(), id));
+            }
+            (name, uid) = (None, None);
+        }
+    }
+    sessions.sort();
+    sessions.dedup();
+    sessions
+}
+
+/// What runs in a user's desktop session: their LaunchAgents and the apps they
+/// have open, each app named by its bundle ID and described by its name.
+/// Reading another user's domain needs root. It blocks.
+pub fn list_session(user: &str, uid: u32) -> Result<Vec<ServiceStatus>, HostError> {
+    let domain = user_domain(uid);
+    let output = launchctl(&["print", &domain])?;
+    if !output.status.success() {
+        return Err(HostError::Failed(message(&output)));
+    }
+    let mut services: Vec<ServiceStatus> = services(&String::from_utf8_lossy(&output.stdout))
+        .into_iter()
+        .map(|mut service| {
+            service.scope = ServiceScope::User;
+            service.user = Some(user.to_owned());
+            if service.unit.starts_with("application.") {
+                describe_app(&domain, &mut service);
+            }
+            service
+        })
+        .collect();
+    services.sort_by(|a, b| a.unit.cmp(&b.unit));
+    Ok(services)
+}
+
+/// An open app's job is `application.<bundle ID>.<n>.<n>`, which changes with
+/// every launch. launchd knows the bundle ID and the program, whose `.app`
+/// folder gives the app's name.
+fn describe_app(domain: &str, service: &mut ServiceStatus) {
+    service.kind = ServiceKind::App;
+    let Ok(output) = launchctl(&["print", &format!("{domain}/{}", service.unit)]) else {
+        return;
+    };
+    let printed = String::from_utf8_lossy(&output.stdout);
+    let field = |key: &str| {
+        printed.lines().find_map(|line| {
+            let (name, value) = line.split_once(" = ")?;
+            (name.trim() == key).then(|| value.trim().to_owned())
+        })
+    };
+    if let Some(bundle) = field("bundle id") {
+        service.unit = bundle;
+    }
+    service.description = field("program").as_deref().and_then(app_name);
+}
+
+/// `HEAD` from `/Applications/HEAD.app/Contents/MacOS/head`.
+fn app_name(program: &str) -> Option<String> {
+    program
+        .split('/')
+        .find_map(|part| part.strip_suffix(".app"))
+        .map(str::to_owned)
+}
+
+/// A user's GUI domain, where their LaunchAgents and apps live.
+pub fn user_domain(uid: u32) -> String {
+    format!("gui/{uid}")
+}
+
+/// Where privd acts at system scope: the system domain when it's root, else
+/// (in tests) its own user's GUI domain.
+pub fn system_domain() -> String {
     let uid = rustix::process::getuid();
     if uid.is_root() {
         "system".to_owned()
@@ -212,9 +321,41 @@ mod tests {
     }
 
     #[test]
+    fn pairs_session_names_and_ids() {
+        let text = "<dictionary> {\n  Name : azaek\n  SessionInfo : <array> {\n    0 : <dictionary> {\n      kCGSSessionOnConsoleKey : TRUE\n      kCGSSessionUserIDKey : 501\n      kCGSSessionUserNameKey : azaek\n    }\n    1 : <dictionary> {\n      kCGSSessionUserIDKey : 0\n      kCGSSessionUserNameKey : root\n    }\n  }\n  UID : 501\n}";
+        assert_eq!(parse_sessions(text), [("azaek".to_owned(), 501)]);
+        assert_eq!(parse_sessions(""), []);
+    }
+
+    #[test]
+    fn names_apps_by_their_bundle_folder() {
+        assert_eq!(
+            app_name("/Applications/HEAD.app/Contents/MacOS/head").as_deref(),
+            Some("HEAD")
+        );
+        assert_eq!(app_name("/usr/libexec/thing"), None);
+    }
+
+    #[test]
     fn lists_this_macs_system_domain() {
         let services = list().expect("launchctl print system");
         assert!(services.iter().any(|s| s.unit.starts_with("com.apple.")));
+    }
+
+    /// Lists this user's own session, which needs no root:
+    /// `cargo test -p cntrl-host -- --ignored --nocapture` with a desktop session.
+    #[test]
+    #[ignore = "reads the user's GUI domain"]
+    fn lists_my_session() {
+        let uid = rustix::process::getuid().as_raw();
+        let services = list_session("me", uid).expect("launchctl print gui");
+        for app in services
+            .iter()
+            .filter(|s| s.kind == ServiceKind::App && !s.unit.starts_with("com.apple."))
+        {
+            println!("app {} {:?} {:?}", app.unit, app.description, app.pid);
+        }
+        assert!(services.iter().all(|s| s.scope == ServiceScope::User));
     }
 
     /// Restarts a throwaway job in this user's GUI domain:
@@ -236,14 +377,14 @@ mod tests {
             ),
         )
         .expect("plist");
-        let domain = domain();
+        let domain = system_domain();
         let plist_path = plist.to_string_lossy().into_owned();
         launchctl(&["bootstrap", &domain, &plist_path]).expect("bootstrap");
-        let result = restart(label);
+        let result = restart(&domain, label);
         let _ = launchctl(&["bootout", &format!("{domain}/{label}")]);
         assert_eq!(result, Ok(JobResult::Done));
         assert!(matches!(
-            restart("pw.cntrl.test.missing"),
+            restart(&domain, "pw.cntrl.test.missing"),
             Err(HostError::NotFound(_))
         ));
     }

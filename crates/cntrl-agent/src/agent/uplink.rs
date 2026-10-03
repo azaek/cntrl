@@ -747,6 +747,7 @@ async fn execute(
             )
             .await;
             let mut services = list_services().await?;
+            services.extend(session_services(privd, limit).await);
             for service in &mut services {
                 service.protected = policy.protects(&service.unit);
             }
@@ -758,6 +759,8 @@ async fn execute(
             let call = Call::ServiceRestart {
                 request_id: request.id.clone(),
                 unit: service.unit,
+                scope: service.scope,
+                user: service.user,
                 actor: request.actor.clone(),
             };
             ipc::call_within(privd, call, limit).await
@@ -781,6 +784,33 @@ async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
     Err(HostError::Unsupported)
+}
+
+/// What runs in users' desktop sessions, which only privd can read. Without
+/// it the list still has the system's services, so a failure is logged.
+#[cfg(target_os = "macos")]
+async fn session_services(privd: &Path, limit: Duration) -> Vec<ServiceStatus> {
+    #[derive(Deserialize)]
+    struct Listed {
+        services: Vec<ServiceStatus>,
+    }
+    match ipc::call_within(privd, Call::ServiceListSessions, limit).await {
+        Ok(value) => serde_json::from_value::<Listed>(value)
+            .map(|listed| listed.services)
+            .unwrap_or_else(|e| {
+                warn!("privd's session services didn't parse: {e}");
+                Vec::new()
+            }),
+        Err(e) => {
+            warn!("can't list session services: {}", e.msg);
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn session_services(_privd: &Path, _limit: Duration) -> Vec<ServiceStatus> {
+    Vec::new()
 }
 
 /// Records one of the agent's decisions in the audit log. A read goes ahead

@@ -1,7 +1,7 @@
 //! systemd over D-Bus, for the `service.*` operations. It needs the system bus,
 //! and root to act on units.
 
-use cntrl_protocol::service::{JobResult, ServiceState, ServiceStatus};
+use cntrl_protocol::service::{JobResult, ServiceKind, ServiceScope, ServiceState, ServiceStatus};
 use futures_util::StreamExt;
 use zbus_systemd::systemd1::ManagerProxy;
 
@@ -61,6 +61,9 @@ impl Systemd {
                 unit,
                 pid: None,
                 protected: false,
+                scope: ServiceScope::System,
+                user: None,
+                kind: ServiceKind::Service,
             })
             .collect();
         services.sort_by(|a, b| a.unit.cmp(&b.unit));
