@@ -6,7 +6,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
+use cntrl_protocol::records::{AuditCheckpoint, StatsRecord};
 use cntrl_protocol::{ErrorCode, Frame};
 use serde_json::{Value, json};
 
@@ -34,6 +36,21 @@ fn golden_frames_round_trip() {
             Frame::Sub(sub) => {
                 Topic::decode(&sub.topic, sub.data.clone())
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
+            Frame::Rec(rec) => {
+                for record in &rec.recs {
+                    let data = record.data.clone();
+                    let decoded = match record.kind {
+                        RecordKind::Metrics => {
+                            serde_json::from_value::<StatsRecord>(data).map(drop)
+                        }
+                        RecordKind::AuditCheckpoint => {
+                            serde_json::from_value::<AuditCheckpoint>(data).map(drop)
+                        }
+                        RecordKind::Unknown => panic!("{name}: a record of unknown type"),
+                    };
+                    decoded.unwrap_or_else(|e| panic!("{name}: record {}: {e}", record.seq));
+                }
             }
             _ => {}
         }

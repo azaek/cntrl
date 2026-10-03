@@ -33,6 +33,24 @@ export interface AgentInfo {
 }
 
 /**
+ * `audit_checkpoint`: privd's signature over the head of the device's audit
+ * log. Console keeps them, so the log can later be checked against them.
+ */
+export interface AuditCheckpoint {
+    device_id: string;
+    /** The sequence number of the last record it covers. */
+    seq: number;
+    /** SHA-256 of that record's line, lowercase hex. */
+    head: string;
+    /** When privd signed it. */
+    ts: number;
+    /** The audit key's ID, from enrollment. */
+    key_id: string;
+    /** ES256 over {@link checkpoint_signing_string} with the audit key, base64url. */
+    sig: string;
+}
+
+/**
  * Asks to stop a running request. It is still answered by a {@link Response}, with
  * `cancelled` if it stopped in time.
  */
@@ -55,6 +73,15 @@ export interface Challenge {
     /** Session ID, also covered by the signature. */
     sid: string;
     nonce: string;
+}
+
+/** CPU over a record's period. */
+export interface CpuRecord {
+    /** Busy time across all cores over the whole period. */
+    busy: number;
+    /** The busiest sample in the period. */
+    busy_max: number;
+    load: LoadAverage;
 }
 
 /** CPU use over the sample interval. */
@@ -319,6 +346,20 @@ export type SigAlg = "Unknown" | "ES256";
 export interface StatsParams {
     /** Sample interval; the agent raises anything below 1,000 ms to 1,000 ms. */
     interval_ms?: number | null;
+}
+
+/**
+ * `metrics`: host stats over about a minute. CPU is averaged from counter
+ * deltas across the period, with its busiest sample beside it; load and memory
+ * are the last values read.
+ */
+export interface StatsRecord {
+    /** When the period ended. */
+    ts: number;
+    /** How long the period was, in milliseconds. */
+    period_ms: number;
+    cpu: CpuRecord;
+    memory: MemoryStats;
 }
 
 /** One live sample. */

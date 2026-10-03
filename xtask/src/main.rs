@@ -40,6 +40,8 @@ fn codegen(check: bool) -> Result<(), String> {
     generator.subschema_for::<cntrl_protocol::enroll::EnrollRequest>();
     generator.subschema_for::<cntrl_protocol::enroll::EnrollResponse>();
     generator.subschema_for::<cntrl_protocol::enroll::EnrollError>();
+    generator.subschema_for::<cntrl_protocol::records::StatsRecord>();
+    generator.subschema_for::<cntrl_protocol::records::AuditCheckpoint>();
     let defs = generator.definitions().clone();
 
     let schema = json!({
