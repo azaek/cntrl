@@ -48,6 +48,23 @@ pnpm ui               # Add shadcn to @cntrl-pw/ui
 | `packages/sdk` | React + TanStack Query + Zustand | Bridge client, hooks, types                   |
 | `packages/ui`  | React + shadcn/ui + Tailwind v4  | Shared components                             |
 
+## Agent (Rust workspace)
+
+The root `Cargo.toml` is a Cargo workspace for the agent crates in `crates/` and for `xtask/`. It excludes `apps/bridge/src-tauri`, which stays its own workspace; keep that exclude, because Bridge's build depends on it.
+
+| Crate | Purpose |
+| --- | --- |
+| `cntrl-protocol` | Agent wire protocol: envelope, operations, error and close codes |
+| `cntrl-host` | Host capabilities: one trait per capability, a backend per OS |
+| `cntrl-agent` | The headless server-management agent (Linux first) |
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo xtask codegen --check   # generated protocol files are current
+```
+
 ## Code Style
 
 ### File Naming

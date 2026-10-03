@@ -45,3 +45,6 @@ __*.md
 
 # The owner's private notes: a separate repo (azaek/cntrl-notes), cloned here.
 /cntrl-notes/
+
+# Rust workspace build output (Bridge keeps its own under src-tauri)
+/target

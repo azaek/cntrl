@@ -1,0 +1,15 @@
+[package]
+name = "cntrl-host"
+description = "Host capabilities for the cntrl agent, with a backend per OS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
