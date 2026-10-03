@@ -215,7 +215,7 @@ async fn enroll_device(
     Ok(Json(outcome))
 }
 
-/// `cntrl policy allow` changed the policy: reconnect, so the hello carries it.
+/// `cntrl policy allow` or `deny` changed the policy: reconnect, so the hello carries it.
 async fn reload_policy(
     ConnectInfo(peer): ConnectInfo<Peer>,
     State(state): State<Arc<AgentState>>,
@@ -223,7 +223,7 @@ async fn reload_policy(
     if peer.uid != Some(0) {
         return Err((
             StatusCode::FORBIDDEN,
-            "only root changes the policy; run `sudo cntrl policy allow`".to_owned(),
+            "only root changes the policy; run it with sudo".to_owned(),
         ));
     }
     state.uplink.policy_changed();

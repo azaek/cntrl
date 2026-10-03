@@ -195,18 +195,28 @@ fn move_hint() -> &'static str {
     }
 }
 
-/// `cntrl policy allow`: adds a capability to the policy file, then has the
-/// running agent reconnect, so Console sees the new policy in its hello.
-pub fn allow_capability(config: &Config, capability: &str) -> ExitCode {
+/// `cntrl policy allow` and `cntrl policy deny`: change the policy file, then
+/// have the running agent reconnect, so Console sees the new policy in its hello.
+pub fn change_capability(config: &Config, capability: &str, allowed: bool) -> ExitCode {
     let path = &config.paths.policy;
     // privd reads the file as root, so root must own it.
-    match policy::allow(path, 0, capability) {
-        Ok(false) => {
+    let changed = if allowed {
+        policy::allow(path, 0, capability)
+    } else {
+        policy::deny(path, 0, capability)
+    };
+    match (changed, allowed) {
+        (Ok(false), true) => {
             println!("{capability} is already allowed.");
             return ExitCode::SUCCESS;
         }
-        Ok(true) => println!("Allowed {capability} in {}.", path.display()),
-        Err(e) => return fail(&e),
+        (Ok(false), false) => {
+            println!("{capability} isn't allowed.");
+            return ExitCode::SUCCESS;
+        }
+        (Ok(true), true) => println!("Allowed {capability} in {}.", path.display()),
+        (Ok(true), false) => println!("Denied {capability} in {}.", path.display()),
+        (Err(e), _) => return fail(&e),
     }
     let reload = request(
         &config.paths.agent_socket,

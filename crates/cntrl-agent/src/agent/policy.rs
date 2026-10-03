@@ -191,11 +191,20 @@ pub fn load(path: &Path, owner: u32) -> PolicyState {
     }
 }
 
-/// Adds `capability` to the policy file at `path`, starting from the built-in
-/// policy when there's no file. Returns whether anything changed. The file is
-/// rewritten whole, so comments in it are lost; the old file is kept beside it
-/// as `policy.toml.bak`.
+/// Adds `capability` to the policy's allow list and rewrites the file;
+/// `Ok(false)` when it was already allowed. Without a file it starts from the
+/// built-in policy.
 pub fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
+    change(path, owner, capability, true)
+}
+
+/// Takes `capability` off the policy's allow list and rewrites the file;
+/// `Ok(false)` when it wasn't allowed.
+pub fn deny(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
+    change(path, owner, capability, false)
+}
+
+fn change(path: &Path, owner: u32, capability: &str, allowed: bool) -> Result<bool, String> {
     if !capability::is_capability(capability) {
         let all = capability::CAPABILITIES.join(", ");
         return Err(format!(
@@ -206,18 +215,18 @@ pub fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> 
         PolicyState::Valid { policy } => policy,
         PolicyState::Invalid { reason } => return Err(format!("fix the policy first: {reason}")),
     };
-    if policy.allow.contains(capability) {
+    if policy.allow.contains(capability) == allowed {
         return Ok(false);
+    }
+    let mut allow = policy.allow;
+    if allowed {
+        allow.insert(capability.to_owned());
+    } else {
+        allow.remove(capability);
     }
     let file = PolicyFile {
         version: 1,
-        allow: policy
-            .allow
-            .into_iter()
-            .chain([capability.to_owned()])
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect(),
+        allow: allow.into_iter().collect(),
         services: ServicesSection {
             protect: Some(policy.protect.into_iter().collect()),
         },
@@ -228,7 +237,7 @@ pub fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> 
     let text = toml::to_string(&file).map_err(|e| e.to_string())?;
     let text = format!(
         "# The device policy. Only root changes it: edit this file, or run\n\
-         # `sudo cntrl policy allow <capability>`, which rewrites it.\n{text}"
+         # `sudo cntrl policy allow <capability>` or `deny`, which rewrite it.\n{text}"
     );
     write_atomically(path, &text)?;
     Ok(true)
@@ -464,6 +473,31 @@ mod tests {
         let owner = own_uid(&path);
         assert!(allow(&path, owner, "root.everything").is_err());
         assert!(allow(&path, owner, "services.manage").is_err());
+    }
+
+    #[test]
+    fn deny_takes_one_capability_off_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("policy.toml");
+        let owner = fs::metadata(dir.path()).expect("temp dir").uid();
+        // From the built-in policy, which allows monitoring.
+        assert_eq!(deny(&path, owner, "processes.read"), Ok(true));
+        let state = load(&path, owner);
+        assert!(!state.allows("processes.read"));
+        assert!(state.allows("system.read"));
+        assert!(state.protects(SSH));
+        assert_eq!(deny(&path, owner, "processes.read"), Ok(false));
+        assert_eq!(allow(&path, owner, "processes.read"), Ok(true));
+        assert!(load(&path, owner).allows("processes.read"));
+    }
+
+    #[test]
+    fn deny_refuses_unknown_capabilities() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("policy.toml");
+        let owner = fs::metadata(dir.path()).expect("temp dir").uid();
+        assert!(deny(&path, owner, "root.everything").is_err());
+        assert!(!path.exists());
     }
 
     #[test]

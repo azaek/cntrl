@@ -74,6 +74,12 @@ pub enum PolicyCommand {
         /// The capability to allow.
         capability: String,
     },
+    /// Stop allowing a capability: rewrites the policy file and reconnects the
+    /// agent. Needs root.
+    Deny {
+        /// The capability to stop allowing.
+        capability: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
