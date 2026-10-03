@@ -1,7 +1,9 @@
-//! The outbox: records Console must receive at least once, namely 60 s stats
-//! and audit checkpoints. Each gets the next number, stays on disk until Console
-//! acknowledges it, and goes out again after a reconnect or a restart; Console
-//! drops repeats by number.
+//! The outbox: records Console must receive at least once. Each gets the next
+//! number, stays on disk until Console acknowledges it, and goes out again after
+//! a reconnect or a restart; Console drops repeats by number. Since Console
+//! keeps no device data (D26), nothing records into it: the stats and audit
+//! checkpoints it used to carry are gone, and any still queued are dropped on
+//! opening. It stays for the alerts and events to come.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -16,9 +18,23 @@ use tracing::warn;
 use super::uplink::now_ms;
 
 pub const OUTBOX_FILE: &str = "outbox.json";
-/// About a day of stats records, one a minute, with room for checkpoints.
+/// How many records the outbox holds.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "nothing records since D26; alerts and events will"
+    )
+)]
 const MAX_RECORDS: usize = 10_000;
 /// The records' data stays under about this many bytes.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "nothing records since D26; alerts and events will"
+    )
+)]
 const MAX_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -63,15 +79,35 @@ impl Outbox {
                 Saved::fresh()
             }
         };
-        Self {
+        let outbox = Self {
             path,
             saved: Mutex::new(saved),
             added: Notify::new(),
+        };
+        // Records from before D26 don't go out: Console keeps no device data.
+        let mut saved = outbox.saved.lock().await;
+        let queued = saved.records.len();
+        saved.records.retain(|record| {
+            !matches!(
+                record.kind,
+                RecordKind::Metrics | RecordKind::AuditCheckpoint
+            )
+        });
+        if saved.records.len() != queued {
+            outbox.save(&saved).await;
         }
+        drop(saved);
+        outbox
     }
 
-    /// Adds a record. When the outbox is full the oldest stats records go
-    /// first; audit checkpoints are never dropped.
+    /// Adds a record. When the outbox is full the oldest records go first.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "nothing records since D26; alerts and events will"
+        )
+    )]
     pub async fn push(&self, kind: RecordKind, data: Value) {
         let mut saved = self.saved.lock().await;
         let seq = saved.next_seq;
@@ -120,6 +156,13 @@ impl Outbox {
 }
 
 /// Drops the oldest stats records until the outbox fits its limits.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "nothing records since D26; alerts and events will"
+    )
+)]
 fn trim(records: &mut VecDeque<OutboxRecord>) {
     let mut bytes: usize = records.iter().map(size).sum();
     while records.len() > MAX_RECORDS || bytes > MAX_BYTES {
@@ -136,6 +179,13 @@ fn trim(records: &mut VecDeque<OutboxRecord>) {
 }
 
 /// Roughly what a record adds to the file.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "nothing records since D26; alerts and events will"
+    )
+)]
 fn size(record: &OutboxRecord) -> usize {
     serde_json::to_vec(&record.data).map_or(0, |data| data.len()) + 40
 }
@@ -181,7 +231,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn survives_a_restart() {
+    async fn drops_old_records_but_keeps_numbering_after_a_restart() {
         let dir = tempfile::tempdir().expect("temp dir");
         let outbox = Outbox::open(dir.path()).await;
         let first = outbox.state().await.next_seq;
@@ -189,15 +239,18 @@ mod tests {
             .push(RecordKind::AuditCheckpoint, json!({ "seq": 7 }))
             .await;
         outbox.push(RecordKind::Metrics, json!({})).await;
-        outbox.ack(first).await;
         drop(outbox);
+        // Records from before D26 don't go out, and the file forgets them too.
         let reopened = Outbox::open(dir.path()).await;
-        let state = reopened.state().await;
+        assert!(reopened.pending(10).await.is_empty());
+        drop(reopened);
+        let again = Outbox::open(dir.path()).await;
+        let state = again.state().await;
         assert_eq!(state.next_seq, first + 2);
-        assert_eq!(state.oldest_unacked, Some(first + 1));
+        assert_eq!(state.oldest_unacked, None);
         // Numbers carry on, so Console never mistakes a new record for a repeat.
-        reopened.push(RecordKind::Metrics, json!({})).await;
-        let last = reopened.pending(10).await.last().map(|r| r.seq);
+        again.push(RecordKind::Metrics, json!({})).await;
+        let last = again.pending(10).await.last().map(|r| r.seq);
         assert_eq!(last, Some(first + 2));
     }
 

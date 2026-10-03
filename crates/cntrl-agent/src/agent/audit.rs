@@ -7,26 +7,13 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use cntrl_protocol::frame::RecordKind;
-use cntrl_protocol::records::AuditCheckpoint;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::time::MissedTickBehavior;
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
 
 use super::digest::sha256_hex;
-use super::identity;
-use super::ipc::{self, Call};
-use super::outbox::Outbox;
-
-/// How often the agent asks privd for a checkpoint. While the log is unchanged,
-/// privd has none to give.
-const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(300);
 
 /// The `prev` of the first record.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -52,11 +39,6 @@ pub struct AuditLog {
 }
 
 impl AuditLog {
-    /// The next record's sequence number, and the hash it will point at.
-    pub fn head(&self) -> (u64, String) {
-        (self.next_seq, self.head.clone())
-    }
-
     /// Opens the log in `dir`, creating both if needed, and continues after its
     /// last record.
     pub fn open(dir: &Path) -> Result<Self, String> {
@@ -110,51 +92,6 @@ impl AuditLog {
         self.head = sha256_hex(line.as_bytes());
         self.next_seq += 1;
         Ok((record.seq, self.head.clone()))
-    }
-}
-
-/// Asks privd for a signed checkpoint every 5 minutes and queues it for
-/// Console. A checkpoint names the device, so none is asked for before
-/// enrollment.
-pub async fn checkpoints(
-    outbox: Arc<Outbox>,
-    state_dir: PathBuf,
-    privd: PathBuf,
-    token: CancellationToken,
-) -> Result<(), String> {
-    let mut ticker = tokio::time::interval(CHECKPOINT_INTERVAL);
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut last: Option<u64> = None;
-    loop {
-        tokio::select! {
-            _ = ticker.tick() => {}
-            () = token.cancelled() => return Ok(()),
-        }
-        let identity = match identity::load(&state_dir) {
-            Ok(Some(identity)) => identity,
-            Ok(None) => continue,
-            Err(e) => {
-                warn!("can't read the identity for a checkpoint: {e}");
-                continue;
-            }
-        };
-        let call = Call::AuditCheckpoint {
-            device_id: identity.device_id,
-            key_id: identity.audit_key_id,
-            after: last,
-        };
-        match ipc::call_once(&privd, call).await {
-            Ok(Value::Null) => {}
-            // Read back first, so a malformed answer never sits in the outbox.
-            Ok(data) => match serde_json::from_value::<AuditCheckpoint>(data.clone()) {
-                Ok(checkpoint) => {
-                    last = Some(checkpoint.seq);
-                    outbox.push(RecordKind::AuditCheckpoint, data).await;
-                }
-                Err(e) => warn!("privd sent an unreadable checkpoint: {e}"),
-            },
-            Err(e) => warn!("can't get an audit checkpoint: {e}"),
-        }
     }
 }
 

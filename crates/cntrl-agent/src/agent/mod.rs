@@ -131,17 +131,10 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         );
         supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
         let host_stats = cntrl_host::stats::backend();
-        supervisor.spawn(
-            "stats",
-            stats::run(host_stats, latest_stats, Arc::clone(&outbox), token.clone()),
-        );
+        supervisor.spawn("stats", stats::run(host_stats, latest_stats, token.clone()));
         supervisor.spawn(
             "processes",
             processes::run(latest_processes, privd_socket.clone(), token.clone()),
-        );
-        supervisor.spawn(
-            "checkpoints",
-            audit::checkpoints(outbox, state_dir, privd_socket.clone(), token.clone()),
         );
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 

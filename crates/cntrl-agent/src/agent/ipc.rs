@@ -79,15 +79,6 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Actor>,
     },
-    /// A signed checkpoint over the audit log's head, or `null` when the log
-    /// hasn't grown since the checkpoint at `after`.
-    AuditCheckpoint {
-        device_id: String,
-        /// The audit key's ID, from enrollment.
-        key_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after: Option<u64>,
-    },
 }
 
 /// Why privd refused or failed a call, with the protocol code to answer with.
@@ -264,11 +255,6 @@ mod tests {
                 user: None,
                 force: true,
                 actor: None,
-            },
-            Call::AuditCheckpoint {
-                device_id: "dev_1".to_owned(),
-                key_id: "key_1".to_owned(),
-                after: Some(3),
             },
             Call::ProcessList,
             Call::ProcessSignal {
