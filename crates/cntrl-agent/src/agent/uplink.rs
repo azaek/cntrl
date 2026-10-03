@@ -755,6 +755,16 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))
         }
         // privd checks the policy again and audits its own decision.
+        ops::Call::AppQuit(quit) => {
+            let call = Call::AppQuit {
+                request_id: request.id.clone(),
+                app: quit.app,
+                user: quit.user,
+                force: quit.force,
+                actor: request.actor.clone(),
+            };
+            ipc::call_within(privd, call, limit).await
+        }
         ops::Call::ServiceRestart(service) => {
             let call = Call::ServiceRestart {
                 request_id: request.id.clone(),

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use cntrl_host::HostError;
 use cntrl_host::services::service_name;
+use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
@@ -210,6 +211,13 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             let target = Target { unit, scope, user };
             restart_service(state, request_id, target, actor).await
         }
+        Call::AppQuit {
+            request_id,
+            app,
+            user,
+            force,
+            actor,
+        } => quit_app(state, request_id, app, user, force, actor).await,
         Call::ServiceListSessions => {
             if !policy::load(&state.policy_path, state.owner).allows("services.read") {
                 let reason = "the device policy doesn't allow services.read";
@@ -223,6 +231,89 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             .map_err(CallError::internal)
         }
     }
+}
+
+/// Quits an app for Console, under `processes.signal`. As with restarts,
+/// privd checks the policy itself and audits before acting.
+async fn quit_app(
+    state: Arc<State>,
+    id: String,
+    app: String,
+    user: Option<String>,
+    force: bool,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    let app = cntrl_host::services::launchd_label(&app)?;
+    let policy = policy::load(&state.policy_path, state.owner);
+    let refusal = if !policy.allows("processes.signal") {
+        Some("the device policy doesn't allow processes.signal".to_owned())
+    } else if policy.protects(&app) {
+        Some(format!("the device policy protects {app}"))
+    } else {
+        None
+    };
+    let request = json!({
+        "id": id,
+        "op": "app.quit",
+        "app": app,
+        "user": user,
+        "force": force,
+        "actor": actor,
+    });
+    if let Some(reason) = refusal {
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    let outcome = quit(app.clone(), user, force).await;
+    let (record, answer) = match outcome {
+        Ok(result) => (
+            json!({ "id": id, "result": result }),
+            serde_json::to_value(AppQuitResult { app, result })
+                .map_err(|e| CallError::internal(e.to_string())),
+        ),
+        Err(e) => (json!({ "id": id, "error": e.to_string() }), Err(e.into())),
+    };
+    audit(&state, "request.completed", record).await?;
+    answer
+}
+
+#[cfg(target_os = "macos")]
+async fn quit(app: String, user: Option<String>, force: bool) -> Result<QuitResult, HostError> {
+    tokio::task::spawn_blocking(move || {
+        let (name, uid) = session(user)?;
+        cntrl_host::launchd::quit_app(&name, uid, &app, force)
+    })
+    .await
+    .map_err(|e| HostError::Failed(e.to_string()))?
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn quit(_app: String, _user: Option<String>, _force: bool) -> Result<QuitResult, HostError> {
+    Err(HostError::Unsupported)
+}
+
+/// The desktop session a request names, or with no user named, the only one.
+#[cfg(target_os = "macos")]
+fn session(user: Option<String>) -> Result<(String, u32), HostError> {
+    let sessions = cntrl_host::launchd::sessions();
+    let found = match &user {
+        Some(name) => sessions.iter().find(|(session, _)| session == name),
+        None if sessions.len() == 1 => sessions.first(),
+        None => None,
+    };
+    found.cloned().ok_or_else(|| {
+        HostError::NotFound(match (&user, sessions.len()) {
+            (Some(name), _) => format!("{name} has no desktop session"),
+            (None, 0) => "nobody is logged in".to_owned(),
+            (None, _) => "several users are logged in; name one".to_owned(),
+        })
+    })
 }
 
 /// Which service a restart is for, and where it runs.
@@ -331,22 +422,7 @@ async fn restart(
     tokio::task::spawn_blocking(move || {
         let domain = match scope {
             ServiceScope::System => launchd::system_domain(),
-            ServiceScope::User => {
-                let sessions = launchd::sessions();
-                let session = match &user {
-                    Some(name) => sessions.iter().find(|(session, _)| session == name),
-                    None if sessions.len() == 1 => sessions.first(),
-                    None => None,
-                };
-                let Some((_, uid)) = session else {
-                    return Err(HostError::NotFound(match (&user, sessions.len()) {
-                        (Some(name), _) => format!("{name} has no desktop session"),
-                        (None, 0) => "nobody is logged in".to_owned(),
-                        (None, _) => "several users are logged in; name one".to_owned(),
-                    }));
-                };
-                launchd::user_domain(*uid)
-            }
+            ServiceScope::User => launchd::user_domain(session(user)?.1),
         };
         launchd::restart(&domain, &label)
     })

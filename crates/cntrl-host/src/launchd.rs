@@ -8,6 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cntrl_protocol::app::QuitResult;
 use cntrl_protocol::service::{JobResult, ServiceKind, ServiceScope, ServiceState, ServiceStatus};
 
 use crate::HostError;
@@ -198,6 +199,83 @@ fn app_name(program: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// How long an app asked to quit gets to close, and one force-quit.
+const QUIT_WAIT: Duration = Duration::from_secs(15);
+const FORCE_WAIT: Duration = Duration::from_secs(5);
+
+/// Quits every running copy of an app through AppKit, the way the Dock does,
+/// or force-quits it the way Force Quit does. It talks to the app through
+/// LaunchServices rather than scripting it, so it needs no Automation
+/// permission. Arguments: the bundle ID, then `quit` or `force`.
+const QUIT_SCRIPT: &str = r#"function run(argv) {
+    ObjC.import("AppKit");
+    var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(argv[0]);
+    for (var i = 0; i < apps.count; i++) {
+        var app = apps.objectAtIndex(i);
+        if (argv[1] === "force") { app.forceTerminate; } else { app.terminate; }
+    }
+    return apps.count;
+}"#;
+
+/// Asks an app open in a user's session to quit, or force-quits it, then waits
+/// for it to close. The asking happens in the user's session as that user,
+/// which privd as root reaches through `launchctl asuser`; run as the user
+/// itself, as in tests, it asks directly. It blocks.
+pub fn quit_app(user: &str, uid: u32, bundle: &str, force: bool) -> Result<QuitResult, HostError> {
+    if !app_open(uid, bundle)? {
+        return Ok(QuitResult::NotOpen);
+    }
+    let how = if force { "force" } else { "quit" };
+    let script = [
+        "/usr/bin/osascript",
+        "-l",
+        "JavaScript",
+        "-e",
+        QUIT_SCRIPT,
+        bundle,
+        how,
+    ];
+    let uid_text = uid.to_string();
+    let output = if rustix::process::getuid().is_root() {
+        let as_user = ["asuser", &uid_text, "/usr/bin/sudo", "-u", user, "--"];
+        Command::new("/bin/launchctl")
+            .args(as_user)
+            .args(script)
+            .output()
+    } else {
+        Command::new(script[0]).args(&script[1..]).output()
+    }
+    .map_err(|e| HostError::Failed(format!("can't run osascript: {e}")))?;
+    if !output.status.success() {
+        return Err(HostError::Failed(message(&output)));
+    }
+    let deadline = Instant::now() + if force { FORCE_WAIT } else { QUIT_WAIT };
+    while app_open(uid, bundle)? {
+        if Instant::now() >= deadline {
+            return Ok(QuitResult::StillOpen);
+        }
+        sleep(POLL);
+    }
+    Ok(QuitResult::Quit)
+}
+
+/// Whether the user's domain has a job for the app: launchd names each open
+/// app `application.<bundle ID>.<n>.<n>`.
+fn app_open(uid: u32, bundle: &str) -> Result<bool, HostError> {
+    let output = launchctl(&["print", &user_domain(uid)])?;
+    if !output.status.success() {
+        return Err(HostError::Failed(message(&output)));
+    }
+    let prefix = format!("application.{bundle}.");
+    Ok(services(&String::from_utf8_lossy(&output.stdout))
+        .iter()
+        .any(|service| {
+            service.unit.strip_prefix(&prefix).is_some_and(|rest| {
+                !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit() || c == '.')
+            })
+        }))
+}
+
 /// A user's GUI domain, where their LaunchAgents and apps live.
 pub fn user_domain(uid: u32) -> String {
     format!("gui/{uid}")
@@ -356,6 +434,22 @@ mod tests {
             println!("app {} {:?} {:?}", app.unit, app.description, app.pid);
         }
         assert!(services.iter().all(|s| s.scope == ServiceScope::User));
+    }
+
+    /// Quits an app in this user's session: Calculator, opened hidden for it.
+    /// `cargo test -p cntrl-host -- --ignored` with a desktop session.
+    #[test]
+    #[ignore = "opens and quits Calculator in the user's session"]
+    fn quits_an_app() {
+        let uid = rustix::process::getuid().as_raw();
+        let bundle = "com.apple.calculator";
+        let opened = Command::new("/usr/bin/open")
+            .args(["-g", "-j", "-b", bundle])
+            .status();
+        assert!(opened.is_ok_and(|status| status.success()));
+        sleep(Duration::from_secs(2));
+        assert_eq!(quit_app("me", uid, bundle, false), Ok(QuitResult::Quit));
+        assert_eq!(quit_app("me", uid, bundle, false), Ok(QuitResult::NotOpen));
     }
 
     /// Restarts a throwaway job in this user's GUI domain:

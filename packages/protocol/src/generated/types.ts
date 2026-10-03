@@ -32,6 +32,24 @@ export interface AgentInfo {
     machine_id_hash: string;
 }
 
+/** `app.quit`: one app to quit, named by its bundle ID as `service.list` gives it. */
+export interface AppQuit {
+    app: string;
+    /** Whose session; the one user logged in when absent. */
+    user?: string | null;
+    /**
+     * Quit at once, as Force Quit does, losing unsaved work. Otherwise the app
+     * is asked to quit the way the Dock asks, and may ask to save first.
+     */
+    force?: boolean;
+}
+
+/** How a quit went. */
+export interface AppQuitResult {
+    app: string;
+    result: QuitResult;
+}
+
 /**
  * `audit_checkpoint`: privd's signature over the head of the device's audit
  * log. Console keeps them, so the log can later be checked against them.
@@ -295,6 +313,8 @@ export interface PublicKey {
     /** The uncompressed P-256 point, base64url without padding. */
     key: string;
 }
+
+export type QuitResult = "unknown" | "quit" | "still_open" | "not_open";
 
 /** A random delay between `min_ms` and `max_ms` spreads reconnects out. */
 export interface ReconnectWindow {

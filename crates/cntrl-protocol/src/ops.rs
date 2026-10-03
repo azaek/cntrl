@@ -18,6 +18,14 @@ define_ops! {
         capability: "services.read",
         since: 1,
     },
+    /// Asks an app open in a user's session to quit, or force-quits it, and
+    /// waits for it to close.
+    AppQuit = "app.quit" {
+        params: crate::app::AppQuit,
+        result: crate::app::AppQuitResult,
+        capability: "processes.signal",
+        since: 1,
+    },
     /// Restarts one service, a systemd unit or on macOS a launchd job, and waits
     /// for the result.
     ServiceRestart = "service.restart" {

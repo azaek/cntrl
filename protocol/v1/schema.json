@@ -1009,6 +1009,70 @@
       ],
       "description": "What a service is."
     },
+    "AppQuit": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Whose session; the one user logged in when absent."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Quit at once, as Force Quit does, losing unsaved work. Otherwise the app\nis asked to quit the way the Dock asks, and may ask to save first."
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "description": "`app.quit`: one app to quit, named by its bundle ID as `service.list` gives it."
+    },
+    "AppQuitResult": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/QuitResult"
+        }
+      },
+      "required": [
+        "app",
+        "result"
+      ],
+      "description": "How a quit went."
+    },
+    "QuitResult": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "quit",
+          "description": "It closed."
+        },
+        {
+          "type": "string",
+          "const": "still_open",
+          "description": "Asked to quit, it's still open: it may be asking to save changes."
+        },
+        {
+          "type": "string",
+          "const": "not_open",
+          "description": "It wasn't open."
+        }
+      ]
+    },
     "ServiceRef": {
       "type": "object",
       "properties": {

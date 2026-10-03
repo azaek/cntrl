@@ -25,6 +25,17 @@
       }
     },
     {
+      "name": "app.quit",
+      "capability": "processes.signal",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/AppQuit"
+      },
+      "result": {
+        "$ref": "#/$defs/AppQuitResult"
+      }
+    },
+    {
       "name": "service.restart",
       "capability": "services.manage",
       "since": 1,

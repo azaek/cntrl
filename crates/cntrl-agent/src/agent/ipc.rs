@@ -52,6 +52,18 @@ pub enum Call {
     /// What runs in each logged-in user's desktop session, which only root can
     /// read: on macOS, their LaunchAgents and open apps.
     ServiceListSessions,
+    /// Quits an app in a user's session for a request from Console. privd
+    /// checks the policy itself and audits its decision before acting.
+    AppQuit {
+        request_id: String,
+        app: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+    },
     /// A signed checkpoint over the audit log's head, or `null` when the log
     /// hasn't grown since the checkpoint at `after`.
     AuditCheckpoint {
@@ -231,6 +243,13 @@ mod tests {
                 actor: None,
             },
             Call::ServiceListSessions,
+            Call::AppQuit {
+                request_id: "req_3".to_owned(),
+                app: "com.azaek.head".to_owned(),
+                user: None,
+                force: true,
+                actor: None,
+            },
             Call::AuditCheckpoint {
                 device_id: "dev_1".to_owned(),
                 key_id: "key_1".to_owned(),

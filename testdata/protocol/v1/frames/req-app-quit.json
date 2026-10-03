@@ -1,0 +1,1 @@
+{"t":"req","id":"01JC0000000000000000000RQE","op":"app.quit","ver":1,"deadline_ms":30000,"data":{"app":"com.azaek.head","user":"azaek"},"actor":{"kind":"user","id":"usr_01JC000000000000000000USR","via":"dashboard"},"idem":"01JC0000000000000000000RQE"}
