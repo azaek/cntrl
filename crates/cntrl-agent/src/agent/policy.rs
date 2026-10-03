@@ -34,6 +34,19 @@ const ALWAYS_PROTECTED: &[&str] = &[
 #[cfg(target_os = "macos")]
 const ALWAYS_PROTECTED: &[&str] = &["pw.cntrl.agent", "pw.cntrl.privd"];
 
+/// Whether `unit` is a per-connection copy of `entry`, as launchd names them on
+/// macOS: `com.openssh.sshd.<UUID>` for each SSH session. Restarting one would
+/// end that session, so protecting a job protects its copies.
+fn instance_of(unit: &str, entry: &str) -> bool {
+    cfg!(target_os = "macos")
+        && unit
+            .strip_prefix(entry)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .is_some_and(|id| {
+                id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+            })
+}
+
 /// Where the policy in force came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,10 +98,9 @@ impl PolicyState {
             return true;
         };
         let unit = service_name(unit).unwrap_or_else(|_| unit.to_owned());
-        policy
-            .protect
-            .iter()
-            .any(|entry| service_name(entry).is_ok_and(|entry| entry == unit))
+        policy.protect.iter().any(|entry| {
+            service_name(entry).is_ok_and(|entry| entry == unit || instance_of(&unit, &entry))
+        })
     }
 
     /// The operations and topics this policy lets Console call, for the hello.
@@ -383,6 +395,9 @@ mod tests {
         assert!(state.protects("pw.cntrl.agent"));
         assert!(state.protects("pw.cntrl.privd"));
         assert!(!state.protects("homebrew.mxcl.nginx"));
+        // Each SSH session is its own launchd job.
+        assert!(state.protects("com.openssh.sshd.13FF5176-EF2C-4879-BC4A-064E004D404F"));
+        assert!(!state.protects("com.openssh.sshd.extra"));
     }
 
     #[test]
