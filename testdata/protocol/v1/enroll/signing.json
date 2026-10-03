@@ -12,5 +12,7 @@
     "machine_id_hash": "3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9",
     "agent_version": "0.1.0"
   },
-  "signing_string": "cntrl-enroll-v1\nk3x9m2q7v4ab\nBHh0ZXN0LWRldmljZS1rZXktbm90LWEtcmVhbC1wb2ludC1qdXN0LWJ5dGVzLWZvci10ZXN0cw\nBHh0ZXN0LWF1ZGl0LWtleS1ub3QtYS1yZWFsLXBvaW50LWp1c3QtYnl0ZXMtZm9yLXRlc3RzLQ\nweb-1\n3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9"
+  "signing_string": "cntrl-enroll-v1\nk3x9m2q7v4ab\nBHh0ZXN0LWRldmljZS1rZXktbm90LWEtcmVhbC1wb2ludC1qdXN0LWJ5dGVzLWZvci10ZXN0cw\nBHh0ZXN0LWF1ZGl0LWtleS1ub3QtYS1yZWFsLXBvaW50LWp1c3QtYnl0ZXMtZm9yLXRlc3RzLQ\nweb-1\n3eb1bd439947eb762998e566ccc2e099c791118b2f40579cc4f7da2b5061b7f9",
+  "previous_device_id": "dev_01m40zq7k2r9v4c6b8n3t5w7ya",
+  "replace_signing_string": "cntrl-replace-v1\nk3x9m2q7v4ab\ndev_01m40zq7k2r9v4c6b8n3t5w7ya\nBHh0ZXN0LWRldmljZS1rZXktbm90LWEtcmVhbC1wb2ludC1qdXN0LWJ5dGVzLWZvci10ZXN0cw"
 }

@@ -4,11 +4,11 @@
 
 use std::fs;
 use std::future::Future;
-use std::io::{self, IsTerminal};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use cntrl_protocol::enroll::EnrollToken;
+use cntrl_protocol::enroll::{EnrollError, EnrollErrorCode, EnrollToken};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request, StatusCode, header};
@@ -82,8 +82,10 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `cntrl enroll`: hands a token from stdin or a file to the running agent.
-pub fn run_enroll(config: &Config, token_file: Option<&Path>, force: bool) -> ExitCode {
+/// `cntrl enroll`: hands a token from stdin or a file to the running agent. On a
+/// machine in another organization already, it asks before moving it, unless
+/// `--move` answered ahead of time (D23).
+pub fn run_enroll(config: &Config, token_file: Option<&Path>, replace: bool) -> ExitCode {
     let token = match read_token(token_file) {
         Ok(token) => token,
         Err(e) => return fail(&e),
@@ -92,29 +94,104 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, force: bool) -> Ex
     if let Err(e) = EnrollToken::parse(&token) {
         return fail(&e.to_string());
     }
-    let body = match serde_json::to_vec(&EnrollCommand { token, force }) {
-        Ok(body) => body,
-        Err(e) => return fail(&e.to_string()),
+    let mut force = replace;
+    loop {
+        let refused = match send_enroll(config, &token, force) {
+            Ok(Ok(outcome)) => {
+                match &outcome.replaced {
+                    Some(old) => println!("Enrolled as {}, replacing {old}.", outcome.device_id),
+                    None => println!("Enrolled as {}.", outcome.device_id),
+                }
+                println!("Device key fingerprint: {}", outcome.fingerprint);
+                println!("Check that Console shows the same fingerprint.");
+                return ExitCode::SUCCESS;
+            }
+            Ok(Err(refused)) => refused,
+            Err(e) => return fail(&e),
+        };
+        let to = refused.to.as_deref().unwrap_or("the token's account");
+        match refused.code {
+            EnrollErrorCode::AlreadyEnrolled => {
+                println!("This machine is already in {to}; nothing changed.");
+                return ExitCode::SUCCESS;
+            }
+            EnrollErrorCode::ConfirmMove if !force => {
+                let from = refused.from.as_deref().unwrap_or("another account");
+                match confirm_move(from, to) {
+                    Some(true) => force = true,
+                    Some(false) => return fail("Nothing changed."),
+                    None => {
+                        return fail(&format!(
+                            "This machine is in {from}. To move it to {to}, {}.",
+                            move_hint()
+                        ));
+                    }
+                }
+            }
+            _ => return fail(&refused.msg),
+        }
+    }
+}
+
+/// One enrollment through the agent: its outcome, or Console's answer when it
+/// needs the user (`confirm_move`) or there's nothing to do (`already_enrolled`).
+fn send_enroll(
+    config: &Config,
+    token: &str,
+    force: bool,
+) -> Result<Result<EnrollOutcome, EnrollError>, String> {
+    let command = EnrollCommand {
+        token: token.to_owned(),
+        force,
     };
-    match block_on(request(
+    let body = serde_json::to_vec(&command).map_err(|e| e.to_string())?;
+    let (status, bytes) = block_on(request(
         &config.paths.agent_socket,
         Method::POST,
         "/v1/enroll",
         body,
-    )) {
-        Ok((status, bytes)) if status.is_success() => {
-            match serde_json::from_slice::<EnrollOutcome>(&bytes) {
-                Ok(outcome) => {
-                    println!("Enrolled as {}.", outcome.device_id);
-                    println!("Device key fingerprint: {}", outcome.fingerprint);
-                    println!("Check that Console shows the same fingerprint.");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(&format!("unexpected reply from the agent: {e}")),
-            }
-        }
-        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
-        Err(e) => fail(&e),
+    ))?;
+    if status.is_success() {
+        return serde_json::from_slice(&bytes)
+            .map(Ok)
+            .map_err(|e| format!("unexpected reply from the agent: {e}"));
+    }
+    if status == StatusCode::CONFLICT
+        && let Ok(refused) = serde_json::from_slice::<EnrollError>(&bytes)
+    {
+        return Ok(Err(refused));
+    }
+    Err(String::from_utf8_lossy(&bytes).trim().to_owned())
+}
+
+/// Asks on the terminal, which works under `curl | sudo sh` too, since only
+/// stdin is the pipe. `None` when there's no terminal to ask on.
+fn confirm_move(from: &str, to: &str) -> Option<bool> {
+    let mut tty = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    write!(
+        tty,
+        "This machine is in {from}. Move it to {to}?\n{from} loses it, and its history stays there. [y/N] "
+    )
+    .ok()?;
+    let mut answer = String::new();
+    BufReader::new(tty).read_line(&mut answer).ok()?;
+    Some(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+/// How to confirm a move where nobody can be asked. The installer sets
+/// CNTRL_INSTALLER, since its flag goes after `sh -s --`.
+fn move_hint() -> &'static str {
+    if std::env::var_os("CNTRL_INSTALLER").is_some() {
+        "run Add device's command again, ending it with `sudo sh -s -- --move`"
+    } else {
+        "run `sudo cntrl enroll --move` with the same token"
     }
 }
 

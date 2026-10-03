@@ -1105,7 +1105,9 @@ fn after_close(frame: Option<CloseFrame>, stable: bool) -> End {
         stable,
     };
     match code {
-        close::REVOKED => stop("Console revoked this device; enroll it again to reconnect"),
+        close::REVOKED => stop(
+            "this device was removed in Console; run Add device's command on it to add it again",
+        ),
         close::GENERATION_MISMATCH => stop(
             "Console locked this device because its key generation doesn't match; enroll it again",
         ),

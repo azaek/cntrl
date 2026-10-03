@@ -1243,6 +1243,21 @@
         "pop": {
           "type": "string",
           "description": "The device key's signature over [`signing_string`], base64url without\npadding."
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviousDevice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The device this machine is enrolled as now, if any, so the gateway can\nretire it when the new one is created (D23)."
+        },
+        "replace": {
+          "type": "boolean",
+          "description": "Go ahead when `previous` is in another organization, or replace it in\nthe same one. Without it the gateway asks first: `confirm_move` or\n`already_enrolled`, leaving the token unused."
         }
       },
       "required": [
@@ -1300,6 +1315,23 @@
       ],
       "description": "The machine being enrolled."
     },
+    "PreviousDevice": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "sig": {
+          "type": "string",
+          "description": "The previous device key's signature over [`replace_signing_string`],\nbase64url without padding."
+        }
+      },
+      "required": [
+        "device_id",
+        "sig"
+      ],
+      "description": "The device a machine is enrolled as, proven with that device's key."
+    },
     "EnrollResponse": {
       "type": "object",
       "properties": {
@@ -1326,6 +1358,13 @@
         "credential": {
           "type": "string",
           "description": "The connection credential: a ticket the gateway checks before a\nconnection reaches its hub, sent as `Authorization: Bearer`. Opaque to the\nagent; the gateway renews it in a `welcome`."
+        },
+        "replaced": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The device this enrollment replaced, now removed from its organization."
         }
       },
       "required": [
@@ -1346,6 +1385,20 @@
         },
         "msg": {
           "type": "string"
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `confirm_move`: the organization the machine is in now."
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `confirm_move` and `already_enrolled`: the token's organization."
         }
       },
       "required": [
@@ -1355,15 +1408,29 @@
       "description": "Why an enrollment failed."
     },
     "EnrollErrorCode": {
-      "type": "string",
-      "enum": [
-        "bad_request",
-        "invalid_token",
-        "token_expired",
-        "token_used",
-        "bad_signature",
-        "internal",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "bad_request",
+            "invalid_token",
+            "token_expired",
+            "token_used",
+            "bad_signature",
+            "internal",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "already_enrolled",
+          "description": "The machine is already in the token's organization; nothing changed."
+        },
+        {
+          "type": "string",
+          "const": "confirm_move",
+          "description": "The machine is in another organization; enroll again with `replace`\nto move it."
+        }
       ],
       "description": "Machine-readable reason in an [`EnrollError`]."
     },

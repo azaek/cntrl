@@ -89,6 +89,25 @@ pub struct EnrollRequest {
     /// The device key's signature over [`signing_string`], base64url without
     /// padding.
     pub pop: String,
+    /// The device this machine is enrolled as now, if any, so the gateway can
+    /// retire it when the new one is created (D23).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<PreviousDevice>,
+    /// Go ahead when `previous` is in another organization, or replace it in
+    /// the same one. Without it the gateway asks first: `confirm_move` or
+    /// `already_enrolled`, leaving the token unused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replace: bool,
+}
+
+/// The device a machine is enrolled as, proven with that device's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PreviousDevice {
+    pub device_id: String,
+    /// The previous device key's signature over [`replace_signing_string`],
+    /// base64url without padding.
+    pub sig: String,
 }
 
 /// A public key.
@@ -128,6 +147,9 @@ pub struct EnrollResponse {
     /// connection reaches its hub, sent as `Authorization: Bearer`. Opaque to the
     /// agent; the gateway renews it in a `welcome`.
     pub credential: String,
+    /// The device this enrollment replaced, now removed from its organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced: Option<String>,
 }
 
 /// Why an enrollment failed.
@@ -136,6 +158,12 @@ pub struct EnrollResponse {
 pub struct EnrollError {
     pub code: EnrollErrorCode,
     pub msg: String,
+    /// For `confirm_move`: the organization the machine is in now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// For `confirm_move` and `already_enrolled`: the token's organization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
 }
 
 /// Machine-readable reason in an [`EnrollError`].
@@ -148,6 +176,11 @@ pub enum EnrollErrorCode {
     TokenExpired,
     TokenUsed,
     BadSignature,
+    /// The machine is already in the token's organization; nothing changed.
+    AlreadyEnrolled,
+    /// The machine is in another organization; enroll again with `replace`
+    /// to move it.
+    ConfirmMove,
     Internal,
     #[serde(other)]
     Unknown,
@@ -165,4 +198,15 @@ pub fn signing_string(
         "cntrl-enroll-v1\n{token_id}\n{device_key}\n{audit_key}\n{}\n{}",
         host.hostname, host.machine_id_hash
     )
+}
+
+/// The string the previous device key signs when its machine enrolls again
+/// (D23). It binds the old device to this token and the new key, so the proof
+/// works for nothing else.
+pub fn replace_signing_string(
+    token_id: &str,
+    previous_device_id: &str,
+    device_key: &str,
+) -> String {
+    format!("cntrl-replace-v1\n{token_id}\n{previous_device_id}\n{device_key}")
 }

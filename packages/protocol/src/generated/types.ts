@@ -113,10 +113,17 @@ export interface CpuStats {
 export interface EnrollError {
     code: EnrollErrorCode;
     msg: string;
+    /** For `confirm_move`: the organization the machine is in now. */
+    from?: string | null;
+    /** For `confirm_move` and `already_enrolled`: the token's organization. */
+    to?: string | null;
 }
 
 /** Machine-readable reason in an {@link EnrollError}. */
-export type EnrollErrorCode = "bad_request" | "invalid_token" | "token_expired" | "token_used" | "bad_signature" | "internal" | "unknown";
+export type EnrollErrorCode =
+    | ("bad_request" | "invalid_token" | "token_expired" | "token_used" | "bad_signature" | "internal" | "unknown")
+    | "already_enrolled"
+    | "confirm_move";
 
 /** `POST /v1/enroll`. */
 export interface EnrollRequest {
@@ -129,6 +136,17 @@ export interface EnrollRequest {
      * padding.
      */
     pop: string;
+    /**
+     * The device this machine is enrolled as now, if any, so the gateway can
+     * retire it when the new one is created (D23).
+     */
+    previous?: PreviousDevice | null;
+    /**
+     * Go ahead when `previous` is in another organization, or replace it in
+     * the same one. Without it the gateway asks first: `confirm_move` or
+     * `already_enrolled`, leaving the token unused.
+     */
+    replace?: boolean;
 }
 
 /** What a successful enrollment returns. */
@@ -147,6 +165,8 @@ export interface EnrollResponse {
      * agent; the gateway renews it in a `welcome`.
      */
     credential: string;
+    /** The device this enrollment replaced, now removed from its organization. */
+    replaced?: string | null;
 }
 
 /** Why a request failed. */
@@ -299,6 +319,16 @@ export interface PolicySummary {
     hash: string;
     /** Why no valid policy is in force. The agent then denies everything. */
     error?: string | null;
+}
+
+/** The device a machine is enrolled as, proven with that device's key. */
+export interface PreviousDevice {
+    device_id: string;
+    /**
+     * The previous device key's signature over {@link replace_signing_string},
+     * base64url without padding.
+     */
+    sig: string;
 }
 
 /** Progress on a running request, before its {@link Response}. */

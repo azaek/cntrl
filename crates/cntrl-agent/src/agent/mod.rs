@@ -58,8 +58,8 @@ pub fn main() -> ExitCode {
         Command::Status { json } => client::print_status(&config, json),
         Command::Enroll {
             token_file,
-            force_reenroll,
-        } => client::run_enroll(&config, token_file.as_deref(), force_reenroll),
+            replace,
+        } => client::run_enroll(&config, token_file.as_deref(), replace),
         Command::Config(ConfigCommand::Check) => {
             println!("{}: OK", cli.config.display());
             ExitCode::SUCCESS

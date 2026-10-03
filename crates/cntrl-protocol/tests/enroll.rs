@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cntrl_protocol::enroll::{EnrollToken, HostInfo, TokenError, signing_string};
+use cntrl_protocol::enroll::{
+    EnrollRequest, EnrollToken, HostInfo, TokenError, replace_signing_string, signing_string,
+};
 use serde_json::Value;
 
 fn vector() -> Value {
@@ -56,4 +58,33 @@ fn the_signing_string_matches_the_vector() {
         &host,
     );
     assert_eq!(signed, text(&vector, "signing_string"));
+}
+
+#[test]
+fn the_replace_signing_string_matches_the_vector() {
+    let vector = vector();
+    let signed = replace_signing_string(
+        &text(&vector, "token_id"),
+        &text(&vector, "previous_device_id"),
+        &text(&vector, "device_key"),
+    );
+    assert_eq!(signed, text(&vector, "replace_signing_string"));
+}
+
+#[test]
+fn a_request_from_an_older_agent_still_parses_and_round_trips() {
+    let vector = vector();
+    let request: EnrollRequest = serde_json::from_value(serde_json::json!({
+        "token": text(&vector, "token"),
+        "device_key": { "alg": "ES256", "key": text(&vector, "device_key") },
+        "audit_key": { "alg": "ES256", "key": text(&vector, "audit_key") },
+        "host": vector["host"].clone(),
+        "pop": "c2ln",
+    }))
+    .expect("parses");
+    assert_eq!(request.previous, None);
+    assert!(!request.replace);
+    let back = serde_json::to_value(&request).expect("serializes");
+    assert!(back.get("previous").is_none());
+    assert!(back.get("replace").is_none());
 }

@@ -15,12 +15,13 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::serve::IncomingStream;
 use axum::{Json, Router};
+use cntrl_protocol::enroll::EnrollErrorCode;
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
-use super::enroll::{self, EnrollCommand, EnrollOutcome};
+use super::enroll::{self, EnrollCommand, EnrollFailure, EnrollOutcome};
 use super::health::Health;
 use super::identity;
 use super::ipc::{self, Call};
@@ -194,9 +195,22 @@ async fn enroll_device(
     }
     // One enrollment at a time, and none while the uplink saves a credential.
     let _identity = state.uplink.lock_identity().await;
-    let outcome = enroll::enroll(&state.config, command)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let outcome =
+        enroll::enroll(&state.config, command)
+            .await
+            .map_err(|failure| match failure {
+                // The CLI asks the user to confirm the move, or says nothing changed.
+                EnrollFailure::Refused(error)
+                    if matches!(
+                        error.code,
+                        EnrollErrorCode::ConfirmMove | EnrollErrorCode::AlreadyEnrolled
+                    ) =>
+                {
+                    let body = serde_json::to_string(&error).unwrap_or_else(|_| error.msg.clone());
+                    (StatusCode::CONFLICT, body)
+                }
+                other => (StatusCode::BAD_REQUEST, other.to_string()),
+            })?;
     state.uplink.enrolled();
     Ok(Json(outcome))
 }

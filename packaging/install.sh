@@ -7,13 +7,17 @@
 #   curl -fsSL https://gw.cntrl.pw/install/<token> | sudo sh
 #   curl -fsSL https://cntrl.pw/install.sh | sudo sh [-s -- --token <token>]
 #
+# On a machine that's in another account already, a token moves it there after
+# asking on the terminal; `sh -s -- --move` moves it without asking (D23).
+#
 # By hand, from a release archive or from a build in this repo:
 #
 #   sudo sh install.sh --archive cntrl-agent-<version>-<target>.tar.gz [--token <token>]
 #   sudo sh packaging/install.sh --binary target/release/cntrl-agent [--token <token>]
 #
 # Options: --console URL (where enrollment goes, default https://gw.cntrl.pw),
-# --gateway URL (a gateway to use in place of the one enrollment returns). The
+# --gateway URL (a gateway to use in place of the one enrollment returns),
+# --move (move the machine from another account without asking). The
 # config is written only when there is none. Running it again upgrades the
 # agent and keeps its identity. Everything runs from main(), called on the last
 # line, so a download cut short runs nothing.
@@ -179,8 +183,9 @@ install_macos() {
     done
 }
 
-# Waits for the agent, then hands it the token, if there is one and the
-# machine isn't enrolled yet; the agent enrolls with Console.
+# Waits for the agent, then hands it the token, if there is one. The agent
+# enrolls, says the machine is in that account already, or asks before moving
+# it from another (D23).
 enroll() {
     tries=0
     until "$bin" status >/dev/null 2>&1; do
@@ -188,15 +193,12 @@ enroll() {
         [ "$tries" -lt 20 ] || fail "the agent didn't start; see its log"
         sleep 0.5
     done
-    if ! "$bin" status 2>/dev/null | grep -q '^uplink: not enrolled'; then
-        say "This machine is already enrolled, and its agent is now up to date."
-        if [ -n "$CNTRL_TOKEN" ]; then
-            say "To move it to another organization: echo '<token>' | sudo cntrl enroll --force-reenroll"
-        fi
-    elif [ -n "$CNTRL_TOKEN" ]; then
-        printf '%s\n' "$CNTRL_TOKEN" | "$bin" enroll
-    else
+    if [ -n "$CNTRL_TOKEN" ]; then
+        printf '%s\n' "$CNTRL_TOKEN" | CNTRL_INSTALLER=1 "$bin" enroll $move
+    elif "$bin" status 2>/dev/null | grep -q '^uplink: not enrolled'; then
         say "To add this machine, run the command from Console's Add device dialog."
+    else
+        say "This machine is already enrolled, and its agent is now up to date."
     fi
 }
 
@@ -204,6 +206,7 @@ main() {
     here=$(dirname "$0")
     archive=
     binary=
+    move=
     while [ $# -gt 0 ]; do
         case $1 in
         --archive) archive=${2:?--archive needs a file}; shift 2 ;;
@@ -211,6 +214,7 @@ main() {
         --token) CNTRL_TOKEN=${2:?--token needs a token}; shift 2 ;;
         --console) CNTRL_CONSOLE=${2:?--console needs a URL}; shift 2 ;;
         --gateway) CNTRL_GATEWAY=${2:?--gateway needs a URL}; shift 2 ;;
+        --move) move=--move; shift ;;
         -h | --help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "unknown option $1" ;;
         esac

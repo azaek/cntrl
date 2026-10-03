@@ -34,14 +34,16 @@ pub enum Command {
         json: bool,
     },
     /// Enroll this machine with Console, using a single-use token read from
-    /// stdin or a file. Needs root.
+    /// stdin or a file. On a machine that's in another account already, it
+    /// asks before moving it there. Needs root.
     Enroll {
         /// Read the token from this file instead of stdin.
         #[arg(long)]
         token_file: Option<PathBuf>,
-        /// Replace an existing enrollment.
-        #[arg(long)]
-        force_reenroll: bool,
+        /// Move the machine to the token's account without asking, replacing
+        /// its current enrollment.
+        #[arg(long = "move", visible_alias = "force-reenroll")]
+        replace: bool,
     },
     /// Work with the config file.
     #[command(subcommand)]
