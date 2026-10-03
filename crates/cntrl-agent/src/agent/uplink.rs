@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::frame::{
-    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, OutboxState, Request, Response, SigAlg,
+    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Records, Request, Response, SigAlg,
     Subscribe, Welcome,
 };
 use cntrl_protocol::ops::{self, Topic};
@@ -38,6 +38,7 @@ use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
+use super::outbox::Outbox;
 use super::policy::PolicyState;
 use super::stats::Latest;
 
@@ -136,6 +137,8 @@ pub struct UplinkConfig {
     pub gateway_url: Option<String>,
     /// The sampler's latest sample, for the `stats` topic.
     pub stats: Arc<Latest>,
+    /// Records for Console, sent and acknowledged over the link.
+    pub outbox: Arc<Outbox>,
 }
 
 /// How a session ended, and what to do next.
@@ -344,10 +347,7 @@ async fn session(
         },
         caps: policy.caps(),
         policy: policy.summary(),
-        outbox: OutboxState {
-            next_seq: 0,
-            oldest_unacked: None,
-        },
+        outbox: config.outbox.state().await,
     };
     if let Err(end) = send(&mut ws, &Frame::Hello(Box::new(hello))).await {
         return end;
@@ -396,12 +396,22 @@ async fn online(
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_pong = Instant::now();
     let (answers, mut answered) = mpsc::channel(ANSWER_QUEUE);
+    let outbox = Arc::clone(&config.outbox);
     let mut session = Session {
         requests: Requests::new(answers, welcome.limits.max_inflight as usize),
         subs: Subscriptions::default(),
         policy,
         config,
+        in_flight: None,
+        batch: (welcome.limits.max_rec_batch as usize).max(1),
     };
+    // Console already has these; the rest go out again.
+    if let Some(upto) = welcome.acked_upto {
+        outbox.ack(upto).await;
+    }
+    if let Err(end) = session.send_records(ws).await {
+        return end;
+    }
     // A reconnecting session gets its subscriptions back in the welcome.
     for subscribe in welcome.subs.iter().cloned() {
         let stats = &session.config.stats;
@@ -431,6 +441,10 @@ async fn online(
                         at_least: Duration::ZERO,
                         stable: stable(),
                     };
+                }
+                // Sends a batch again if its ack is overdue.
+                if let Err(end) = session.send_records(ws).await {
+                    return end;
                 }
             }
             message = ws.next() => match message {
@@ -469,6 +483,11 @@ async fn online(
                     return end;
                 }
             }
+            () = outbox.added.notified() => {
+                if let Err(end) = session.send_records(ws).await {
+                    return end;
+                }
+            }
             Some(answer) = answered.recv() => {
                 if let Some(answer) = session.requests.finish(answer)
                     && let Err(end) = send(ws, &Frame::Res(answer)).await
@@ -499,6 +518,58 @@ struct Session<'a> {
     /// The policy the hello reported; a change reconnects.
     policy: Arc<PolicyState>,
     config: &'a UplinkConfig,
+    /// The outbox batch awaiting Console's ack. One at a time, so an ack never
+    /// covers a batch Console didn't store.
+    in_flight: Option<InFlight>,
+    /// Records per batch: the hub's `limits.max_rec_batch`.
+    batch: usize,
+}
+
+/// A batch of outbox records sent and not yet acknowledged.
+struct InFlight {
+    upto: u64,
+    sent: Instant,
+}
+
+/// How long a batch waits for its ack before it goes out again.
+const ACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+impl Session<'_> {
+    /// Sends the next batch of outbox records, unless one is still awaiting
+    /// its ack.
+    async fn send_records(&mut self, ws: &mut Ws) -> Result<(), End> {
+        if self
+            .in_flight
+            .as_ref()
+            .is_some_and(|batch| batch.sent.elapsed() < ACK_TIMEOUT)
+        {
+            return Ok(());
+        }
+        let recs = self.config.outbox.pending(self.batch).await;
+        let Some(upto) = recs.last().map(|record| record.seq) else {
+            self.in_flight = None;
+            return Ok(());
+        };
+        send(ws, &Frame::Rec(Records { recs })).await?;
+        self.in_flight = Some(InFlight {
+            upto,
+            sent: Instant::now(),
+        });
+        Ok(())
+    }
+
+    /// Console has every record up to `upto`: drop them, and send what's next.
+    async fn acked(&mut self, ws: &mut Ws, upto: u64) -> Result<(), End> {
+        self.config.outbox.ack(upto).await;
+        if self
+            .in_flight
+            .as_ref()
+            .is_some_and(|batch| batch.upto <= upto)
+        {
+            self.in_flight = None;
+        }
+        self.send_records(ws).await
+    }
 }
 
 /// Handles a frame from Console; `Some` ends the session.
@@ -516,6 +587,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             session.requests.start(request, &session.policy, privd)?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
+        Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
         Frame::Sub(subscribe) => {
             let (policy, stats) = (&session.policy, &session.config.stats);
             return session.subs.open(ws, subscribe, policy, stats).await.err();

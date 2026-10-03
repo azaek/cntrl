@@ -14,6 +14,7 @@ mod ipc;
 mod keys;
 mod local_api;
 mod logging;
+mod outbox;
 mod policy;
 mod privd;
 mod stats;
@@ -32,6 +33,7 @@ use cli::{AuditCommand, Cli, Command, ConfigCommand, PolicyCommand};
 use config::Config;
 use health::Health;
 use local_api::AgentState;
+use outbox::Outbox;
 use supervisor::Supervisor;
 use uplink::{Uplink, UplinkConfig};
 
@@ -95,12 +97,15 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let health = Arc::new(Health::new());
         let uplink = Arc::new(Uplink::new());
         let latest_stats = Arc::new(stats::Latest::new(None));
+        let state_dir = config.paths.state_dir.clone();
+        let outbox = Arc::new(Outbox::open(&state_dir).await);
         let privd_socket = config.paths.privd_socket.clone();
         let uplink_config = UplinkConfig {
-            state_dir: config.paths.state_dir.clone(),
+            state_dir: state_dir.clone(),
             privd_socket: privd_socket.clone(),
             gateway_url: config.console.gateway_url.clone(),
             stats: Arc::clone(&latest_stats),
+            outbox: Arc::clone(&outbox),
         };
         let state = Arc::new(AgentState::new(
             config,
@@ -120,9 +125,14 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             health::heartbeat(Arc::clone(&health), token.clone()),
         );
         supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
+        let host_stats = cntrl_host::stats::backend();
         supervisor.spawn(
             "stats",
-            stats::run(cntrl_host::stats::backend(), latest_stats, token.clone()),
+            stats::run(host_stats, latest_stats, Arc::clone(&outbox), token.clone()),
+        );
+        supervisor.spawn(
+            "checkpoints",
+            audit::checkpoints(outbox, state_dir, privd_socket.clone(), token.clone()),
         );
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 

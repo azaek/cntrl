@@ -16,6 +16,7 @@ use cntrl_host::HostError;
 use cntrl_host::services::service_unit;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::records::{AuditCheckpoint, checkpoint_signing_string};
 use cntrl_protocol::service::{JobResult, ServiceJob};
 use serde_json::{Value, json};
 use tokio::net::{UnixListener, UnixStream};
@@ -167,6 +168,36 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             let mut log = state.audit.lock().unwrap_or_else(PoisonError::into_inner);
             log.append("agent", &kind, data)
                 .map(|(seq, hash)| json!({ "seq": seq, "hash": hash }))
+        })
+        .await
+        .map_err(CallError::internal),
+        Call::AuditCheckpoint {
+            device_id,
+            key_id,
+            after,
+        } => blocking(move || {
+            let (next_seq, head) = state
+                .audit
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .head();
+            // An empty log, or nothing new since the last checkpoint.
+            let Some(seq) = next_seq.checked_sub(1).filter(|seq| after != Some(*seq)) else {
+                return Ok(Value::Null);
+            };
+            let ts = super::uplink::now_ms();
+            let signed = checkpoint_signing_string(&device_id, seq, &head, ts, &key_id);
+            let sig =
+                SigningKey::load_or_generate(&state.audit_key_path)?.sign(signed.as_bytes())?;
+            let checkpoint = AuditCheckpoint {
+                device_id,
+                seq,
+                head,
+                ts,
+                key_id,
+                sig,
+            };
+            serde_json::to_value(checkpoint).map_err(|e| e.to_string())
         })
         .await
         .map_err(CallError::internal),
@@ -326,6 +357,10 @@ impl Activity {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
+
     use super::super::config::Paths;
     use super::super::policy::PolicyState;
     use super::*;
@@ -379,6 +414,35 @@ mod tests {
             .await
             .expect("audit key again");
         assert_eq!(first["key"], second["key"], "the audit key is created once");
+
+        let checkpoint = |after| Call::AuditCheckpoint {
+            device_id: "dev_1".to_owned(),
+            key_id: "key_1".to_owned(),
+            after,
+        };
+        let signed = ipc::call_once(&socket, checkpoint(None))
+            .await
+            .expect("checkpoint");
+        let signed: AuditCheckpoint = serde_json::from_value(signed).expect("a checkpoint");
+        assert_eq!((signed.seq, signed.device_id.as_str()), (0, "dev_1"));
+        let message = checkpoint_signing_string(
+            &signed.device_id,
+            signed.seq,
+            &signed.head,
+            signed.ts,
+            &signed.key_id,
+        );
+        let public = URL_SAFE_NO_PAD
+            .decode(first["key"].as_str().expect("a key"))
+            .expect("base64");
+        let sig = URL_SAFE_NO_PAD.decode(&signed.sig).expect("base64");
+        UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, public)
+            .verify(message.as_bytes(), &sig)
+            .expect("the audit key signed the checkpoint");
+        let unchanged = ipc::call_once(&socket, checkpoint(Some(signed.seq)))
+            .await
+            .expect("checkpoint");
+        assert_eq!(unchanged, Value::Null, "nothing new, no checkpoint");
 
         server.abort();
     }
