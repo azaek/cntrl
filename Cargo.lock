@@ -278,7 +278,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cntrl-agent"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "cntrl-host"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "cntrl-protocol",
  "futures-util",
@@ -318,13 +318,14 @@ dependencies = [
  "rustix",
  "sysinfo",
  "tempfile",
+ "tokio",
  "zbus",
  "zbus_systemd",
 ]
 
 [[package]]
 name = "cntrl-protocol"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "crc32fast",
  "schemars",
@@ -2435,7 +2436,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "cntrl-protocol",
  "schemars",
