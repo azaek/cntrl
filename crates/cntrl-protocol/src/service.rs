@@ -101,6 +101,47 @@ pub struct ServiceStatus {
     /// What it is; a service when absent.
     #[serde(default, skip_serializing_if = "ServiceKind::is_service")]
     pub kind: ServiceKind,
+    /// Whether it starts at boot, where that can be changed: a systemd unit
+    /// file that's enabled or disabled, or a third-party LaunchDaemon on a Mac.
+    /// Absent for units that can't be enabled (systemd's `static` ones), for
+    /// Apple's own jobs, and from agents before 0.1.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// What `service.start`, `service.stop`, `service.restart`, `service.enable`
+/// and `service.disable` do (angle 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceAction {
+    Start,
+    Stop,
+    Restart,
+    /// Starts at boot; on a Mac it also loads the job now.
+    Enable,
+    /// Doesn't start at boot; on a Mac it also unloads the job now.
+    Disable,
+}
+
+impl ServiceAction {
+    /// Its operation.
+    pub fn op(self) -> &'static str {
+        match self {
+            Self::Start => "service.start",
+            Self::Stop => "service.stop",
+            Self::Restart => "service.restart",
+            Self::Enable => "service.enable",
+            Self::Disable => "service.disable",
+        }
+    }
+
+    /// Whether it can cut the machine off when it's one the policy protects,
+    /// such as SSH: stopping, restarting and disabling can; starting and
+    /// enabling can't.
+    pub fn interrupts(self) -> bool {
+        matches!(self, Self::Stop | Self::Restart | Self::Disable)
+    }
 }
 
 /// A service's state across service managers.

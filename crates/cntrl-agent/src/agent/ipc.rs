@@ -9,7 +9,7 @@ use cntrl_host::HostError;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::power::PowerAction;
-use cntrl_protocol::service::ServiceScope;
+use cntrl_protocol::service::{ServiceAction, ServiceScope};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -36,13 +36,15 @@ pub enum Call {
     },
     /// The public half of privd's audit key, created on first use.
     AuditKey,
-    /// Restarts a unit for a request from Console. privd checks the policy
-    /// itself and audits its decision before acting.
-    ServiceRestart {
+    /// Starts, stops, restarts, enables or disables a unit for a request from
+    /// Console. privd checks the policy itself and audits its decision before
+    /// acting.
+    ServiceAct {
         /// The request's ID, which is also its audit ID. Not `id`: the call is
         /// flattened into an envelope that has one.
         request_id: String,
         unit: String,
+        action: ServiceAction,
         #[serde(default, skip_serializing_if = "ServiceScope::is_system")]
         scope: ServiceScope,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -244,16 +246,18 @@ mod tests {
                 data: Value::Null,
             },
             Call::AuditKey,
-            Call::ServiceRestart {
+            Call::ServiceAct {
                 request_id: "req_1".to_owned(),
                 unit: "nginx.service".to_owned(),
+                action: ServiceAction::Restart,
                 scope: ServiceScope::System,
                 user: None,
                 actor: None,
             },
-            Call::ServiceRestart {
+            Call::ServiceAct {
                 request_id: "req_2".to_owned(),
                 unit: "com.azaek.tmux".to_owned(),
+                action: ServiceAction::Stop,
                 scope: ServiceScope::User,
                 user: Some("azaek".to_owned()),
                 actor: None,

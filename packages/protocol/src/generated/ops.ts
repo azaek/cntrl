@@ -9,6 +9,10 @@ export interface Ops {
     "app.quit": { params: AppQuit; result: AppQuitResult; capability: "processes.signal"; since: 1 };
     "process.signal": { params: ProcessSignal; result: ProcessSignalResult; capability: "processes.signal"; since: 1 };
     "service.restart": { params: ServiceRef; result: ServiceJob; capability: "services.manage"; since: 1 };
+    "service.start": { params: ServiceRef; result: ServiceJob; capability: "services.manage"; since: 1 };
+    "service.stop": { params: ServiceRef; result: ServiceJob; capability: "services.manage"; since: 1 };
+    "service.enable": { params: ServiceRef; result: ServiceJob; capability: "services.manage"; since: 1 };
+    "service.disable": { params: ServiceRef; result: ServiceJob; capability: "services.manage"; since: 1 };
     "power.info": { params: NoParams; result: PowerInfo; capability: "power.read"; since: 1 };
     "power.reboot": { params: NoParams; result: PowerStarted; capability: "power.reboot"; since: 1 };
     "power.poweroff": { params: NoParams; result: PowerStarted; capability: "power.poweroff"; since: 1 };
@@ -33,6 +37,10 @@ export const OPS = [
     { name: "app.quit", capability: "processes.signal", since: 1 },
     { name: "process.signal", capability: "processes.signal", since: 1 },
     { name: "service.restart", capability: "services.manage", since: 1 },
+    { name: "service.start", capability: "services.manage", since: 1 },
+    { name: "service.stop", capability: "services.manage", since: 1 },
+    { name: "service.enable", capability: "services.manage", since: 1 },
+    { name: "service.disable", capability: "services.manage", since: 1 },
     { name: "power.info", capability: "power.read", since: 1 },
     { name: "power.reboot", capability: "power.reboot", since: 1 },
     { name: "power.poweroff", capability: "power.poweroff", since: 1 },

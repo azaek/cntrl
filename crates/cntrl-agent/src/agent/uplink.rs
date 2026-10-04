@@ -19,7 +19,7 @@ use cntrl_protocol::frame::{
 use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
-use cntrl_protocol::service::{ServiceList, ServiceStatus};
+use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
@@ -802,16 +802,40 @@ async fn execute(
             ipc::call_within(privd, call, limit).await
         }
         ops::Call::ServiceRestart(service) => {
-            let call = Call::ServiceRestart {
-                request_id: request.id.clone(),
-                unit: service.unit,
-                scope: service.scope,
-                user: service.user,
-                actor: request.actor.clone(),
-            };
-            ipc::call_within(privd, call, limit).await
+            act_on_service(request, service, ServiceAction::Restart, privd, limit).await
+        }
+        ops::Call::ServiceStart(service) => {
+            act_on_service(request, service, ServiceAction::Start, privd, limit).await
+        }
+        ops::Call::ServiceStop(service) => {
+            act_on_service(request, service, ServiceAction::Stop, privd, limit).await
+        }
+        ops::Call::ServiceEnable(service) => {
+            act_on_service(request, service, ServiceAction::Enable, privd, limit).await
+        }
+        ops::Call::ServiceDisable(service) => {
+            act_on_service(request, service, ServiceAction::Disable, privd, limit).await
         }
     }
+}
+
+/// Asks privd to act on a service; it checks the policy again and audits.
+async fn act_on_service(
+    request: &Request,
+    service: ServiceRef,
+    action: ServiceAction,
+    privd: &Path,
+    limit: Duration,
+) -> Result<serde_json::Value, CallError> {
+    let call = Call::ServiceAct {
+        request_id: request.id.clone(),
+        unit: service.unit,
+        action,
+        scope: service.scope,
+        user: service.user,
+        actor: request.actor.clone(),
+    };
+    ipc::call_within(privd, call, limit).await
 }
 
 /// Asks privd to take a power action, which it answers before taking.

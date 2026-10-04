@@ -644,6 +644,13 @@ export interface ServiceStatus {
     user?: string | null;
     /** What it is; a service when absent. */
     kind?: ServiceKind;
+    /**
+     * Whether it starts at boot, where that can be changed: a systemd unit
+     * file that's enabled or disabled, or a third-party LaunchDaemon on a Mac.
+     * Absent for units that can't be enabled (systemd's `static` ones), for
+     * Apple's own jobs, and from agents before 0.1.5.
+     */
+    enabled?: boolean | null;
 }
 
 /** A signed-in user. */

@@ -58,6 +58,50 @@
       }
     },
     {
+      "name": "service.start",
+      "capability": "services.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ServiceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceJob"
+      }
+    },
+    {
+      "name": "service.stop",
+      "capability": "services.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ServiceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceJob"
+      }
+    },
+    {
+      "name": "service.enable",
+      "capability": "services.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ServiceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceJob"
+      }
+    },
+    {
+      "name": "service.disable",
+      "capability": "services.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ServiceRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ServiceJob"
+      }
+    },
+    {
       "name": "power.info",
       "capability": "power.read",
       "since": 1,

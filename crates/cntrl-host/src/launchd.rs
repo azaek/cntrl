@@ -3,13 +3,17 @@
 //! LaunchAgents and open apps. privd runs as root; run as another user, as in
 //! tests, it acts on that user's GUI domain in place of the system's.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cntrl_protocol::app::QuitResult;
-use cntrl_protocol::service::{JobResult, ServiceKind, ServiceScope, ServiceState, ServiceStatus};
+use cntrl_protocol::service::{
+    JobResult, ServiceAction, ServiceKind, ServiceScope, ServiceState, ServiceStatus,
+};
 
 use crate::HostError;
 
@@ -19,6 +23,9 @@ const SETTLE: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(250);
 /// launchctl's exit status for a job that isn't loaded in the domain.
 const NO_SUCH_JOB: i32 = 113;
+/// Third-party daemons' plists. A daemon that was stopped (booted out) is
+/// loaded again from here; Apple's own live in /System and are left alone.
+const DAEMONS: &str = "/Library/LaunchDaemons";
 
 /// Restarts `label` in `domain` with `launchctl kickstart -k`, which stops a
 /// running instance first, then waits until launchd shows the job running, or
@@ -26,16 +33,83 @@ const NO_SUCH_JOB: i32 = 113;
 /// blocking thread.
 pub fn restart(domain: &str, label: &str) -> Result<JobResult, HostError> {
     let target = format!("{domain}/{label}");
-    let output = launchctl(&["kickstart", "-k", &target])?;
-    if !output.status.success() {
-        return Err(match output.status.code() {
-            Some(NO_SUCH_JOB) => HostError::NotFound(format!("{label} isn't a launchd job here")),
-            _ => HostError::Failed(message(&output)),
-        });
+    succeeded(&launchctl(&["kickstart", "-k", &target])?, label)?;
+    settle(&target)
+}
+
+/// Takes `action` on `label` in `domain` (angle 11). Stopping unloads the job,
+/// since launchd starts a kept-alive job again after a signal; starting loads
+/// a stopped daemon from its plist first; enabling and disabling set launchd's
+/// lasting override, then load or unload the job to match. It blocks.
+pub fn act(domain: &str, label: &str, action: ServiceAction) -> Result<JobResult, HostError> {
+    let target = format!("{domain}/{label}");
+    let loaded = || launchctl(&["print", &target]).is_ok_and(|o| o.status.success());
+    match action {
+        ServiceAction::Restart => restart(domain, label),
+        ServiceAction::Start => {
+            if !loaded() {
+                bootstrap(domain, label)?;
+            }
+            succeeded(&launchctl(&["kickstart", &target])?, label)?;
+            settle(&target)
+        }
+        ServiceAction::Stop => {
+            let output = launchctl(&["bootout", &target])?;
+            // A job that isn't loaded is stopped already.
+            if output.status.code() != Some(NO_SUCH_JOB) {
+                succeeded(&output, label)?;
+            }
+            Ok(JobResult::Done)
+        }
+        ServiceAction::Enable => {
+            succeeded(&launchctl(&["enable", &target])?, label)?;
+            if !loaded() {
+                bootstrap(domain, label)?;
+            }
+            Ok(JobResult::Done)
+        }
+        ServiceAction::Disable => {
+            succeeded(&launchctl(&["disable", &target])?, label)?;
+            let output = launchctl(&["bootout", &target])?;
+            if output.status.code() != Some(NO_SUCH_JOB) {
+                succeeded(&output, label)?;
+            }
+            Ok(JobResult::Done)
+        }
     }
+}
+
+/// Loads a third-party daemon from its plist in `/Library/LaunchDaemons`.
+fn bootstrap(domain: &str, label: &str) -> Result<(), HostError> {
+    let plist = Path::new(DAEMONS).join(format!("{label}.plist"));
+    if domain != "system" || !plist.exists() {
+        return Err(HostError::NotFound(format!(
+            "{label} isn't loaded, and there's no {} to load it from",
+            plist.display()
+        )));
+    }
+    succeeded(
+        &launchctl(&["bootstrap", domain, &plist.to_string_lossy()])?,
+        label,
+    )
+}
+
+fn succeeded(output: &Output, label: &str) -> Result<(), HostError> {
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(match output.status.code() {
+        Some(NO_SUCH_JOB) => HostError::NotFound(format!("{label} isn't a launchd job here")),
+        _ => HostError::Failed(message(output)),
+    })
+}
+
+/// Waits until launchd shows the job running, or finished for a job that runs
+/// and exits.
+fn settle(target: &str) -> Result<JobResult, HostError> {
     let deadline = Instant::now() + SETTLE;
     loop {
-        let printed = launchctl(&["print", &target])?;
+        let printed = launchctl(&["print", target])?;
         match state(&String::from_utf8_lossy(&printed.stdout)) {
             JobState::Running | JobState::Exited(0) => return Ok(JobResult::Done),
             JobState::Exited(_) => return Ok(JobResult::Failed),
@@ -54,8 +128,70 @@ pub fn list() -> Result<Vec<ServiceStatus>, HostError> {
         return Err(HostError::Failed(message(&output)));
     }
     let mut services = services(&String::from_utf8_lossy(&output.stdout));
+    let disabled = launchctl(&["print-disabled", "system"])
+        .map(|output| overrides(&String::from_utf8_lossy(&output.stdout)))
+        .unwrap_or_default();
+    let installed = third_party(Path::new(DAEMONS));
+    let loaded: HashSet<String> = services.iter().map(|s| s.unit.clone()).collect();
+    for service in &mut services {
+        if installed.contains(&service.unit) {
+            service.enabled = Some(!disabled.get(&service.unit).copied().unwrap_or(false));
+        }
+    }
+    // A daemon that was stopped isn't in the domain any more, but its plist is.
+    services.extend(
+        installed
+            .into_iter()
+            .filter(|label| !loaded.contains(label))
+            .map(|label| ServiceStatus {
+                enabled: Some(!disabled.get(&label).copied().unwrap_or(false)),
+                unit: label,
+                description: None,
+                state: ServiceState::Stopped,
+                detail: Some("not loaded".to_owned()),
+                pid: None,
+                protected: false,
+                scope: ServiceScope::System,
+                user: None,
+                kind: ServiceKind::Service,
+            }),
+    );
     services.sort_by(|a, b| a.unit.cmp(&b.unit));
     Ok(services)
+}
+
+/// `launchctl print-disabled`'s overrides: `"label" => disabled` (or `=>
+/// true` on older macOS) for each job with one.
+fn overrides(printed: &str) -> HashMap<String, bool> {
+    printed
+        .lines()
+        .filter_map(|line| {
+            let (label, value) = line.split_once("=>")?;
+            let label = label.trim().trim_matches('"');
+            let disabled = match value.trim() {
+                "disabled" | "true" => true,
+                "enabled" | "false" => false,
+                _ => return None,
+            };
+            Some((label.to_owned(), disabled))
+        })
+        .collect()
+}
+
+/// The labels of the daemons installed in a directory, by their plists'
+/// names, which by convention are their labels.
+fn third_party(dir: &Path) -> HashSet<String> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    name.strip_suffix(".plist").map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Reads the `services = { … }` block of `launchctl print`: a line per job with
@@ -95,6 +231,7 @@ fn services(printed: &str) -> Vec<ServiceStatus> {
                 scope: ServiceScope::System,
                 user: None,
                 kind: ServiceKind::Service,
+                enabled: None,
             })
         })
         .collect()
@@ -342,6 +479,28 @@ fn message(output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_launchds_overrides() {
+        let printed = "\tdisabled services = {\n\t\t\"com.apple.ftpd\" => disabled\n\t\t\"com.example.web\" => enabled\n\t\t\"com.old.style\" => true\n\t}\n";
+        let overrides = overrides(printed);
+        assert_eq!(overrides.get("com.apple.ftpd"), Some(&true));
+        assert_eq!(overrides.get("com.example.web"), Some(&false));
+        assert_eq!(overrides.get("com.old.style"), Some(&true));
+        assert_eq!(overrides.len(), 3);
+    }
+
+    #[test]
+    fn lists_installed_daemons_by_their_plists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("pw.cntrl.agent.plist"), "").expect("write");
+        std::fs::write(dir.path().join("com.example.web.plist"), "").expect("write");
+        std::fs::write(dir.path().join("README"), "").expect("write");
+        let mut labels: Vec<String> = third_party(dir.path()).into_iter().collect();
+        labels.sort();
+        assert_eq!(labels, ["com.example.web", "pw.cntrl.agent"]);
+        assert!(third_party(Path::new("/nonexistent")).is_empty());
+    }
 
     #[test]
     fn reads_launchctl_print() {

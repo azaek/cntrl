@@ -19,7 +19,7 @@ use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
-use cntrl_protocol::service::{JobResult, ServiceJob, ServiceScope, ServiceStatus};
+use cntrl_protocol::service::{JobResult, ServiceAction, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
 use tokio::net::UnixStream;
 use tracing::{error, info, warn};
@@ -180,15 +180,16 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
         })
         .await
         .map_err(CallError::internal),
-        Call::ServiceRestart {
+        Call::ServiceAct {
             request_id,
             unit,
+            action,
             scope,
             user,
             actor,
         } => {
             let target = Target { unit, scope, user };
-            restart_service(state, request_id, target, actor).await
+            act_on_service(state, request_id, target, action, actor).await
         }
         Call::AppQuit {
             request_id,
@@ -419,24 +420,26 @@ fn session_services() -> Result<Vec<ServiceStatus>, String> {
 
 /// Restarts a service for Console. privd checks the policy itself, whatever
 /// the agent decided, and audits its decision, synced to disk, before acting.
-async fn restart_service(
+async fn act_on_service(
     state: Arc<State>,
     id: String,
     target: Target,
+    action: ServiceAction,
     actor: Option<Actor>,
 ) -> Result<Value, CallError> {
     let unit = service_name(&target.unit)?;
     let policy = policy::load(&state.policy_path, state.owner);
+    // A protected service can still be started or enabled (angle 11).
     let refusal = if !policy.allows("services.manage") {
         Some("the device policy doesn't allow services.manage".to_owned())
-    } else if policy.protects(&unit) {
+    } else if action.interrupts() && policy.protects(&unit) {
         Some(format!("the device policy protects {unit}"))
     } else {
         None
     };
     let request = json!({
         "id": id,
-        "op": "service.restart",
+        "op": action.op(),
         "unit": unit,
         "scope": target.scope,
         "user": target.user,
@@ -452,7 +455,7 @@ async fn restart_service(
         return Err(CallError::new(ErrorCode::PolicyDenied, reason));
     }
     audit(&state, "request.allowed", json!({ "request": request })).await?;
-    let outcome = tokio::time::timeout(JOB_LIMIT, restart(&unit, target.scope, target.user))
+    let outcome = tokio::time::timeout(JOB_LIMIT, act(&unit, target.scope, target.user, action))
         .await
         .unwrap_or_else(|_| {
             Err(HostError::Failed(format!(
@@ -472,10 +475,11 @@ async fn restart_service(
 }
 
 #[cfg(target_os = "linux")]
-async fn restart(
+async fn act(
     unit: &str,
     scope: ServiceScope,
     _user: Option<String>,
+    action: ServiceAction,
 ) -> Result<JobResult, HostError> {
     if !scope.is_system() {
         return Err(HostError::Invalid(
@@ -484,17 +488,18 @@ async fn restart(
     }
     cntrl_host::systemd::Systemd::connect()
         .await?
-        .restart(unit)
+        .act(unit, action)
         .await
 }
 
 /// On macOS a service in a user's session restarts in that user's GUI domain;
 /// with no user named, the one user logged in.
 #[cfg(target_os = "macos")]
-async fn restart(
+async fn act(
     label: &str,
     scope: ServiceScope,
     user: Option<String>,
+    action: ServiceAction,
 ) -> Result<JobResult, HostError> {
     use cntrl_host::launchd;
     let label = label.to_owned();
@@ -503,17 +508,18 @@ async fn restart(
             ServiceScope::System => launchd::system_domain(),
             ServiceScope::User => launchd::user_domain(session(user)?.1),
         };
-        launchd::restart(&domain, &label)
+        launchd::act(&domain, &label, action)
     })
     .await
     .map_err(|e| HostError::Failed(e.to_string()))?
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-async fn restart(
+async fn act(
     _unit: &str,
     _scope: ServiceScope,
     _user: Option<String>,
+    _action: ServiceAction,
 ) -> Result<JobResult, HostError> {
     Err(HostError::Unsupported)
 }

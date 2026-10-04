@@ -42,6 +42,36 @@ define_ops! {
         capability: "services.manage",
         since: 1,
     },
+    /// Starts one service and waits for the result. On a Mac a job that was
+    /// stopped is loaded again first.
+    ServiceStart = "service.start" {
+        params: crate::service::ServiceRef,
+        result: crate::service::ServiceJob,
+        capability: "services.manage",
+        since: 1,
+    },
+    /// Stops one service and waits for the result. On a Mac the job is
+    /// unloaded, since launchd starts a kept-alive job again after a signal.
+    ServiceStop = "service.stop" {
+        params: crate::service::ServiceRef,
+        result: crate::service::ServiceJob,
+        capability: "services.manage",
+        since: 1,
+    },
+    /// Makes one service start at boot; on a Mac it also loads it now.
+    ServiceEnable = "service.enable" {
+        params: crate::service::ServiceRef,
+        result: crate::service::ServiceJob,
+        capability: "services.manage",
+        since: 1,
+    },
+    /// Stops one service starting at boot; on a Mac it also unloads it now.
+    ServiceDisable = "service.disable" {
+        params: crate::service::ServiceRef,
+        result: crate::service::ServiceJob,
+        capability: "services.manage",
+        since: 1,
+    },
     /// What the machine can do about power, what an action would interrupt and
     /// whether the machine comes back after it.
     PowerInfo = "power.info" {

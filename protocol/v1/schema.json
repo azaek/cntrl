@@ -1001,6 +1001,13 @@
         "kind": {
           "$ref": "#/$defs/ServiceKind",
           "description": "What it is; a service when absent."
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether it starts at boot, where that can be changed: a systemd unit\nfile that's enabled or disabled, or a third-party LaunchDaemon on a Mac.\nAbsent for units that can't be enabled (systemd's `static` ones), for\nApple's own jobs, and from agents before 0.1.5."
         }
       },
       "required": [
