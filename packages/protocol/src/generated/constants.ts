@@ -43,6 +43,7 @@ export type Capability = (typeof CAPABILITIES)[number];
 export const MONITOR_ONLY: readonly Capability[] = [
     "system.read",
     "processes.read",
+    "power.read",
     "services.read",
     "logs.read",
 ];

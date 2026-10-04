@@ -42,6 +42,43 @@ define_ops! {
         capability: "services.manage",
         since: 1,
     },
+    /// What the machine can do about power, what an action would interrupt and
+    /// whether the machine comes back after it.
+    PowerInfo = "power.info" {
+        params: crate::system::NoParams,
+        result: crate::power::PowerInfo,
+        capability: "power.read",
+        since: 1,
+    },
+    /// Restarts the machine. It answers, then restarts a moment later.
+    PowerReboot = "power.reboot" {
+        params: crate::system::NoParams,
+        result: crate::power::PowerStarted,
+        capability: "power.reboot",
+        since: 1,
+    },
+    /// Shuts the machine down. It answers, then shuts down a moment later.
+    PowerPoweroff = "power.poweroff" {
+        params: crate::system::NoParams,
+        result: crate::power::PowerStarted,
+        capability: "power.poweroff",
+        since: 1,
+    },
+    /// Puts the machine to sleep. It answers, then sleeps a moment later.
+    PowerSuspend = "power.suspend" {
+        params: crate::system::NoParams,
+        result: crate::power::PowerStarted,
+        capability: "power.suspend",
+        since: 1,
+    },
+    /// Hibernates the machine, where it can. It answers, then hibernates a
+    /// moment later.
+    PowerHibernate = "power.hibernate" {
+        params: crate::system::NoParams,
+        result: crate::power::PowerStarted,
+        capability: "power.hibernate",
+        since: 1,
+    },
 }
 
 define_topics! {

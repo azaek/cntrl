@@ -20,6 +20,7 @@ pub const CAPABILITIES: &[&str] = &[
 pub const MONITOR_ONLY: &[&str] = &[
     "system.read",
     "processes.read",
+    "power.read",
     "services.read",
     "logs.read",
 ];

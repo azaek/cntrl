@@ -1,0 +1,1 @@
+{"t":"res","id":"01JC0000000000000000000RQI","ok":true,"data":{"actions":["reboot","poweroff","suspend"],"sessions":[{"user":"azaek","place":"console","remote":false},{"user":"azaek","place":"10.0.0.5","remote":true}],"unlock_after_restart":"file_vault","restarts_after_power_loss":true,"wake_on_lan":{"interface":"en0","mac":"d0:11:e5:73:0e:f0","enabled":true}}}

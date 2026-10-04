@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
+use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesSample;
 use cntrl_protocol::records::{AuditCheckpoint, StatsRecord};
 use cntrl_protocol::stats::{SensorKind, StatsSample};
@@ -179,4 +180,24 @@ fn system_info_decodes_with_and_without_hardware() {
     }))
     .expect("a 0.1.3 agent's system info");
     assert!(older.machine.is_none() && older.cpu.is_none());
+}
+
+#[test]
+fn power_info_decodes() {
+    let text = fs::read_to_string(frames_dir().join("res-power-info.json")).expect("read");
+    let Frame::Res(res) = serde_json::from_str(&text).expect("a frame") else {
+        panic!("res-power-info.json isn't a response");
+    };
+    let info: PowerInfo = serde_json::from_value(res.data.expect("data")).expect("power info");
+    assert_eq!(
+        info.actions,
+        [
+            PowerAction::Reboot,
+            PowerAction::Poweroff,
+            PowerAction::Suspend
+        ]
+    );
+    assert_eq!(info.unlock_after_restart, Some(DiskUnlock::FileVault));
+    assert!(info.sessions[1].remote && info.inhibitors.is_empty());
+    assert_eq!(PowerAction::Hibernate.op(), "power.hibernate");
 }

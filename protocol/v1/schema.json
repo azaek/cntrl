@@ -1257,6 +1257,180 @@
       ],
       "description": "A job result, as systemd reports it in `JobRemoved`. On macOS it is `done`\nonce launchd shows the job running again (or finished cleanly), `failed` if\nit exited with an error, and `timeout` if launchd doesn't say in time."
     },
+    "PowerInfo": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PowerAction"
+          },
+          "description": "The actions this machine can take. One can be held off by an inhibitor\nand still be listed."
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "description": "Who's signed in, at the machine or remotely."
+        },
+        "inhibitors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Inhibitor"
+          },
+          "description": "Programs holding off a shutdown or sleep, through logind on Linux."
+        },
+        "unlock_after_restart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskUnlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a restart waits for before the machine can reconnect."
+        },
+        "restarts_after_power_loss": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the machine starts by itself after a power cut, where the agent\ncan tell (macOS's `autorestart`)."
+        },
+        "wake_on_lan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WakeOnLan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The wired interface a magic packet would wake, where there is one."
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "description": "What `power.info` returns."
+    },
+    "PowerAction": {
+      "type": "string",
+      "enum": [
+        "reboot",
+        "poweroff",
+        "suspend",
+        "hibernate"
+      ],
+      "description": "A power action, by the name of its operation's second part."
+    },
+    "Session": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "string"
+        },
+        "place": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where: a seat or terminal, such as `seat0` or `console`, or the address\na remote login came from."
+        },
+        "remote": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "user",
+        "remote"
+      ],
+      "description": "A signed-in user."
+    },
+    "Inhibitor": {
+      "type": "object",
+      "properties": {
+        "who": {
+          "type": "string",
+          "description": "The program, such as `GNOME Software`."
+        },
+        "why": {
+          "type": "string"
+        },
+        "what": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What it holds off, such as `shutdown` and `sleep`."
+        },
+        "mode": {
+          "type": "string",
+          "description": "`block` holds the action off; `delay` only delays it a few seconds."
+        }
+      },
+      "required": [
+        "who",
+        "why",
+        "what",
+        "mode"
+      ],
+      "description": "A program holding off a shutdown or sleep."
+    },
+    "DiskUnlock": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "file_vault",
+          "description": "FileVault: the Mac waits at the unlock screen for a password."
+        },
+        {
+          "type": "string",
+          "const": "encrypted_root",
+          "description": "Linux's root filesystem is encrypted, so the machine may wait for a\npassphrase at boot, unless a TPM or network unlock is set up."
+        }
+      ],
+      "description": "Why a restarted machine waits before it can reconnect."
+    },
+    "WakeOnLan": {
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": "string",
+          "description": "Such as `eno1` or `en0`."
+        },
+        "mac": {
+          "type": "string",
+          "description": "Where a magic packet goes, such as `d0:11:e5:73:0e:f0`."
+        },
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether it's set to wake the machine; absent where the agent can't\ntell."
+        }
+      },
+      "required": [
+        "interface",
+        "mac"
+      ],
+      "description": "Wake-on-LAN on a wired interface."
+    },
+    "PowerStarted": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/PowerAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "description": "What a power action returns: that it has started."
+    },
     "StatsParams": {
       "type": "object",
       "properties": {

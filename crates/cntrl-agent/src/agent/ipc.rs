@@ -8,6 +8,7 @@ use bytes::Bytes;
 use cntrl_host::HostError;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::power::PowerAction;
 use cntrl_protocol::service::ServiceScope;
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -67,6 +68,15 @@ pub enum Call {
     /// The whole process table. On macOS only root can read other users'
     /// processes, so the agent asks privd (D24).
     ProcessList,
+    /// Restarts, shuts down, sleeps or hibernates the machine for a request
+    /// from Console. privd checks the policy itself, audits, answers, and acts
+    /// a moment later (angle 10).
+    Power {
+        request_id: String,
+        action: PowerAction,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+    },
     /// Stops a process for a request from Console, if it's still the one that
     /// started at `started`. privd checks the policy itself and audits its
     /// decision before acting.
@@ -262,6 +272,11 @@ mod tests {
                 pid: 4211,
                 started: 1_791_000_000,
                 force: false,
+                actor: None,
+            },
+            Call::Power {
+                request_id: "req_5".to_owned(),
+                action: PowerAction::Reboot,
                 actor: None,
             },
         ];

@@ -17,6 +17,7 @@ use cntrl_host::services::service_name;
 use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::service::{JobResult, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
@@ -196,6 +197,11 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             force,
             actor,
         } => quit_app(state, request_id, app, user, force, actor).await,
+        Call::Power {
+            request_id,
+            action,
+            actor,
+        } => power(state, request_id, action, actor).await,
         Call::ProcessList => {
             if !policy::load(&state.policy_path, state.owner).allows("processes.read") {
                 let reason = "the device policy doesn't allow processes.read";
@@ -513,6 +519,80 @@ async fn restart(
 }
 
 /// Appends one of privd's own records to the audit log, synced to disk.
+/// How long after answering privd takes a power action: long enough for the
+/// answer to reach Console before the network goes.
+const POWER_DELAY: Duration = Duration::from_secs(2);
+
+/// Restarts, shuts down, sleeps or hibernates the machine for a request from
+/// Console (angle 10). privd checks the policy itself and that nothing holds
+/// the action off, audits, answers, and acts a moment later, since once the
+/// machine goes an answer can't.
+async fn power(
+    state: Arc<State>,
+    id: String,
+    action: PowerAction,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    let request = json!({ "id": id, "op": action.op(), "actor": actor });
+    if !policy::load(&state.policy_path, state.owner).allows(action.op()) {
+        let reason = format!("the device policy doesn't allow {}", action.op());
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    if let Err(e) = power_check(action).await {
+        audit(
+            &state,
+            "request.completed",
+            json!({ "id": id, "error": e.to_string() }),
+        )
+        .await?;
+        return Err(e.into());
+    }
+    audit(
+        &state,
+        "request.completed",
+        json!({ "id": id, "result": "started" }),
+    )
+    .await?;
+    tokio::spawn(async move {
+        tokio::time::sleep(POWER_DELAY).await;
+        if let Err(e) = power_act(action).await {
+            warn!("{} failed: {e}", action.op());
+            let failure = json!({ "id": id, "error": e.to_string() });
+            if let Err(e) = audit(&state, "request.failed", failure).await {
+                warn!("can't audit the failure: {}", e.msg);
+            }
+        }
+    });
+    serde_json::to_value(PowerStarted { action }).map_err(|e| CallError::internal(e.to_string()))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn power_check(action: PowerAction) -> Result<(), HostError> {
+    cntrl_host::power::check(action).await
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn power_act(action: PowerAction) -> Result<(), HostError> {
+    cntrl_host::power::act(action).await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn power_check(_action: PowerAction) -> Result<(), HostError> {
+    Err(HostError::Unsupported)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn power_act(_action: PowerAction) -> Result<(), HostError> {
+    Err(HostError::Unsupported)
+}
+
 async fn audit(state: &Arc<State>, kind: &'static str, data: Value) -> Result<(), CallError> {
     let state = Arc::clone(state);
     blocking(move || {

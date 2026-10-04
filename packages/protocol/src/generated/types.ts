@@ -131,6 +131,9 @@ export interface DiskIo {
     write: number;
 }
 
+/** Why a restarted machine waits before it can reconnect. */
+export type DiskUnlock = "file_vault" | "encrypted_root";
+
 /** Why an enrollment failed. */
 export interface EnrollError {
     code: EnrollErrorCode;
@@ -319,6 +322,17 @@ export interface HostInfo {
     agent_version: string;
 }
 
+/** A program holding off a shutdown or sleep. */
+export interface Inhibitor {
+    /** The program, such as `GNOME Software`. */
+    who: string;
+    why: string;
+    /** What it holds off, such as `shutdown` and `sleep`. */
+    what: string[];
+    /** `block` holds the action off; `delay` only delays it a few seconds. */
+    mode: string;
+}
+
 /**
  * A job result, as systemd reports it in `JobRemoved`. On macOS it is `done`
  * once launchd shows the job running again (or finished cleanly), `failed` if
@@ -385,6 +399,36 @@ export interface PolicySummary {
     hash: string;
     /** Why no valid policy is in force. The agent then denies everything. */
     error?: string | null;
+}
+
+/** A power action, by the name of its operation's second part. */
+export type PowerAction = "reboot" | "poweroff" | "suspend" | "hibernate";
+
+/** What `power.info` returns. */
+export interface PowerInfo {
+    /**
+     * The actions this machine can take. One can be held off by an inhibitor
+     * and still be listed.
+     */
+    actions: PowerAction[];
+    /** Who's signed in, at the machine or remotely. */
+    sessions?: Session[];
+    /** Programs holding off a shutdown or sleep, through logind on Linux. */
+    inhibitors?: Inhibitor[];
+    /** What a restart waits for before the machine can reconnect. */
+    unlock_after_restart?: DiskUnlock | null;
+    /**
+     * Whether the machine starts by itself after a power cut, where the agent
+     * can tell (macOS's `autorestart`).
+     */
+    restarts_after_power_loss?: boolean | null;
+    /** The wired interface a magic packet would wake, where there is one. */
+    wake_on_lan?: WakeOnLan | null;
+}
+
+/** What a power action returns: that it has started. */
+export interface PowerStarted {
+    action: PowerAction;
 }
 
 /** The device a machine is enrolled as, proven with that device's key. */
@@ -602,6 +646,17 @@ export interface ServiceStatus {
     kind?: ServiceKind;
 }
 
+/** A signed-in user. */
+export interface Session {
+    user: string;
+    /**
+     * Where: a seat or terminal, such as `seat0` or `console`, or the address
+     * a remote login came from.
+     */
+    place?: string | null;
+    remote: boolean;
+}
+
 /** Signature algorithm of the device key. */
 export type SigAlg = "Unknown" | "ES256";
 
@@ -702,6 +757,19 @@ export interface Temperature {
 /** Ends a subscription. */
 export interface Unsubscribe {
     id: string;
+}
+
+/** Wake-on-LAN on a wired interface. */
+export interface WakeOnLan {
+    /** Such as `eno1` or `en0`. */
+    interface: string;
+    /** Where a magic packet goes, such as `d0:11:e5:73:0e:f0`. */
+    mac: string;
+    /**
+     * Whether it's set to wake the machine; absent where the agent can't
+     * tell.
+     */
+    enabled?: boolean | null;
 }
 
 /** The gateway's answer to a valid {@link Hello}. */

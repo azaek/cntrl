@@ -56,6 +56,61 @@
       "result": {
         "$ref": "#/$defs/ServiceJob"
       }
+    },
+    {
+      "name": "power.info",
+      "capability": "power.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PowerInfo"
+      }
+    },
+    {
+      "name": "power.reboot",
+      "capability": "power.reboot",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PowerStarted"
+      }
+    },
+    {
+      "name": "power.poweroff",
+      "capability": "power.poweroff",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PowerStarted"
+      }
+    },
+    {
+      "name": "power.suspend",
+      "capability": "power.suspend",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PowerStarted"
+      }
+    },
+    {
+      "name": "power.hibernate",
+      "capability": "power.hibernate",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PowerStarted"
+      }
     }
   ],
   "topics": [

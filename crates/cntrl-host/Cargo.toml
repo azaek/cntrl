@@ -22,6 +22,8 @@ procfs-core = { version = "0.18", default-features = false }
 # macOS, as the research recommends for non-Linux hosts. rustix signals
 # processes, through a pidfd on Linux.
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# Power actions run a command or a D-Bus call from async code (angle 10).
+tokio = { version = "1", default-features = false, features = ["process", "rt"] }
 rustix = { version = "1.1", default-features = false, features = ["std", "process", "event", "fs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
 
@@ -33,7 +35,7 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "u
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = "0.3"
 zbus = { version = "5.19", default-features = false, features = ["tokio"] }
-zbus_systemd = { version = "0.26200", default-features = false, features = ["systemd1", "zbus-async-tokio"] }
+zbus_systemd = { version = "0.26200", default-features = false, features = ["systemd1", "login1", "zbus-async-tokio"] }
 
 [lints]
 workspace = true

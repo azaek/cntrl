@@ -17,6 +17,7 @@ use cntrl_protocol::frame::{
     Subscribe, Welcome,
 };
 use cntrl_protocol::ops::{self, Topic};
+use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceList, ServiceStatus};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
@@ -764,6 +765,21 @@ async fn execute(
             serde_json::to_value(ServiceList { services })
                 .map_err(|e| CallError::internal(e.to_string()))
         }
+        ops::Call::PowerInfo(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            serde_json::to_value(power_info().await?)
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        // privd checks the policy again and audits its own decision.
+        ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,
+        ops::Call::PowerPoweroff(_) => power(request, PowerAction::Poweroff, privd, limit).await,
+        ops::Call::PowerSuspend(_) => power(request, PowerAction::Suspend, privd, limit).await,
+        ops::Call::PowerHibernate(_) => power(request, PowerAction::Hibernate, privd, limit).await,
         // privd checks the policy again and audits its own decision.
         ops::Call::AppQuit(quit) => {
             let call = Call::AppQuit {
@@ -796,6 +812,32 @@ async fn execute(
             ipc::call_within(privd, call, limit).await
         }
     }
+}
+
+/// Asks privd to take a power action, which it answers before taking.
+async fn power(
+    request: &Request,
+    action: PowerAction,
+    privd: &Path,
+    limit: Duration,
+) -> Result<serde_json::Value, CallError> {
+    let call = Call::Power {
+        request_id: request.id.clone(),
+        action,
+        actor: request.actor.clone(),
+    };
+    ipc::call_within(privd, call, limit).await
+}
+
+/// What the machine can do about power. Reading it needs no root (angle 10).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn power_info() -> Result<PowerInfo, HostError> {
+    cntrl_host::power::info().await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn power_info() -> Result<PowerInfo, HostError> {
+    Err(HostError::Unsupported)
 }
 
 /// The services at system scope. Listing needs no root, so the agent does it.
