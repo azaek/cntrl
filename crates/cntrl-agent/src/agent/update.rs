@@ -7,8 +7,10 @@
 //! carries one (from 0.1.8), else the copy built into this binary.
 
 use std::collections::BTreeMap;
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode};
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -93,8 +95,8 @@ async fn update(
 
     let target = release_target()?;
     let base = format!("{RELEASES}/agent-v{latest}");
-    let manifest = fetch(&client, &format!("{base}/manifest.json"), MAX_ARCHIVE).await?;
-    let signature = fetch(&client, &format!("{base}/manifest.json.sig"), 1024).await?;
+    let manifest = fetch(&client, &format!("{base}/manifest.json"), MAX_ARCHIVE, None).await?;
+    let signature = fetch(&client, &format!("{base}/manifest.json.sig"), 1024, None).await?;
     verify(&manifest, &signature)?;
     let manifest: Manifest = serde_json::from_slice(&manifest)
         .map_err(|e| format!("the release's manifest doesn't read: {e}"))?;
@@ -112,7 +114,13 @@ async fn update(
         "Checked release {latest}'s signature. Downloading its build for {target} ({:.1} MB).",
         megabytes(artifact.size)
     );
-    let archive = fetch(&client, &artifact.url, MAX_ARCHIVE.min(artifact.size)).await?;
+    let archive = fetch(
+        &client,
+        &artifact.url,
+        MAX_ARCHIVE.min(artifact.size),
+        Progress::new(artifact.size),
+    )
+    .await?;
     matches(&archive, artifact)?;
 
     // A directory only root can reach, so nothing changes the files between
@@ -143,7 +151,7 @@ async fn update(
 /// Console's imports and yanks decide, as they do for the install command.
 async fn latest_version(client: &reqwest::Client, console: &str) -> Result<String, String> {
     let url = format!("{}/install.sh", console.trim_end_matches('/'));
-    let script = fetch(client, &url, 1024 * 1024).await?;
+    let script = fetch(client, &url, 1024 * 1024, None).await?;
     installer_version(&String::from_utf8_lossy(&script))
         .ok_or_else(|| format!("{url} doesn't say which release is current"))
 }
@@ -237,8 +245,14 @@ fn installer(work: &Path, archive: &Path) -> Result<std::path::PathBuf, String> 
     Ok(built_in)
 }
 
-/// Downloads `url`, refusing more than `limit` bytes.
-async fn fetch(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec<u8>, String> {
+/// Downloads `url`, refusing more than `limit` bytes, and shows `progress`
+/// when there is one.
+async fn fetch(
+    client: &reqwest::Client,
+    url: &str,
+    limit: u64,
+    mut progress: Option<Progress>,
+) -> Result<Vec<u8>, String> {
     let mut response = client
         .get(url)
         .send()
@@ -257,8 +271,91 @@ async fn fetch(client: &reqwest::Client, url: &str, limit: u64) -> Result<Vec<u8
         if body.len() as u64 > limit {
             return Err(format!("{url} sent more than expected"));
         }
+        if let Some(progress) = &mut progress {
+            progress.show(body.len() as u64);
+        }
     }
     Ok(body)
+}
+
+/// A download's progress on a terminal, one line redrawn the way the
+/// installer draws its own: a bar, the share done, and how much of how much.
+struct Progress {
+    total: u64,
+    glyphs: (char, char),
+    drawn: Option<Instant>,
+}
+
+impl Progress {
+    /// Progress toward `total` bytes, when stderr is a terminal to draw on.
+    fn new(total: u64) -> Option<Self> {
+        std::io::stderr().is_terminal().then(|| Self {
+            total,
+            glyphs: if utf8_locale() {
+                ('█', '░')
+            } else {
+                ('#', '.')
+            },
+            drawn: None,
+        })
+    }
+
+    /// Draws `have` bytes done: at most ten times a second, and always the
+    /// last.
+    fn show(&mut self, have: u64) {
+        let now = Instant::now();
+        if have < self.total
+            && self
+                .drawn
+                .is_some_and(|at| now.duration_since(at) < Duration::from_millis(100))
+        {
+            return;
+        }
+        self.drawn = Some(now);
+        let line = format!("\r  {}\x1b[K", progress_line(have, self.total, self.glyphs));
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
+}
+
+impl Drop for Progress {
+    /// Ends the line however the download ends, so what follows starts on
+    /// its own.
+    fn drop(&mut self) {
+        if self.drawn.is_some() {
+            eprintln!();
+        }
+    }
+}
+
+/// Whether the locale is UTF-8, the installer's test, for the bar's blocks.
+fn utf8_locale() -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .is_some_and(|locale| {
+            let locale = locale.to_ascii_lowercase();
+            locale.contains("utf-8") || locale.contains("utf8")
+        })
+}
+
+/// The progress line for `have` of `total` bytes.
+fn progress_line(have: u64, total: u64, (full, empty): (char, char)) -> String {
+    const WIDTH: usize = 28;
+    let share = if total == 0 {
+        0.0
+    } else {
+        (have as f64 / total as f64).min(1.0)
+    };
+    let filled = (share * WIDTH as f64).round() as usize;
+    let bar: String = (0..WIDTH)
+        .map(|at| if at < filled { full } else { empty })
+        .collect();
+    format!(
+        "{bar} {:>3}%  {:.1} of {:.1} MB",
+        (share * 100.0) as u32,
+        megabytes(have),
+        megabytes(total)
+    )
 }
 
 /// The release build for this machine: static musl on Linux, whatever this
@@ -300,10 +397,11 @@ fn newer(a: &str, b: &str) -> bool {
     }
 }
 
-/// Bytes as megabytes, for saying how big a download is.
+/// Bytes as megabytes, for saying how big a download is, counted as the
+/// installer and GitHub's release page count them.
 #[allow(clippy::cast_precision_loss)]
 fn megabytes(bytes: u64) -> f64 {
-    bytes as f64 / 1_000_000.0
+    bytes as f64 / 1_048_576.0
 }
 
 #[cfg(test)]
@@ -370,6 +468,26 @@ mod tests {
         assert!(newer("0.1.8", "0.1.8-beta.1"));
         assert!(!newer("0.1.7", "0.1.7"));
         assert!(!newer("0.1.6", "0.1.7"));
+    }
+
+    #[test]
+    fn progress_reads_as_the_installers_does() {
+        let ascii = ('#', '.');
+        assert_eq!(
+            progress_line(0, 4_086_046, ascii),
+            "............................   0%  0.0 of 3.9 MB"
+        );
+        assert_eq!(
+            progress_line(2_043_023, 4_086_046, ascii),
+            "##############..............  50%  1.9 of 3.9 MB"
+        );
+        assert_eq!(
+            progress_line(4_086_046, 4_086_046, ('█', '░')),
+            "████████████████████████████ 100%  3.9 of 3.9 MB"
+        );
+        // More than promised stays full, and an unknown total stays empty.
+        assert!(progress_line(5_000_000, 4_086_046, ascii).contains(" 100%  4.8 of 3.9 MB"));
+        assert!(progress_line(10, 0, ascii).starts_with("............................   0%"));
     }
 
     #[test]
