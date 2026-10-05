@@ -10,6 +10,7 @@ pub mod codes;
 pub mod enroll;
 pub mod frame;
 pub mod logs;
+pub mod network;
 pub mod ops;
 pub mod power;
 pub mod process;
@@ -17,6 +18,7 @@ pub mod records;
 mod registry;
 pub mod service;
 pub mod stats;
+pub mod storage;
 pub mod system;
 
 pub use capability::{CAPABILITIES, MONITOR_ONLY};

@@ -29,12 +29,16 @@ tokio = { version = "1", default-features = false, features = ["process", "rt"] 
 rustix = { version = "1.1", default-features = false, features = ["std", "process", "event", "fs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
 
-# Disks, network and temperatures on macOS (angle 09).
+# Disks, network and temperatures on macOS (angle 09); diskutil's and
+# ioreg's property lists for the Storage tab (angle 13).
 [target.'cfg(target_os = "macos")'.dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user", "disk", "network", "component"] }
+plist = { version = "1", default-features = false }
 
-# systemd over D-Bus, for services.
+# systemd over D-Bus, for services; interfaces' addresses for the Network
+# tab (angle 13), which sysinfo reads with getifaddrs.
 [target.'cfg(target_os = "linux")'.dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["system", "user", "network"] }
 futures-util = "0.3"
 zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.26200", default-features = false, features = ["systemd1", "login1", "zbus-async-tokio"] }

@@ -1652,6 +1652,180 @@
       ],
       "description": "What a power action returns: that it has started."
     },
+    "Listeners": {
+      "type": "object",
+      "properties": {
+        "listeners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Listener"
+          }
+        },
+        "owners": {
+          "type": "boolean",
+          "description": "Whether the processes were found. Finding them takes root, so privd\ndoes it; without privd the ports come alone."
+        }
+      },
+      "required": [
+        "listeners",
+        "owners"
+      ],
+      "description": "The result of `network.listeners`."
+    },
+    "Listener": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "$ref": "#/$defs/SocketProtocol"
+        },
+        "address": {
+          "type": "string",
+          "description": "The address it's bound to: `0.0.0.0` or `::` for every address,\n`127.0.0.1` or `::1` for this machine only, or one of the machine's."
+        },
+        "port": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Who owns the socket."
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "process": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The process's name."
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The service it runs in: a systemd unit, or on a Mac a launchd job."
+        }
+      },
+      "required": [
+        "protocol",
+        "address",
+        "port"
+      ],
+      "description": "A socket waiting for others: a TCP socket listening, or a UDP socket bound\nand not connected."
+    },
+    "SocketProtocol": {
+      "type": "string",
+      "enum": [
+        "tcp",
+        "udp"
+      ]
+    },
+    "DisksHealth": {
+      "type": "object",
+      "properties": {
+        "disks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiskHealth"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why there's nothing to say, when there isn't: on Linux, that\nsmartmontools isn't installed."
+        }
+      },
+      "required": [
+        "disks"
+      ],
+      "description": "The result of `storage.health`."
+    },
+    "DiskHealth": {
+      "type": "object",
+      "properties": {
+        "disk": {
+          "type": "string",
+          "description": "The disk's name, as `storage` gives it."
+        },
+        "status": {
+          "$ref": "#/$defs/HealthStatus"
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "power_on_hours": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "wear": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How much of an SSD's rated life is used, as a percentage; it can pass\n100."
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What's wrong, in a few words, when something is."
+        }
+      },
+      "required": [
+        "disk",
+        "status"
+      ],
+      "description": "What one disk says of its health."
+    },
+    "HealthStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "ok",
+          "description": "The disk passes its own check."
+        },
+        {
+          "type": "string",
+          "const": "warning",
+          "description": "It passes, but something is past a limit or was once: worn out, too\nhot, errors logged, attributes that crossed their threshold."
+        },
+        {
+          "type": "string",
+          "const": "failing",
+          "description": "It says it's failing."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "It can't say, or wasn't asked, as a disk asleep isn't woken for this."
+        }
+      ]
+    },
     "StatsParams": {
       "type": "object",
       "properties": {
@@ -2302,6 +2476,459 @@
         "message"
       ],
       "description": "One log line."
+    },
+    "NetworkParams": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How often to send, in milliseconds: 2000 when absent, 1000 at least."
+        }
+      },
+      "description": "What a `network` subscription asks for."
+    },
+    "NetworkSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was read, in Unix milliseconds."
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Interface"
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "description": "Where traffic for elsewhere goes: one default route per address family\nthat has one."
+        },
+        "dns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The name servers the machine asks, as its resolver names them."
+        }
+      },
+      "required": [
+        "ts",
+        "interfaces",
+        "routes",
+        "dns"
+      ],
+      "description": "One `network` event."
+    },
+    "Interface": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "As the OS names it, such as `eth0`, `enp3s0` or `en0`."
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The port's name where the OS gives one, such as `Wi-Fi` on a Mac."
+        },
+        "kind": {
+          "$ref": "#/$defs/InterfaceKind"
+        },
+        "physical": {
+          "type": "boolean",
+          "description": "Hardware, not a bridge, tunnel or container link, whose traffic also\ncrosses a physical interface."
+        },
+        "up": {
+          "type": "boolean",
+          "description": "Able to pass packets."
+        },
+        "speed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "The link's speed in megabits per second, where the OS knows it."
+        },
+        "mtu": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "mac": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The hardware address, as `aa:bb:cc:dd:ee:ff`."
+        },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InterfaceAddress"
+          }
+        },
+        "received": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Bytes per second since the previous reading."
+        },
+        "sent": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "received_total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Bytes since the interface came up."
+        },
+        "sent_total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Packets that failed, sending or receiving, since it came up."
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "physical",
+        "up",
+        "addresses",
+        "received",
+        "sent",
+        "received_total",
+        "sent_total",
+        "errors"
+      ],
+      "description": "One network interface."
+    },
+    "InterfaceKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ethernet",
+            "wifi",
+            "loopback",
+            "bridge",
+            "bond",
+            "vlan",
+            "other"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "tunnel",
+          "description": "A VPN or tunnel: WireGuard, `tun`, `utun`, GRE and the like."
+        },
+        {
+          "type": "string",
+          "const": "virtual",
+          "description": "A container's or a virtual machine's link: `veth`, `docker0`, `virbr0`."
+        }
+      ]
+    },
+    "InterfaceAddress": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "IPv4 or IPv6, without the prefix, such as `192.168.1.20`."
+        },
+        "prefix": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The prefix length: 24 for a /24."
+        }
+      },
+      "required": [
+        "address",
+        "prefix"
+      ],
+      "description": "An address on an interface."
+    },
+    "Route": {
+      "type": "object",
+      "properties": {
+        "gateway": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The next hop, such as `192.168.1.1`; absent for a point-to-point link."
+        },
+        "interface": {
+          "type": "string",
+          "description": "The interface the route leaves by."
+        }
+      },
+      "required": [
+        "interface"
+      ],
+      "description": "A default route."
+    },
+    "StorageParams": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How often to send, in milliseconds: 2000 when absent, 1000 at least."
+        }
+      },
+      "description": "What a `storage` subscription asks for."
+    },
+    "StorageSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was read, in Unix milliseconds."
+        },
+        "disks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Disk"
+          },
+          "description": "The physical disks, not partitions, RAID or device-mapper devices."
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Volume"
+          }
+        }
+      },
+      "required": [
+        "ts",
+        "disks",
+        "volumes"
+      ],
+      "description": "One `storage` event."
+    },
+    "Disk": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "As the OS names it, such as `sda`, `nvme0n1` or `disk0`."
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "In bytes."
+        },
+        "kind": {
+          "$ref": "#/$defs/DiskKind"
+        },
+        "external": {
+          "type": "boolean",
+          "description": "Plugged in over USB or Thunderbolt, or removable media."
+        },
+        "read": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Bytes per second."
+        },
+        "written": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reads": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "Requests completed per second, where the OS counts them."
+        },
+        "writes": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "wait_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "How long a request took on average, queueing included, in\nmilliseconds; absent when none completed."
+        },
+        "busy": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "The share of the time it had requests in progress, 0 to 1. A disk\nthat serves requests in parallel, as an SSD does, can take more while\nat 1 (iostat(1), %util)."
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "kind",
+        "external",
+        "read",
+        "written"
+      ],
+      "description": "A physical disk, with its traffic since the previous reading."
+    },
+    "DiskKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "nvme",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "ssd",
+          "description": "A solid-state disk on SATA, SAS or USB."
+        },
+        {
+          "type": "string",
+          "const": "hdd",
+          "description": "A spinning disk."
+        },
+        {
+          "type": "string",
+          "const": "virtual",
+          "description": "A disk a hypervisor provides."
+        }
+      ]
+    },
+    "Volume": {
+      "type": "object",
+      "properties": {
+        "mount": {
+          "type": "string",
+          "description": "Where it's mounted, such as `/` or `/mnt/media`."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The volume's name where the OS gives one, such as `Macintosh HD`."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Its type, such as `ext4`, `zfs`, `nfs4` or `apfs`."
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What's mounted: a device such as `/dev/nvme0n1p2`, or for a network\nvolume its server and share."
+        },
+        "disk": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The physical disk it's on, by name, when there's one."
+        },
+        "total": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "In use. On a Mac it's the whole APFS container's use, since its volumes\nshare the space."
+        },
+        "available": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "What a user other than root can still write."
+        },
+        "inodes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Files it can hold, where the filesystem has a fixed number."
+        },
+        "inodes_used": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "network": {
+          "type": "boolean",
+          "description": "Mounted from another machine: NFS, SMB and the like."
+        }
+      },
+      "required": [
+        "mount",
+        "kind",
+        "total",
+        "used",
+        "available",
+        "read_only",
+        "network"
+      ],
+      "description": "A mounted filesystem."
     },
     "EnrollRequest": {
       "type": "object",

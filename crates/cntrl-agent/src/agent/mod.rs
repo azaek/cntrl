@@ -18,12 +18,14 @@ mod launchd;
 mod local_api;
 mod logging;
 mod logs;
+mod network;
 mod outbox;
 mod paused;
 mod policy;
 mod privd;
 mod processes;
 mod stats;
+mod storage;
 mod supervisor;
 mod systemd;
 mod update;
@@ -111,6 +113,8 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let uplink = Arc::new(Uplink::new());
         let latest_stats = Arc::new(stats::Latest::new(None));
         let latest_processes = Arc::new(processes::Latest::new(None));
+        let latest_network = Arc::new(network::Latest::new(None));
+        let latest_storage = Arc::new(storage::Latest::new(None));
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
         let alert_rules = Arc::new(alerts::Alerts::open(&state_dir).await);
@@ -121,6 +125,8 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             gateway_url: config.console.gateway_url.clone(),
             stats: Arc::clone(&latest_stats),
             processes: Arc::clone(&latest_processes),
+            network: Arc::clone(&latest_network),
+            storage: Arc::clone(&latest_storage),
             outbox: Arc::clone(&outbox),
             alerts: Arc::clone(&alert_rules),
         };
@@ -156,6 +162,15 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         supervisor.spawn(
             "processes",
             processes::run(latest_processes, privd_socket.clone(), token.clone()),
+        );
+        supervisor.spawn("network", network::run(latest_network, token.clone()));
+        supervisor.spawn(
+            "storage",
+            storage::run(
+                latest_storage,
+                cntrl_host::storage::backend(),
+                token.clone(),
+            ),
         );
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 

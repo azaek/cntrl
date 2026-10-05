@@ -60,6 +60,10 @@ pub(crate) struct Mount {
     pub kind: String,
     /// A network or FUSE mount, whose statvfs can block.
     pub remote: bool,
+    /// What's mounted, such as `/dev/nvme0n1p2` or `nas:/export`.
+    pub source: Option<String>,
+    /// The device's `major:minor`, which leads to its disk in sysfs.
+    pub device: String,
 }
 
 /// The mounts worth showing, from mountinfo's text: `/` always (in a container
@@ -86,7 +90,8 @@ pub(crate) fn select(mountinfo: &str) -> Vec<Mount> {
         if !wanted {
             continue;
         }
-        let key = (info.mount_source.unwrap_or_default(), kind.clone());
+        let source = info.mount_source.filter(|source| !source.is_empty());
+        let key = (source.clone().unwrap_or_default(), kind.clone());
         if chosen
             .get(&key)
             .is_none_or(|existing| mount.len() < existing.mount.len())
@@ -97,6 +102,8 @@ pub(crate) fn select(mountinfo: &str) -> Vec<Mount> {
                     mount,
                     kind,
                     remote,
+                    source,
+                    device: info.majmin,
                 },
             );
         }
@@ -106,11 +113,37 @@ pub(crate) fn select(mountinfo: &str) -> Vec<Mount> {
     mounts
 }
 
-/// A filesystem's total, used and available bytes. Used counts the blocks
-/// kept for root, as df(1) does, so used and available don't add up to the
-/// total.
+/// The mount points mounted read-only, from a mountinfo. The agent's own
+/// (`/proc/self/mountinfo`) won't do: its unit's `ProtectSystem=strict` mounts
+/// everything read-only for it alone, so the machine's are PID 1's.
+pub(crate) fn read_only(mountinfo: &Path) -> Option<HashSet<String>> {
+    let text = fs::read_to_string(mountinfo).ok()?;
+    let infos = MountInfos::from_buf_read(text.as_bytes()).ok()?;
+    Some(
+        infos
+            .into_iter()
+            .filter(|info| info.mount_options.contains_key("ro"))
+            .map(|info| info.mount_point.to_string_lossy().into_owned())
+            .collect(),
+    )
+}
+
+/// A filesystem's space, and its files where it has a fixed number of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Space {
+    pub total: u64,
+    /// Used counts the blocks kept for root, as df(1) does, so used and
+    /// available don't add up to the total.
+    pub used: u64,
+    pub available: u64,
+    pub inodes: Option<u64>,
+    pub inodes_used: Option<u64>,
+}
+
+/// A filesystem's space, from statvfs(3). A filesystem that makes inodes as it
+/// needs them, as btrfs does, says it has none.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn space(path: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn space(path: &str) -> Option<Space> {
     let stat = rustix::fs::statvfs(path).ok()?;
     let unit = if stat.f_frsize > 0 {
         stat.f_frsize
@@ -119,15 +152,18 @@ pub(crate) fn space(path: &str) -> Option<(u64, u64, u64)> {
     };
     let total = stat.f_blocks.saturating_mul(unit);
     let free = stat.f_bfree.saturating_mul(unit);
-    Some((
+    let inodes = (stat.f_files > 0).then_some(stat.f_files);
+    Some(Space {
         total,
-        total.saturating_sub(free),
-        stat.f_bavail.saturating_mul(unit),
-    ))
+        used: total.saturating_sub(free),
+        available: stat.f_bavail.saturating_mul(unit),
+        inodes,
+        inodes_used: inodes.map(|files| files.saturating_sub(stat.f_ffree)),
+    })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub(crate) fn space(_path: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn space(_path: &str) -> Option<Space> {
     None
 }
 
@@ -162,32 +198,42 @@ impl LinuxFilesystems {
 /// Selects the mounts and measures them: disks at once, network and FUSE
 /// mounts each on a thread of its own, skipping any still stuck.
 fn look(mountinfo: &Path, stuck: &Stuck) -> Vec<Filesystem> {
+    measure(mountinfo, stuck)
+        .into_iter()
+        .map(|(mount, space)| Filesystem {
+            mount: mount.mount,
+            name: None,
+            kind: mount.kind,
+            total: space.total,
+            used: space.used,
+            available: space.available,
+        })
+        .collect()
+}
+
+/// The mounts worth showing with their space: disks at once, network and FUSE
+/// mounts each on a thread of its own, skipping any still stuck, and any that
+/// says it has no space.
+pub(crate) fn measure(mountinfo: &Path, stuck: &Stuck) -> Vec<(Mount, Space)> {
     let mounts = fs::read_to_string(mountinfo)
         .map(|text| select(&text))
         .unwrap_or_default();
     mounts
         .into_iter()
         .filter_map(|mount| {
-            let (total, used, available) = if mount.remote {
+            let space = if mount.remote {
                 remote_space(stuck, &mount.mount)?
             } else {
                 space(&mount.mount)?
             };
-            (total > 0).then_some(Filesystem {
-                mount: mount.mount,
-                name: None,
-                kind: mount.kind,
-                total,
-                used,
-                available,
-            })
+            (space.total > 0).then_some((mount, space))
         })
         .collect()
 }
 
 /// statvfs on a thread of its own, given up on after `REMOTE_TIMEOUT`. The
 /// mount counts as stuck, and isn't tried again, until that thread returns.
-pub(crate) fn remote_space(stuck: &Stuck, mount: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn remote_space(stuck: &Stuck, mount: &str) -> Option<Space> {
     if !lock(stuck).insert(mount.to_owned()) {
         return None;
     }
@@ -236,6 +282,8 @@ mod tests {
                 mount: "/".to_owned(),
                 kind: "overlay".to_owned(),
                 remote: false,
+                source: Some("overlay".to_owned()),
+                device: "0:57".to_owned(),
             }]
         );
     }
@@ -300,8 +348,13 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn measures_the_root_filesystem() {
-        let (total, used, available) = space("/").expect("statvfs on /");
-        assert!(total > 0 && used <= total && available <= total);
+        let measured = space("/").expect("statvfs on /");
+        assert!(
+            measured.total > 0
+                && measured.used <= measured.total
+                && measured.available <= measured.total
+        );
+        assert!(measured.inodes_used <= measured.inodes);
         assert_eq!(space("/nonexistent/path"), None);
     }
 

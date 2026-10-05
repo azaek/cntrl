@@ -1,0 +1,1 @@
+{"t":"res","id":"01JC0000000000000000000RQH","ok":true,"data":{"disks":[{"disk":"nvme0n1","status":"ok","temperature":41.0,"power_on_hours":9812,"wear":2},{"disk":"sda","status":"warning","temperature":36.0,"power_on_hours":31027,"detail":"8 reallocated sectors"}]}}

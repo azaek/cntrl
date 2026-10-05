@@ -170,7 +170,8 @@ fn filesystems(stuck: &Stuck) -> Vec<Filesystem> {
             }
             let kind = disk.file_system().to_string_lossy().into_owned();
             let (total, used, available) = if REMOTE.contains(&kind.as_str()) {
-                remote_space(stuck, &mount)?
+                let space = remote_space(stuck, &mount)?;
+                (space.total, space.used, space.available)
             } else {
                 disk.refresh_specifics(DiskRefreshKind::nothing().with_storage());
                 let (total, available) = (disk.total_space(), disk.available_space());

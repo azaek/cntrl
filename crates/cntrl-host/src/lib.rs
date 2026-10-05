@@ -14,11 +14,13 @@ pub mod machine;
 #[cfg(target_os = "macos")]
 pub mod macos;
 mod mounts;
+pub mod network;
 pub mod oslog;
 pub mod power;
 pub mod processes;
 pub mod services;
 pub mod stats;
+pub mod storage;
 pub mod system;
 #[cfg(target_os = "linux")]
 pub mod systemd;

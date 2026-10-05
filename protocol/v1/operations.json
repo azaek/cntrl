@@ -155,6 +155,28 @@
       "result": {
         "$ref": "#/$defs/PowerStarted"
       }
+    },
+    {
+      "name": "network.listeners",
+      "capability": "network.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/Listeners"
+      }
+    },
+    {
+      "name": "storage.health",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/DisksHealth"
+      }
     }
   ],
   "topics": [
@@ -189,6 +211,28 @@
       },
       "event": {
         "$ref": "#/$defs/LogsBatch"
+      }
+    },
+    {
+      "name": "network",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NetworkParams"
+      },
+      "event": {
+        "$ref": "#/$defs/NetworkSample"
+      }
+    },
+    {
+      "name": "storage",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/StorageParams"
+      },
+      "event": {
+        "$ref": "#/$defs/StorageSample"
       }
     }
   ]

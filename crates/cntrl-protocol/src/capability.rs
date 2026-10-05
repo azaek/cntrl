@@ -14,6 +14,7 @@ pub const CAPABILITIES: &[&str] = &[
     "services.read",
     "services.manage",
     "logs.read",
+    "network.read",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.
@@ -23,6 +24,7 @@ pub const MONITOR_ONLY: &[&str] = &[
     "power.read",
     "services.read",
     "logs.read",
+    "network.read",
 ];
 
 /// Whether `name` is a capability of this protocol version.

@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn the_same_content_hashes_the_same_whatever_its_source() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let text = "version = 1\nallow = [\"logs.read\", \"power.read\", \"system.read\", \"services.read\", \"processes.read\"]\n";
+        let text = "version = 1\nallow = [\"logs.read\", \"network.read\", \"power.read\", \"system.read\", \"services.read\", \"processes.read\"]\n";
         let path = write_policy(dir.path(), text, 0o644);
         let (PolicyState::Valid { policy: from_file }, PolicyState::Valid { policy: builtin }) = (
             load(&path, own_uid(&path)),

@@ -250,7 +250,64 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             .await
             .map_err(CallError::internal)
         }
+        Call::SocketOwners { inodes } => {
+            if !policy::load(&state.policy_path, state.owner).allows("network.read") {
+                let reason = "the device policy doesn't allow network.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            blocking(move || {
+                let wanted: std::collections::HashSet<u64> = inodes.into_iter().collect();
+                let owners = cntrl_host::network::socket_owners(std::path::Path::new("/"), &wanted);
+                Ok(json!({ "owners": owners.into_iter().collect::<Vec<(u64, u32)>>() }))
+            })
+            .await
+            .map_err(CallError::internal)
+        }
+        Call::Listeners => {
+            if !policy::load(&state.policy_path, state.owner).allows("network.read") {
+                let reason = "the device policy doesn't allow network.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            listeners().await
+        }
+        Call::DiskHealth { disks } => {
+            if !policy::load(&state.policy_path, state.owner).allows("system.read") {
+                let reason = "the device policy doesn't allow system.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            disk_health(disks).await
+        }
     }
+}
+
+/// Every port listened on, from lsof as root (angle 13).
+#[cfg(target_os = "macos")]
+async fn listeners() -> Result<Value, CallError> {
+    blocking(|| {
+        let found = cntrl_host::network::mac::listeners().map_err(|e| e.to_string())?;
+        serde_json::to_value(found).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(CallError::internal)
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn listeners() -> Result<Value, CallError> {
+    let reason = "on this OS the agent reads the sockets and asks privd only who owns them";
+    Err(CallError::new(ErrorCode::BadRequest, reason))
+}
+
+/// Each disk's SMART health, from smartctl, which reads the raw device.
+#[cfg(target_os = "linux")]
+async fn disk_health(disks: Vec<String>) -> Result<Value, CallError> {
+    let health = cntrl_host::storage::smart_health(&disks).await;
+    serde_json::to_value(health).map_err(|e| CallError::internal(e.to_string()))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn disk_health(_disks: Vec<String>) -> Result<Value, CallError> {
+    let reason = "on this OS the agent asks diskutil itself";
+    Err(CallError::new(ErrorCode::BadRequest, reason))
 }
 
 /// Stops a process for Console, under `processes.signal` (D24). privd checks

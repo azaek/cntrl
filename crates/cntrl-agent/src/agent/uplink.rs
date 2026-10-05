@@ -18,11 +18,13 @@ use cntrl_protocol::frame::{
     Subscribe, Welcome,
 };
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
+use cntrl_protocol::network::{Listeners, NetworkParams, NetworkSample};
 use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
+use cntrl_protocol::storage::{DisksHealth, StorageParams, StorageSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
 use futures_util::{SinkExt, StreamExt};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -46,11 +48,13 @@ use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
 use super::logs;
+use super::network;
 use super::outbox::Outbox;
 use super::paused::{self, PausedState};
 use super::policy::PolicyState;
 use super::processes::{self, Table};
 use super::stats::Latest;
+use super::storage;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the gateway has to send its challenge, then its welcome.
@@ -218,6 +222,10 @@ pub struct UplinkConfig {
     pub stats: Arc<Latest>,
     /// The latest process table, for the `processes` topic.
     pub processes: Arc<processes::Latest>,
+    /// The latest interfaces, for the `network` topic.
+    pub network: Arc<network::Latest>,
+    /// The latest disks and volumes, for the `storage` topic.
+    pub storage: Arc<storage::Latest>,
     /// Records for Console, sent and acknowledged over the link.
     pub outbox: Arc<Outbox>,
     /// The alert rules this device decides itself, which the hub sends (D43).
@@ -519,10 +527,15 @@ async fn online(
     }
     // A reconnecting session gets its subscriptions back in the welcome.
     for subscribe in welcome.subs.iter().cloned() {
-        let latest = (&*session.config.stats, &*session.config.processes);
+        let samplers = Samplers {
+            stats: &session.config.stats,
+            processes: &session.config.processes,
+            network: &session.config.network,
+            storage: &session.config.storage,
+        };
         if let Err(end) = session
             .subs
-            .open(ws, subscribe, &session.policy, latest)
+            .open(ws, subscribe, &session.policy, &samplers)
             .await
         {
             return end;
@@ -590,6 +603,18 @@ async fn online(
             }
             Some(table) = next_value(&mut session.subs.processes), if session.subs.processes.is_some() => {
                 if let Err(end) = session.subs.publish_table(ws, &table, &session.policy).await {
+                    return end;
+                }
+            }
+            Some(sample) = next_value(&mut session.subs.network), if session.subs.network.is_some() => {
+                let network = |topic: &Watching| matches!(topic, Watching::Network);
+                if let Err(end) = session.subs.publish_to(ws, network, sample.ts, &*sample).await {
+                    return end;
+                }
+            }
+            Some(sample) = next_value(&mut session.subs.storage), if session.subs.storage.is_some() => {
+                let storage = |topic: &Watching| matches!(topic, Watching::Storage);
+                if let Err(end) = session.subs.publish_to(ws, storage, sample.ts, &*sample).await {
                     return end;
                 }
             }
@@ -739,8 +764,17 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
         Frame::Sub(subscribe) => {
             let policy = &session.policy;
-            let latest = (&*session.config.stats, &*session.config.processes);
-            return session.subs.open(ws, subscribe, policy, latest).await.err();
+            let samplers = Samplers {
+                stats: &session.config.stats,
+                processes: &session.config.processes,
+                network: &session.config.network,
+                storage: &session.config.storage,
+            };
+            return session
+                .subs
+                .open(ws, subscribe, policy, &samplers)
+                .await
+                .err();
         }
         Frame::Unsub(unsubscribe) => {
             session.subs.close(&unsubscribe.id);
@@ -916,6 +950,26 @@ async fn execute(
             serde_json::to_value(power_info().await?)
                 .map_err(|e| CallError::internal(e.to_string()))
         }
+        ops::Call::NetworkListeners(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            serde_json::to_value(listeners(privd, limit).await?)
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::StorageHealth(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            serde_json::to_value(disk_health(privd, limit).await?)
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
         // privd checks the policy again and audits its own decision.
         ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,
         ops::Call::PowerPoweroff(_) => power(request, PowerAction::Poweroff, privd, limit).await,
@@ -992,6 +1046,131 @@ async fn power(
         actor: request.actor.clone(),
     };
     ipc::call_within(privd, call, limit).await
+}
+
+/// How long privd may take to say who owns the sockets; past it, the ports
+/// go without their processes.
+#[cfg(target_os = "linux")]
+const OWNERS_LIMIT: Duration = Duration::from_secs(10);
+
+/// The ports the machine listens on (angle 13). On Linux the agent reads the
+/// socket tables, which anyone can, and privd says which process holds each,
+/// which takes root; without privd the ports come alone.
+#[cfg(target_os = "linux")]
+async fn listeners(privd: &Path, limit: Duration) -> Result<Listeners, CallError> {
+    #[derive(Deserialize)]
+    struct Owners {
+        owners: Vec<(u64, u32)>,
+    }
+    let root = Path::new("/");
+    let sockets =
+        tokio::task::spawn_blocking(|| cntrl_host::network::linux::sockets(Path::new("/")))
+            .await
+            .map_err(|e| CallError::internal(e.to_string()))?;
+    let inodes = sockets.iter().map(|socket| socket.inode).collect();
+    let owners = match ipc::call_within(
+        privd,
+        Call::SocketOwners { inodes },
+        limit.min(OWNERS_LIMIT),
+    )
+    .await
+    {
+        Ok(value) => serde_json::from_value::<Owners>(value)
+            .ok()
+            .map(|found| found.owners.into_iter().collect::<HashMap<u64, u32>>()),
+        Err(e) => {
+            warn!("privd didn't say who owns the sockets: {}", e.msg);
+            None
+        }
+    };
+    let users = cntrl_host::network::user_names(root);
+    Ok(cntrl_host::network::listeners(
+        root,
+        &sockets,
+        owners.as_ref(),
+        &users,
+    ))
+}
+
+/// On a Mac only root sees other users' sockets, so privd runs lsof; each
+/// listener's service is the launchd job whose process it is.
+#[cfg(target_os = "macos")]
+async fn listeners(privd: &Path, limit: Duration) -> Result<Listeners, CallError> {
+    let value = ipc::call_within(privd, Call::Listeners, limit).await?;
+    let mut found: Listeners =
+        serde_json::from_value(value).map_err(|e| CallError::internal(e.to_string()))?;
+    if let Ok(services) = list_services().await {
+        let jobs: HashMap<u32, String> = services
+            .into_iter()
+            .filter_map(|service| Some((service.pid?, service.unit)))
+            .collect();
+        for listener in &mut found.listeners {
+            listener.service = listener.pid.and_then(|pid| jobs.get(&pid).cloned());
+        }
+    }
+    Ok(found)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn listeners(_privd: &Path, _limit: Duration) -> Result<Listeners, CallError> {
+    Err(HostError::Unsupported.into())
+}
+
+/// What each physical disk says of its health, leaving out a hypervisor's,
+/// which have none of their own (angle 13). On Linux smartctl reads the raw
+/// device, so privd runs it.
+#[cfg(target_os = "linux")]
+async fn disk_health(privd: &Path, limit: Duration) -> Result<DisksHealth, CallError> {
+    let disks = physical_disks().await?;
+    if disks.is_empty() {
+        return Ok(only_virtual());
+    }
+    let value = ipc::call_within(privd, Call::DiskHealth { disks }, limit).await?;
+    serde_json::from_value(value).map_err(|e| CallError::internal(e.to_string()))
+}
+
+/// On a Mac diskutil says, without root.
+#[cfg(target_os = "macos")]
+async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, CallError> {
+    let disks = physical_disks().await?;
+    if disks.is_empty() {
+        return Ok(only_virtual());
+    }
+    tokio::task::spawn_blocking(move || cntrl_host::storage::mac::health(&disks))
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, CallError> {
+    Err(HostError::Unsupported.into())
+}
+
+/// A machine whose disks a hypervisor provides can't see their health; the
+/// host it runs on can.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn only_virtual() -> DisksHealth {
+    DisksHealth {
+        disks: Vec::new(),
+        note: Some(
+            "its disks are virtual, so their health is for the machine it runs on to tell"
+                .to_owned(),
+        ),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+async fn physical_disks() -> Result<Vec<String>, CallError> {
+    tokio::task::spawn_blocking(|| {
+        cntrl_host::storage::backend()
+            .disks()
+            .into_iter()
+            .filter(|disk| disk.kind != cntrl_protocol::storage::DiskKind::Virtual)
+            .map(|disk| disk.name)
+            .collect()
+    })
+    .await
+    .map_err(|e| CallError::internal(e.to_string()))
 }
 
 /// What the machine can do about power. Reading it needs no root (angle 10).
@@ -1076,6 +1255,8 @@ const DUE_SLACK_MS: u64 = 500;
 struct Subscriptions {
     stats: Option<watch::Receiver<Option<Arc<StatsSample>>>>,
     processes: Option<watch::Receiver<Option<Arc<Table>>>>,
+    network: Option<watch::Receiver<Option<Arc<NetworkSample>>>>,
+    storage: Option<watch::Receiver<Option<Arc<StorageSample>>>>,
     open: HashMap<String, Subscription>,
     log_out: logs::Batches,
     log_batches: mpsc::Receiver<(String, LogsBatch)>,
@@ -1089,6 +1270,8 @@ impl Subscriptions {
         Self {
             stats: None,
             processes: None,
+            network: None,
+            storage: None,
             open: HashMap::new(),
             log_out,
             log_batches,
@@ -1131,6 +1314,16 @@ enum Watching {
     Stats,
     Processes(ProcessesParams),
     Logs(logs::Reader),
+    Network,
+    Storage,
+}
+
+/// The samplers a subscription reads from.
+struct Samplers<'a> {
+    stats: &'a Latest,
+    processes: &'a processes::Latest,
+    network: &'a network::Latest,
+    storage: &'a storage::Latest,
 }
 
 /// A process table this recent goes to a new subscription at once.
@@ -1143,7 +1336,7 @@ impl Subscriptions {
         ws: &mut Ws,
         subscribe: Subscribe,
         policy: &PolicyState,
-        (stats, tables): (&Latest, &processes::Latest),
+        samplers: &Samplers<'_>,
     ) -> Result<(), End> {
         let refuse = |code, msg: String| Frame::Res(Response::err(subscribe.id.clone(), code, msg));
         if subscribe.ver != 1 {
@@ -1161,7 +1354,7 @@ impl Subscriptions {
         match topic {
             Topic::Stats(params) => {
                 let every_ms = params.interval_ms.unwrap_or(1_000).max(1_000);
-                let receiver = self.stats.get_or_insert_with(|| stats.subscribe());
+                let receiver = self.stats.get_or_insert_with(|| samplers.stats.subscribe());
                 let latest = receiver.borrow().clone();
                 let accepted = encode(&StatsParams {
                     interval_ms: Some(every_ms),
@@ -1193,7 +1386,9 @@ impl Subscriptions {
                     limit: Some(limit),
                     ..params
                 };
-                let receiver = self.processes.get_or_insert_with(|| tables.subscribe());
+                let receiver = self
+                    .processes
+                    .get_or_insert_with(|| samplers.processes.subscribe());
                 let latest = receiver.borrow().clone();
                 let accepted = encode(&params)?;
                 send(
@@ -1216,6 +1411,62 @@ impl Subscriptions {
                     }
                 }
                 debug!(id = %subscribe.id, "processes subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+            Topic::Network(params) => {
+                let every_ms = params.interval_ms.unwrap_or(2_000).max(1_000);
+                let receiver = self
+                    .network
+                    .get_or_insert_with(|| samplers.network.subscribe());
+                let latest = receiver.borrow().clone();
+                let accepted = encode(&NetworkParams {
+                    interval_ms: Some(every_ms),
+                })?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let mut sub = Subscription {
+                    topic: Watching::Network,
+                    every_ms: u64::from(every_ms),
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(sample) =
+                    latest.filter(|sample| now_ms().saturating_sub(sample.ts) < FRESH_TABLE_MS)
+                {
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
+                }
+                debug!(id = %subscribe.id, every_ms, "network subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+            Topic::Storage(params) => {
+                let every_ms = params.interval_ms.unwrap_or(2_000).max(1_000);
+                let receiver = self
+                    .storage
+                    .get_or_insert_with(|| samplers.storage.subscribe());
+                let latest = receiver.borrow().clone();
+                let accepted = encode(&StorageParams {
+                    interval_ms: Some(every_ms),
+                })?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let mut sub = Subscription {
+                    topic: Watching::Storage,
+                    every_ms: u64::from(every_ms),
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(sample) =
+                    latest.filter(|sample| now_ms().saturating_sub(sample.ts) < FRESH_TABLE_MS)
+                {
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
+                }
+                debug!(id = %subscribe.id, every_ms, "storage subscription opened");
                 self.open.insert(subscribe.id, sub);
             }
             Topic::Logs(params) => {
@@ -1364,6 +1615,20 @@ impl Subscriptions {
         {
             self.processes = None;
         }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::Network))
+        {
+            self.network = None;
+        }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::Storage))
+        {
+            self.storage = None;
+        }
     }
 
     /// Sends a new sample to every `stats` subscription that's due.
@@ -1371,6 +1636,22 @@ impl Subscriptions {
         for (id, sub) in &mut self.open {
             if matches!(sub.topic, Watching::Stats) && sample.ts >= sub.next_ts {
                 send_event(ws, id, sub, sample.ts, sample).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Sends a new sample to every subscription of its kind that's due.
+    async fn publish_to<T: Serialize>(
+        &mut self,
+        ws: &mut Ws,
+        kind: impl Fn(&Watching) -> bool,
+        ts: u64,
+        sample: &T,
+    ) -> Result<(), End> {
+        for (id, sub) in &mut self.open {
+            if kind(&sub.topic) && ts >= sub.next_ts {
+                send_event(ws, id, sub, ts, sample).await?;
             }
         }
         Ok(())

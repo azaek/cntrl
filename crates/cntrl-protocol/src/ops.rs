@@ -109,6 +109,22 @@ define_ops! {
         capability: "power.hibernate",
         since: 1,
     },
+    /// The ports the machine listens on, each with the process and service
+    /// behind it where privd can find them (angle 13).
+    NetworkListeners = "network.listeners" {
+        params: crate::system::NoParams,
+        result: crate::network::Listeners,
+        capability: "network.read",
+        since: 1,
+    },
+    /// What each disk says of its health: SMART through smartctl on Linux,
+    /// where smartmontools is installed, and diskutil on a Mac (angle 13).
+    StorageHealth = "storage.health" {
+        params: crate::system::NoParams,
+        result: crate::storage::DisksHealth,
+        capability: "system.read",
+        since: 1,
+    },
 }
 
 define_topics! {
@@ -133,6 +149,22 @@ define_topics! {
         params: crate::logs::LogsParams,
         event: crate::logs::LogsBatch,
         capability: "logs.read",
+        since: 1,
+    },
+    /// The interfaces, with each one's traffic, the default routes and DNS,
+    /// read every 2 s only while someone is subscribed (angle 13).
+    Network = "network" {
+        params: crate::network::NetworkParams,
+        event: crate::network::NetworkSample,
+        capability: "system.read",
+        since: 1,
+    },
+    /// The physical disks, with each one's traffic, and the volumes, read
+    /// every 2 s only while someone is subscribed (angle 13).
+    Storage = "storage" {
+        params: crate::storage::StorageParams,
+        event: crate::storage::StorageSample,
+        capability: "system.read",
         since: 1,
     },
 }

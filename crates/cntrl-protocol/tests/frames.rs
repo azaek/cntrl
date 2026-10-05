@@ -7,11 +7,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use cntrl_protocol::frame::RecordKind;
+use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
 use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesSample;
 use cntrl_protocol::records::{AlertRecord, AuditCheckpoint, StatsRecord};
 use cntrl_protocol::stats::{SensorKind, StatsSample};
+use cntrl_protocol::storage::{DiskKind, DisksHealth, HealthStatus, StorageSample};
 use cntrl_protocol::system::SystemInfo;
 use cntrl_protocol::{ErrorCode, Frame};
 use serde_json::{Value, json};
@@ -201,4 +203,43 @@ fn power_info_decodes() {
     assert_eq!(info.unlock_after_restart, Some(DiskUnlock::FileVault));
     assert!(info.sessions[1].remote && info.inhibitors.is_empty());
     assert_eq!(PowerAction::Hibernate.op(), "power.hibernate");
+}
+
+/// The data of an event or a successful response in a golden frame.
+#[allow(clippy::expect_used)]
+fn data_of(file: &str) -> Value {
+    let text = fs::read_to_string(frames_dir().join(file)).expect("read the frame");
+    match serde_json::from_str::<Frame>(&text).expect("a frame") {
+        Frame::Evt(event) => event.data,
+        Frame::Res(res) => res.data.expect("data"),
+        other => panic!("{file} is neither an event nor a response: {other:?}"),
+    }
+}
+
+#[test]
+fn network_frames_decode() {
+    let sample: NetworkSample =
+        serde_json::from_value(data_of("evt-network.json")).expect("a network sample");
+    assert_eq!(sample.interfaces.len(), 3);
+    assert_eq!(sample.interfaces[1].label.as_deref(), Some("Wi-Fi"));
+    assert_eq!(sample.interfaces[2].kind, InterfaceKind::Tunnel);
+    assert_eq!(sample.routes[1].gateway, None);
+    let listeners: Listeners =
+        serde_json::from_value(data_of("res-network-listeners.json")).expect("listeners");
+    assert!(listeners.owners);
+    assert_eq!(listeners.listeners[3].protocol, SocketProtocol::Udp);
+    assert_eq!(listeners.listeners[3].pid, None);
+}
+
+#[test]
+fn storage_frames_decode() {
+    let sample: StorageSample =
+        serde_json::from_value(data_of("evt-storage.json")).expect("a storage sample");
+    assert_eq!(sample.disks[1].kind, DiskKind::Hdd);
+    assert!(sample.volumes[1].network);
+    assert_eq!(sample.volumes[1].inodes, None);
+    let health: DisksHealth =
+        serde_json::from_value(data_of("res-storage-health.json")).expect("health");
+    assert_eq!(health.disks[1].status, HealthStatus::Warning);
+    assert_eq!(health.disks[0].wear, Some(2));
 }

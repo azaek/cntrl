@@ -99,6 +99,21 @@ pub enum Call {
     LogStream {
         params: LogsParams,
     },
+    /// Which process holds each of these socket inodes, for the Network tab
+    /// (angle 13): reading another user's descriptors takes root. privd checks
+    /// the policy itself.
+    SocketOwners {
+        inodes: Vec<u64>,
+    },
+    /// Every port listened on, with the process behind each, on a Mac, where
+    /// only root sees other users' sockets (angle 13). privd checks the policy
+    /// itself.
+    Listeners,
+    /// Each disk's SMART health, on Linux, where reading it takes the raw
+    /// device (angle 13). privd checks the policy itself.
+    DiskHealth {
+        disks: Vec<String>,
+    },
 }
 
 /// Why privd refused or failed a call, with the protocol code to answer with.

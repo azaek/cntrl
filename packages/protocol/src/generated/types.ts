@@ -191,14 +191,71 @@ export interface CpuStats {
     load: LoadAverage;
 }
 
+/** A physical disk, with its traffic since the previous reading. */
+export interface Disk {
+    /** As the OS names it, such as `sda`, `nvme0n1` or `disk0`. */
+    name: string;
+    model?: string | null;
+    /** In bytes. */
+    size: number;
+    kind: DiskKind;
+    /** Plugged in over USB or Thunderbolt, or removable media. */
+    external: boolean;
+    /** Bytes per second. */
+    read: number;
+    written: number;
+    /** Requests completed per second, where the OS counts them. */
+    reads?: number | null;
+    writes?: number | null;
+    /**
+     * How long a request took on average, queueing included, in
+     * milliseconds; absent when none completed.
+     */
+    wait_ms?: number | null;
+    /**
+     * The share of the time it had requests in progress, 0 to 1. A disk
+     * that serves requests in parallel, as an SSD does, can take more while
+     * at 1 (iostat(1), %util).
+     */
+    busy?: number | null;
+}
+
+/** What one disk says of its health. */
+export interface DiskHealth {
+    /** The disk's name, as `storage` gives it. */
+    disk: string;
+    status: HealthStatus;
+    temperature?: number | null;
+    power_on_hours?: number | null;
+    /**
+     * How much of an SSD's rated life is used, as a percentage; it can pass
+     * 100.
+     */
+    wear?: number | null;
+    /** What's wrong, in a few words, when something is. */
+    detail?: string | null;
+}
+
 /** Disk throughput, in bytes per second. */
 export interface DiskIo {
     read: number;
     write: number;
 }
 
+export type DiskKind = ("nvme" | "unknown") | "ssd" | "hdd" | "virtual";
+
 /** Why a restarted machine waits before it can reconnect. */
 export type DiskUnlock = "file_vault" | "encrypted_root";
+
+/** The result of `storage.health`. */
+export interface DisksHealth {
+    disks: DiskHealth[];
+    /**
+     * Why there's nothing to say, when there isn't: on Linux, that
+     * smartmontools isn't installed.
+     */
+    note?: string | null;
+}
 
 /** Why an enrollment failed. */
 export interface EnrollError {
@@ -347,6 +404,8 @@ export interface GpuStats {
     power?: number | null;
 }
 
+export type HealthStatus = "ok" | "warning" | "failing" | "unknown";
+
 /** How often the agent pings, and how long it waits for a pong. */
 export interface HeartbeatConfig {
     interval_ms: number;
@@ -402,6 +461,49 @@ export interface Inhibitor {
     mode: string;
 }
 
+/** One network interface. */
+export interface Interface {
+    /** As the OS names it, such as `eth0`, `enp3s0` or `en0`. */
+    name: string;
+    /** The port's name where the OS gives one, such as `Wi-Fi` on a Mac. */
+    label?: string | null;
+    kind: InterfaceKind;
+    /**
+     * Hardware, not a bridge, tunnel or container link, whose traffic also
+     * crosses a physical interface.
+     */
+    physical: boolean;
+    /** Able to pass packets. */
+    up: boolean;
+    /** The link's speed in megabits per second, where the OS knows it. */
+    speed?: number | null;
+    mtu?: number | null;
+    /** The hardware address, as `aa:bb:cc:dd:ee:ff`. */
+    mac?: string | null;
+    addresses: InterfaceAddress[];
+    /** Bytes per second since the previous reading. */
+    received: number;
+    sent: number;
+    /** Bytes since the interface came up. */
+    received_total: number;
+    sent_total: number;
+    /** Packets that failed, sending or receiving, since it came up. */
+    errors: number;
+}
+
+/** An address on an interface. */
+export interface InterfaceAddress {
+    /** IPv4 or IPv6, without the prefix, such as `192.168.1.20`. */
+    address: string;
+    /** The prefix length: 24 for a /24. */
+    prefix: number;
+}
+
+export type InterfaceKind =
+    | ("ethernet" | "wifi" | "loopback" | "bridge" | "bond" | "vlan" | "other")
+    | "tunnel"
+    | "virtual";
+
 /**
  * A job result, as systemd reports it in `JobRemoved`. On macOS it is `done`
  * once launchd shows the job running again (or finished cleanly), `failed` if
@@ -414,6 +516,37 @@ export interface Limits {
     max_frame_bytes: number;
     max_inflight: number;
     max_rec_batch: number;
+}
+
+/**
+ * A socket waiting for others: a TCP socket listening, or a UDP socket bound
+ * and not connected.
+ */
+export interface Listener {
+    protocol: SocketProtocol;
+    /**
+     * The address it's bound to: `0.0.0.0` or `::` for every address,
+     * `127.0.0.1` or `::1` for this machine only, or one of the machine's.
+     */
+    address: string;
+    port: number;
+    /** Who owns the socket. */
+    user?: string | null;
+    pid?: number | null;
+    /** The process's name. */
+    process?: string | null;
+    /** The service it runs in: a systemd unit, or on a Mac a launchd job. */
+    service?: string | null;
+}
+
+/** The result of `network.listeners`. */
+export interface Listeners {
+    listeners: Listener[];
+    /**
+     * Whether the processes were found. Finding them takes root, so privd
+     * does it; without privd the ports come alone.
+     */
+    owners: boolean;
 }
 
 /** Load averages over 1, 5 and 15 minutes. */
@@ -512,6 +645,26 @@ export interface MemoryStats {
 export interface NetworkIo {
     received: number;
     sent: number;
+}
+
+/** What a `network` subscription asks for. */
+export interface NetworkParams {
+    /** How often to send, in milliseconds: 2000 when absent, 1000 at least. */
+    interval_ms?: number | null;
+}
+
+/** One `network` event. */
+export interface NetworkSample {
+    /** When it was read, in Unix milliseconds. */
+    ts: number;
+    interfaces: Interface[];
+    /**
+     * Where traffic for elsewhere goes: one default route per address family
+     * that has one.
+     */
+    routes: Route[];
+    /** The name servers the machine asks, as its resolver names them. */
+    dns: string[];
 }
 
 /** Parameters of operations that take none: `{}` or an absent `data`. */
@@ -730,6 +883,14 @@ export interface Response {
     err?: ErrorBody | null;
 }
 
+/** A default route. */
+export interface Route {
+    /** The next hop, such as `192.168.1.1`; absent for a point-to-point link. */
+    gateway?: string | null;
+    /** The interface the route leaves by. */
+    interface: string;
+}
+
 /** What a temperature sensor measures. */
 export type SensorKind = ("disk" | "gpu") | "cpu" | "other";
 
@@ -825,6 +986,8 @@ export interface Session {
 /** Signature algorithm of the device key. */
 export type SigAlg = "Unknown" | "ES256";
 
+export type SocketProtocol = "tcp" | "udp";
+
 /** Parameters of the `stats` topic. */
 export interface StatsParams {
     /** Sample interval; the agent raises anything below 1,000 ms to 1,000 ms. */
@@ -877,6 +1040,21 @@ export interface StatsSample {
 
 export type StopResult = "unknown" | "stopped" | "still_running" | "not_running";
 
+/** What a `storage` subscription asks for. */
+export interface StorageParams {
+    /** How often to send, in milliseconds: 2000 when absent, 1000 at least. */
+    interval_ms?: number | null;
+}
+
+/** One `storage` event. */
+export interface StorageSample {
+    /** When it was read, in Unix milliseconds. */
+    ts: number;
+    /** The physical disks, not partitions, RAID or device-mapper devices. */
+    disks: Disk[];
+    volumes: Volume[];
+}
+
 /** Starts a live topic. */
 export interface Subscribe {
     id: string;
@@ -928,6 +1106,37 @@ export interface Temperature {
 /** Ends a subscription. */
 export interface Unsubscribe {
     id: string;
+}
+
+/** A mounted filesystem. */
+export interface Volume {
+    /** Where it's mounted, such as `/` or `/mnt/media`. */
+    mount: string;
+    /** The volume's name where the OS gives one, such as `Macintosh HD`. */
+    name?: string | null;
+    /** Its type, such as `ext4`, `zfs`, `nfs4` or `apfs`. */
+    kind: string;
+    /**
+     * What's mounted: a device such as `/dev/nvme0n1p2`, or for a network
+     * volume its server and share.
+     */
+    source?: string | null;
+    /** The physical disk it's on, by name, when there's one. */
+    disk?: string | null;
+    total: number;
+    /**
+     * In use. On a Mac it's the whole APFS container's use, since its volumes
+     * share the space.
+     */
+    used: number;
+    /** What a user other than root can still write. */
+    available: number;
+    /** Files it can hold, where the filesystem has a fixed number. */
+    inodes?: number | null;
+    inodes_used?: number | null;
+    read_only: boolean;
+    /** Mounted from another machine: NFS, SMB and the like. */
+    network: boolean;
 }
 
 /** Wake-on-LAN on a wired interface. */
