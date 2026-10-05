@@ -14,6 +14,7 @@ pub mod machine;
 #[cfg(target_os = "macos")]
 pub mod macos;
 mod mounts;
+pub mod oslog;
 pub mod power;
 pub mod processes;
 pub mod services;

@@ -12,6 +12,10 @@ pub struct LogsParams {
     /// absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// The user whose session runs `unit`, for a user's LaunchAgent on a Mac;
+    /// the system's service when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     /// The least important to show, as a syslog priority: 0 (emergency) to
     /// 7 (debug); everything when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -43,12 +47,13 @@ pub struct LogsBatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LogEntry {
-    /// When it was logged, in milliseconds since the Unix epoch.
+    /// When it was logged, in milliseconds since the Unix epoch; 0 when
+    /// that isn't known, as for the earlier lines of a service's output file.
     pub ts: u64,
     /// Its syslog priority: 0 (emergency) to 7 (debug).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
-    /// Who logged it: the service, or the program's name.
+    /// Who logged it: the service, the program's name, or the output file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -71,7 +71,8 @@ pub fn parse(line: &str) -> Option<LogEntry> {
     })
 }
 
-fn cut(mut message: String) -> String {
+/// A message cut at [`MAX_MESSAGE`] bytes, on a character, with an ellipsis.
+pub fn cut(mut message: String) -> String {
     if message.len() > MAX_MESSAGE {
         let mut end = MAX_MESSAGE;
         while !message.is_char_boundary(end) {
@@ -108,6 +109,7 @@ mod tests {
             priority: Some(9),
             grep: Some("error".to_owned()),
             lines: Some(5_000),
+            ..LogsParams::default()
         };
         let asked = args(&params);
         assert!(asked.contains(&"--lines=1000".to_owned()));

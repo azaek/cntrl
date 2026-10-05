@@ -413,6 +413,66 @@ fn app_open(uid: u32, bundle: &str) -> Result<bool, HostError> {
         }))
 }
 
+/// Where a job's log comes from (angle 11 part 3): the processes its unified
+/// log lines come from, and the files its output goes to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobLog {
+    pub job: crate::oslog::Job,
+    /// Its standard output and error where they go to files, once each.
+    pub files: Vec<String>,
+}
+
+/// A job's log sources, from `launchctl print`.
+pub fn job_log(domain: &str, label: &str) -> Result<JobLog, HostError> {
+    let output = launchctl(&["print", &format!("{domain}/{label}")])?;
+    if !output.status.success() {
+        return Err(HostError::NotFound(format!("launchd has no job {label}")));
+    }
+    Ok(parse_job_log(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Reads the job's own lines, one tab in, not those of the sections inside it.
+fn parse_job_log(printed: &str) -> JobLog {
+    let field = |key: &str| {
+        printed.lines().find_map(|line| {
+            let line = line.strip_prefix('\t')?;
+            if line.starts_with('\t') {
+                return None;
+            }
+            let (name, value) = line.split_once(" = ")?;
+            (name == key).then(|| value.trim().to_owned())
+        })
+    };
+    // A job with arguments and no program runs its first argument.
+    let first_argument = || {
+        let mut lines = printed
+            .lines()
+            .skip_while(|line| *line != "\targuments = {");
+        lines.next()?;
+        let first = lines.next()?.trim();
+        (first != "}").then(|| first.to_owned())
+    };
+    let program = field("program")
+        .or_else(first_argument)
+        .filter(|program| program.starts_with('/'));
+    let mut files: Vec<String> = Vec::new();
+    for path in ["stdout path", "stderr path"]
+        .iter()
+        .filter_map(|key| field(key))
+    {
+        if path.starts_with('/') && path != "/dev/null" && !files.contains(&path) {
+            files.push(path);
+        }
+    }
+    JobLog {
+        job: crate::oslog::Job {
+            program,
+            pid: field("pid").and_then(|pid| pid.parse().ok()),
+        },
+        files,
+    }
+}
+
 /// A user's GUI domain, where their LaunchAgents and apps live.
 pub fn user_domain(uid: u32) -> String {
     format!("gui/{uid}")
@@ -479,6 +539,24 @@ fn message(output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_jobs_log_comes_from_its_program_process_and_output_files() {
+        let printed = "system/pw.cntrl.agent = {\n\tactive count = 1\n\tstate = running\n\n\tprogram = /Library/Application Support/cntrl/bin/cntrl-agent\n\targuments = {\n\t\t/Library/Application Support/cntrl/bin/cntrl-agent\n\t\trun\n\t}\n\n\tstdout path = /var/log/cntrl/agent.log\n\tstderr path = /var/log/cntrl/agent.log\n\tenvironment = {\n\t\tpid = 7\n\t}\n\tpid = 95556\n}\n";
+        let log = parse_job_log(printed);
+        assert_eq!(
+            log.job.program.as_deref(),
+            Some("/Library/Application Support/cntrl/bin/cntrl-agent")
+        );
+        assert_eq!(log.job.pid, Some(95556));
+        assert_eq!(log.files, ["/var/log/cntrl/agent.log"]);
+        // Arguments without a program, output nowhere, not running.
+        let printed = "system/x = {\n\targuments = {\n\t\t/usr/local/bin/x\n\t\t--serve\n\t}\n\tstderr path = /dev/null\n}\n";
+        let log = parse_job_log(printed);
+        assert_eq!(log.job.program.as_deref(), Some("/usr/local/bin/x"));
+        assert_eq!(log.job.pid, None);
+        assert!(log.files.is_empty());
+    }
 
     #[test]
     fn reads_launchds_overrides() {

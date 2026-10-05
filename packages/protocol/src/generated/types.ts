@@ -356,11 +356,14 @@ export interface LoadAverage {
 
 /** One log line. */
 export interface LogEntry {
-    /** When it was logged, in milliseconds since the Unix epoch. */
+    /**
+     * When it was logged, in milliseconds since the Unix epoch; 0 when
+     * that isn't known, as for the earlier lines of a service's output file.
+     */
     ts: number;
     /** Its syslog priority: 0 (emergency) to 7 (debug). */
     priority?: number | null;
-    /** Who logged it: the service, or the program's name. */
+    /** Who logged it: the service, the program's name, or the output file. */
     source?: string | null;
     pid?: number | null;
     /** The message, cut at 4 KiB. */
@@ -389,6 +392,11 @@ export interface LogsParams {
      * absent.
      */
     unit?: string | null;
+    /**
+     * The user whose session runs `unit`, for a user's LaunchAgent on a Mac;
+     * the system's service when absent.
+     */
+    user?: string | null;
     /**
      * The least important to show, as a syslog priority: 0 (emergency) to
      * 7 (debug); everything when absent.

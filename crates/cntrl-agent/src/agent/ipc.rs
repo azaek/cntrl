@@ -8,6 +8,7 @@ use bytes::Bytes;
 use cntrl_host::HostError;
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::logs::LogsParams;
 use cntrl_protocol::power::PowerAction;
 use cntrl_protocol::service::{ServiceAction, ServiceScope};
 use futures_util::{SinkExt, StreamExt};
@@ -90,6 +91,13 @@ pub enum Call {
         force: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Actor>,
+    },
+    /// A log for a `logs` subscription, on a Mac, where only an admin reads
+    /// the unified log (angle 11 part 3). privd checks the policy itself and
+    /// answers with batches, the last saying why it ended, until the agent
+    /// hangs up.
+    LogStream {
+        params: LogsParams,
     },
 }
 

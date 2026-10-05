@@ -17,6 +17,7 @@ use cntrl_host::services::service_name;
 use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::codes::ErrorCode;
 use cntrl_protocol::frame::Actor;
+use cntrl_protocol::logs::LogsParams;
 use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::service::{JobResult, ServiceAction, ServiceJob, ServiceScope, ServiceStatus};
@@ -153,6 +154,10 @@ async fn handle(stream: UnixStream, state: &Arc<State>) {
                 return;
             }
         };
+        // A log keeps the connection to itself until the agent hangs up.
+        if let Call::LogStream { params } = request.call {
+            return stream_logs(state, request.id, params, channel).await;
+        }
         let response = Response::from_result(request.id, respond(state, request.call).await);
         if let Err(e) = ipc::send(&mut channel, &response).await {
             warn!("couldn't answer: {e}");
@@ -165,6 +170,11 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
     let state = Arc::clone(state);
     match call {
         Call::Ping => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
+        // `handle` gives a log its connection before it gets here.
+        Call::LogStream { .. } => Err(CallError::new(
+            ErrorCode::BadRequest,
+            "a log stream takes its own connection",
+        )),
         Call::PolicyShow => serde_json::to_value(policy::load(&state.policy_path, state.owner))
             .map_err(|e| CallError::internal(e.to_string())),
         Call::AuditAppend { kind, data } => blocking(move || {
@@ -619,6 +629,110 @@ async fn blocking(
         .map_err(|e| e.to_string())?
 }
 
+/// Answers a `log_stream` call on a Mac (angle 11 part 3): checks the policy,
+/// finds where the log comes from, then sends batches as answers to the one
+/// request until the log stops, which the last says why, or the agent hangs
+/// up, which ends `log` and `tail`.
+#[cfg(target_os = "macos")]
+async fn stream_logs(state: &Arc<State>, id: u64, params: LogsParams, channel: ipc::Channel) {
+    use cntrl_protocol::logs::LogsBatch;
+    use futures_util::{SinkExt, StreamExt};
+
+    let (mut sink, mut incoming) = channel.split();
+    let mut answer = async |result: Result<Value, CallError>| {
+        let frame = serde_json::to_vec(&Response::from_result(id, result)).unwrap_or_default();
+        sink.send(bytes::Bytes::from(frame)).await.is_ok()
+    };
+    if !policy::load(&state.policy_path, state.owner).allows("logs.read") {
+        let refused = CallError::new(
+            ErrorCode::PolicyDenied,
+            "the device policy doesn't allow logs.read",
+        );
+        answer(Err(refused)).await;
+        return;
+    }
+    let source = match log_source(&params).await {
+        Ok(source) => source,
+        Err(e) => {
+            answer(Err(e)).await;
+            return;
+        }
+    };
+    let (out, mut batches) = tokio::sync::mpsc::channel(16);
+    let mut reader =
+        tokio::spawn(async move { super::logs::mac::read(&params, &source, &out).await });
+    let reason = loop {
+        tokio::select! {
+            batch = batches.recv() => match batch {
+                Some(batch) => {
+                    let value = serde_json::to_value(&batch).unwrap_or_default();
+                    if !answer(Ok(value)).await {
+                        reader.abort();
+                        return;
+                    }
+                }
+                // The reader has stopped, and drops its sender.
+                None => break (&mut reader).await.unwrap_or_else(|e| e.to_string()),
+            },
+            // The agent hung up, or broke the one-request rule.
+            _ = incoming.next() => {
+                reader.abort();
+                return;
+            }
+        }
+    };
+    let last = LogsBatch {
+        ended: Some(reason),
+        ..LogsBatch::default()
+    };
+    answer(Ok(serde_json::to_value(&last).unwrap_or_default())).await;
+}
+
+/// Where a subscription's log comes from: the whole system's unified log, or
+/// one launchd job's lines and output files.
+#[cfg(target_os = "macos")]
+async fn log_source(params: &LogsParams) -> Result<super::logs::mac::Source, CallError> {
+    use super::logs::mac::Source;
+    use cntrl_host::launchd;
+
+    let Some(unit) = params.unit.clone() else {
+        return Ok(Source::default());
+    };
+    let label = service_name(&unit)?;
+    let user = params.user.clone();
+    tokio::task::spawn_blocking(move || -> Result<Source, HostError> {
+        let (domain, files_as) = match user {
+            Some(user) => {
+                let (name, uid) = session(Some(user))?;
+                let gid = gid_of(&name)
+                    .ok_or_else(|| HostError::NotFound(format!("{name} has no group")))?;
+                (launchd::user_domain(uid), Some((uid, gid)))
+            }
+            None => (launchd::system_domain(), None),
+        };
+        let log = launchd::job_log(&domain, &label)?;
+        Ok(Source {
+            job: Some(log.job),
+            files: log.files,
+            files_as,
+        })
+    })
+    .await
+    .map_err(|e| CallError::internal(e.to_string()))?
+    .map_err(CallError::from)
+}
+
+/// Only privd on a Mac streams logs; on Linux the agent reads the journal
+/// itself.
+#[cfg(not(target_os = "macos"))]
+async fn stream_logs(_state: &Arc<State>, id: u64, _params: LogsParams, mut channel: ipc::Channel) {
+    let refused = CallError::new(
+        ErrorCode::BadRequest,
+        "the agent reads logs itself on this OS",
+    );
+    let _ = ipc::send(&mut channel, &Response::from_result(id, Err(refused))).await;
+}
+
 /// The user this process runs as.
 fn own_uid() -> u32 {
     rustix::process::getuid().as_raw()
@@ -639,8 +753,19 @@ fn uid_of(user: &str) -> Option<u32> {
 /// accounts the installer creates out of `/etc/passwd`.
 #[cfg(target_os = "macos")]
 fn uid_of(user: &str) -> Option<u32> {
+    id_of(user, "-u")
+}
+
+/// `user`'s primary group, through `id`.
+#[cfg(target_os = "macos")]
+fn gid_of(user: &str) -> Option<u32> {
+    id_of(user, "-g")
+}
+
+#[cfg(target_os = "macos")]
+fn id_of(user: &str, which: &str) -> Option<u32> {
     let output = std::process::Command::new("/usr/bin/id")
-        .args(["-u", user])
+        .args([which, user])
         .output()
         .ok()?;
     if !output.status.success() {

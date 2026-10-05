@@ -1941,6 +1941,13 @@
           ],
           "description": "One service's log, such as `nginx.service`; the whole system's when\nabsent."
         },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The user whose session runs `unit`, for a user's LaunchAgent on a Mac;\nthe system's service when absent."
+        },
         "priority": {
           "type": [
             "integer",
@@ -2005,7 +2012,7 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
-          "description": "When it was logged, in milliseconds since the Unix epoch."
+          "description": "When it was logged, in milliseconds since the Unix epoch; 0 when\nthat isn't known, as for the earlier lines of a service's output file."
         },
         "priority": {
           "type": [
@@ -2022,7 +2029,7 @@
             "string",
             "null"
           ],
-          "description": "Who logged it: the service, or the program's name."
+          "description": "Who logged it: the service, the program's name, or the output file."
         },
         "pid": {
           "type": [

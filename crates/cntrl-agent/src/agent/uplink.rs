@@ -408,7 +408,7 @@ async fn online(
     let outbox = Arc::clone(&config.outbox);
     let mut session = Session {
         requests: Requests::new(answers, welcome.limits.max_inflight as usize),
-        subs: Subscriptions::default(),
+        subs: Subscriptions::new(config.privd_socket.clone()),
         policy,
         config,
         in_flight: None,
@@ -945,10 +945,12 @@ struct Subscriptions {
     open: HashMap<String, Subscription>,
     log_out: logs::Batches,
     log_batches: mpsc::Receiver<(String, LogsBatch)>,
+    /// privd's socket, which a Mac's log readers go through.
+    privd: PathBuf,
 }
 
-impl Default for Subscriptions {
-    fn default() -> Self {
+impl Subscriptions {
+    fn new(privd: PathBuf) -> Self {
         let (log_out, log_batches) = mpsc::channel(64);
         Self {
             stats: None,
@@ -956,7 +958,14 @@ impl Default for Subscriptions {
             open: HashMap::new(),
             log_out,
             log_batches,
+            privd,
         }
+    }
+}
+
+impl Default for Subscriptions {
+    fn default() -> Self {
+        Self::new(PathBuf::new())
     }
 }
 
@@ -1076,10 +1085,28 @@ impl Subscriptions {
                 self.open.insert(subscribe.id, sub);
             }
             Topic::Logs(params) => {
-                if cfg!(not(target_os = "linux")) {
+                if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
                     let msg = "this agent can't read logs on this OS yet".to_owned();
                     return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
                 }
+                // A user's session runs a Mac's LaunchAgents; systemd's user
+                // units come later.
+                let user = match params.user.as_deref() {
+                    None => None,
+                    Some(_) if cfg!(not(target_os = "macos")) => {
+                        let msg = "a user's services' logs aren't read on this OS yet".to_owned();
+                        return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                    }
+                    Some(_) if params.unit.is_none() => {
+                        let msg = "a user goes with a unit".to_owned();
+                        return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                    }
+                    Some(user) if user_name(user) => Some(user.to_owned()),
+                    Some(user) => {
+                        let msg = format!("`{user}` isn't a user name");
+                        return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                    }
+                };
                 if let Some(oldest) = self.crowded_out() {
                     let last = LogsBatch {
                         ended: Some(format!(
@@ -1103,6 +1130,7 @@ impl Subscriptions {
                 };
                 let params = LogsParams {
                     unit,
+                    user,
                     priority: params.priority.map(|p| p.min(7)),
                     lines: Some(
                         params
@@ -1118,7 +1146,12 @@ impl Subscriptions {
                     &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
                 )
                 .await?;
-                let reader = logs::start(subscribe.id.clone(), params, self.log_out.clone());
+                let reader = logs::start(
+                    subscribe.id.clone(),
+                    params,
+                    self.privd.clone(),
+                    self.log_out.clone(),
+                );
                 let sub = Subscription {
                     topic: Watching::Logs(reader),
                     every_ms: 0,
@@ -1501,6 +1534,16 @@ pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, millis)
+}
+
+/// A user name as macOS and Linux allow it: letters, digits and `._-`, not
+/// starting with `-`.
+fn user_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
 #[cfg(test)]
