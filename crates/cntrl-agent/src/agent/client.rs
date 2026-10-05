@@ -360,7 +360,7 @@ pub(super) async fn request(
     Ok((status, bytes))
 }
 
-fn block_on<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+pub(super) fn block_on<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

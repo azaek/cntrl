@@ -1,0 +1,11 @@
+{
+  "version": "0.1.7",
+  "channel": "stable",
+  "published_at": "2026-10-05T08:31:41Z",
+  "artifacts": {
+    "aarch64-apple-darwin": { "url": "https://github.com/azaek/cntrl/releases/download/agent-v0.1.7/cntrl-agent-0.1.7-aarch64-apple-darwin.tar.gz", "size": 4032519, "sha256": "9dd92047a534f110a49c98f76905e76c00b20dcbbb76694c874d4a5a287b721f" },
+    "aarch64-unknown-linux-musl": { "url": "https://github.com/azaek/cntrl/releases/download/agent-v0.1.7/cntrl-agent-0.1.7-aarch64-unknown-linux-musl.tar.gz", "size": 5578582, "sha256": "2b97535c615d2b10ec5fcfc88c30a773bcdb2a234f05fdc41a765382728e709c" },
+    "x86_64-apple-darwin": { "url": "https://github.com/azaek/cntrl/releases/download/agent-v0.1.7/cntrl-agent-0.1.7-x86_64-apple-darwin.tar.gz", "size": 4182641, "sha256": "affc249b8bbbdc26f61c9572732a75a61216acaae632383ce0e19bd6800cf1cb" },
+    "x86_64-unknown-linux-musl": { "url": "https://github.com/azaek/cntrl/releases/download/agent-v0.1.7/cntrl-agent-0.1.7-x86_64-unknown-linux-musl.tar.gz", "size": 5712374, "sha256": "22987eddfbeb873eae013f8ef69f4c2cb5ac1924d41acfccda830176e04bc846" }
+  }
+}

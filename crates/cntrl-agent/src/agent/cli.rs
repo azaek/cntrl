@@ -45,6 +45,17 @@ pub enum Command {
         #[arg(long = "move", visible_alias = "force-reenroll")]
         replace: bool,
     },
+    /// Update the agent to the release Console offers, after checking the
+    /// release's signature, size and SHA-256. The machine stays enrolled.
+    /// Needs root.
+    Update {
+        /// Only say whether a newer release is out.
+        #[arg(long)]
+        check: bool,
+        /// Install the release again even when this is it.
+        #[arg(long)]
+        force: bool,
+    },
     /// Work with the config file.
     #[command(subcommand)]
     Config(ConfigCommand),

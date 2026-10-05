@@ -21,7 +21,9 @@
 # (install Console's release even when it, or a newer agent, is installed).
 # The config is written only when there is none. Running Console's command
 # again updates the agent when the release is newer, and otherwise only makes
-# sure it runs; either way the agent keeps its identity. Everything runs from
+# sure it runs; either way the agent keeps its identity. From agent 0.1.8,
+# `sudo cntrl update` does the same after checking the release's signature,
+# running the installer that comes in the release's archive (D41). Everything runs from
 # main(), called on the last line, so a download cut short runs nothing.
 
 set -eu

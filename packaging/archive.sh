@@ -20,6 +20,9 @@ mkdir -p "$stage/$name/packaging"
 cp "$binary" "$stage/$name/cntrl-agent"
 chmod 0755 "$stage/$name/cntrl-agent"
 cp "$here/../LICENSE" "$stage/$name/LICENSE"
+# The installer travels with the release, so `cntrl update` runs the one that
+# knows this release's steps, checked with the archive (D41).
+cp "$here/install.sh" "$stage/$name/packaging/install.sh"
 case $target in
 *-linux-*) cp -R "$here/systemd" "$stage/$name/packaging/" ;;
 *-darwin)

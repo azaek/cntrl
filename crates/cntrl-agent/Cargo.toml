@@ -30,6 +30,8 @@ sd-notify = "0.4"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
+# A private working directory for `cntrl update` (D41).
+tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "fs", "io-util"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["codec"] }

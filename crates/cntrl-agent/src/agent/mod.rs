@@ -24,6 +24,7 @@ mod processes;
 mod stats;
 mod supervisor;
 mod systemd;
+mod update;
 mod uplink;
 
 use std::path::Path;
@@ -62,6 +63,7 @@ pub fn main() -> ExitCode {
             token_file,
             replace,
         } => client::run_enroll(&config, token_file.as_deref(), replace),
+        Command::Update { check, force } => update::run(&config, check, force),
         Command::Config(ConfigCommand::Check) => {
             println!("{}: OK", cli.config.display());
             ExitCode::SUCCESS
