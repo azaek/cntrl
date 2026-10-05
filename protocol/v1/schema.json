@@ -904,6 +904,13 @@
             }
           ],
           "description": "From 0.1.4."
+        },
+        "chassis": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The form factor, in systemd's words (machine-info(5)): `desktop`,\n`laptop`, `convertible`, `server`, `tablet`, `handset`, `watch`,\n`embedded`, `vm` or `container`, where the machine says. From 0.1.10."
         }
       },
       "required": [

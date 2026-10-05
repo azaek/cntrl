@@ -842,6 +842,12 @@ export interface SystemInfo {
     machine?: string | null;
     /** From 0.1.4. */
     cpu?: CpuInfo | null;
+    /**
+     * The form factor, in systemd's words (machine-info(5)): `desktop`,
+     * `laptop`, `convertible`, `server`, `tablet`, `handset`, `watch`,
+     * `embedded`, `vm` or `container`, where the machine says. From 0.1.10.
+     */
+    chassis?: string | null;
 }
 
 /** One temperature sensor's reading. */

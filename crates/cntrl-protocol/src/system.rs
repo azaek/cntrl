@@ -27,6 +27,11 @@ pub struct SystemInfo {
     /// From 0.1.4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<CpuInfo>,
+    /// The form factor, in systemd's words (machine-info(5)): `desktop`,
+    /// `laptop`, `convertible`, `server`, `tablet`, `handset`, `watch`,
+    /// `embedded`, `vm` or `container`, where the machine says. From 0.1.10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chassis: Option<String>,
 }
 
 /// The CPU.

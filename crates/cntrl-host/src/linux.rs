@@ -227,6 +227,7 @@ impl System for LinuxSystem {
             agent_version: agent_version.to_owned(),
             machine: machine(&self.root),
             cpu: cpu_info(&self.root.join("proc/cpuinfo")),
+            chassis: chassis(&self.root),
         })
     }
 }
@@ -268,6 +269,114 @@ fn machine(root: &Path) -> Option<String> {
         (None, product) => product,
         (Some(_), None) => None,
     }
+}
+
+/// The chassis types machine-info(5) defines.
+const CHASSIS: &[&str] = &[
+    "desktop",
+    "laptop",
+    "convertible",
+    "server",
+    "tablet",
+    "handset",
+    "watch",
+    "embedded",
+    "vm",
+    "container",
+];
+
+/// What DMI's vendor and product names say about a virtual machine, as
+/// systemd's own detection reads them.
+const VM_VENDORS: &[&str] = &[
+    "QEMU",
+    "KVM",
+    "VMware",
+    "VirtualBox",
+    "innotek GmbH",
+    "Xen",
+    "Bochs",
+    "Parallels",
+    "BHYVE",
+    "OpenStack",
+    "KubeVirt",
+    "Amazon EC2",
+    "Google Compute Engine",
+    "Apple Virtualization",
+];
+
+/// The form factor, worked out as systemd's hostnamed does when nothing sets
+/// it (`fallback_chassis`): a container or a virtual machine first, then the
+/// firmware's SMBIOS chassis type, ACPI's power profile, and the device
+/// tree's. `/etc/machine-info`'s CHASSIS= wins, as it does for hostnamed.
+fn chassis(root: &Path) -> Option<String> {
+    let valid = |name: &str| CHASSIS.contains(&name).then(|| name.to_owned());
+    let configured = fs::read_to_string(root.join("etc/machine-info"))
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                line.strip_prefix("CHASSIS=")
+                    .map(|value| value.trim().trim_matches('"').to_owned())
+            })
+        });
+    if let Some(name) = configured.as_deref().and_then(valid) {
+        return Some(name);
+    }
+    let container = ["run/systemd/container", ".dockerenv", "run/.containerenv"];
+    if container.iter().any(|path| root.join(path).exists()) {
+        return Some("container".to_owned());
+    }
+    if virtual_machine(root) {
+        return Some("vm".to_owned());
+    }
+    let number = |path: &str| {
+        fs::read_to_string(root.join(path))
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    };
+    let firmware = number("sys/class/dmi/id/chassis_type").and_then(|kind| match kind {
+        0x03 | 0x04 | 0x06 | 0x07 | 0x0D | 0x23 | 0x24 => Some("desktop"),
+        0x08 | 0x09 | 0x0A | 0x0E => Some("laptop"),
+        0x0B => Some("handset"),
+        0x11 | 0x1C | 0x1D => Some("server"),
+        0x1E => Some("tablet"),
+        0x1F | 0x20 => Some("convertible"),
+        0x21 | 0x22 => Some("embedded"),
+        _ => None,
+    });
+    let acpi = || {
+        number("sys/firmware/acpi/pm_profile").and_then(|profile| match profile {
+            1 | 3 | 6 => Some("desktop"),
+            2 => Some("laptop"),
+            4 | 5 | 7 => Some("server"),
+            8 => Some("tablet"),
+            _ => None,
+        })
+    };
+    if let Some(name) = firmware.or_else(acpi) {
+        return Some(name.to_owned());
+    }
+    fs::read_to_string(root.join("proc/device-tree/chassis-type"))
+        .ok()
+        .and_then(|name| valid(name.trim_end_matches('\0').trim()))
+}
+
+/// Whether this is a virtual machine: the CPU flag hypervisors set on x86, a
+/// Xen hypervisor, or DMI naming a hypervisor or a cloud's machines.
+fn virtual_machine(root: &Path) -> bool {
+    let flagged = fs::read_to_string(root.join("proc/cpuinfo")).is_ok_and(|text| {
+        text.lines()
+            .filter(|line| line.starts_with("flags"))
+            .any(|line| line.split_whitespace().any(|flag| flag == "hypervisor"))
+    });
+    let dmi = ["sys_vendor", "product_name", "board_vendor", "bios_vendor"]
+        .iter()
+        .filter_map(|name| fs::read_to_string(root.join("sys/class/dmi/id").join(name)).ok())
+        .any(|value| VM_VENDORS.iter().any(|vendor| value.contains(vendor)));
+    let hyperv = fs::read_to_string(root.join("sys/class/dmi/id/product_name"))
+        .is_ok_and(|product| product.trim() == "Virtual Machine");
+    flagged || dmi || hyperv || root.join("sys/hypervisor/type").exists()
 }
 
 /// The CPU from `/proc/cpuinfo`: x86 names its model; cores are the distinct
@@ -490,6 +599,55 @@ mod tests {
             Some("Intel(R) Core(TM) i5-7200U CPU @ 2.50GHz")
         );
         assert_eq!((info.cores, info.threads), (2, 4));
+    }
+
+    #[test]
+    fn works_out_the_chassis_as_hostnamed_does() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        fs::create_dir_all(root.join("sys/class/dmi/id")).expect("mkdir");
+        fs::create_dir_all(root.join("sys/firmware/acpi")).expect("mkdir");
+        fs::create_dir_all(root.join("proc/device-tree")).expect("mkdir");
+        fs::create_dir_all(root.join("etc")).expect("mkdir");
+        assert_eq!(chassis(root), None);
+        // The device tree speaks last, ACPI before it, then the firmware.
+        fs::write(root.join("proc/device-tree/chassis-type"), "embedded\0").expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("embedded"));
+        fs::write(root.join("sys/firmware/acpi/pm_profile"), "4\n").expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("server"));
+        fs::write(root.join("sys/class/dmi/id/chassis_type"), "10\n").expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("laptop"));
+        // A hypervisor beats the firmware, a container beats both, and
+        // machine-info beats everything.
+        fs::write(root.join("sys/class/dmi/id/sys_vendor"), "QEMU\n").expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("vm"));
+        fs::write(root.join(".dockerenv"), "").expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("container"));
+        fs::write(
+            root.join("etc/machine-info"),
+            "PRETTY_HOSTNAME=Box\nCHASSIS=server\n",
+        )
+        .expect("write");
+        assert_eq!(chassis(root).as_deref(), Some("server"));
+    }
+
+    #[test]
+    fn a_hypervisor_flag_means_a_virtual_machine() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        fs::create_dir_all(root.join("proc")).expect("mkdir");
+        fs::write(
+            root.join("proc/cpuinfo"),
+            "processor\t: 0\nflags\t\t: fpu vme sse2\n",
+        )
+        .expect("write");
+        assert!(!virtual_machine(root));
+        fs::write(
+            root.join("proc/cpuinfo"),
+            "processor\t: 0\nflags\t\t: fpu hypervisor sse2\n",
+        )
+        .expect("write");
+        assert!(virtual_machine(root));
     }
 
     #[test]

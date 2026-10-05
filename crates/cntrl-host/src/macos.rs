@@ -275,6 +275,7 @@ impl System for MacSystem {
             agent_version: agent_version.to_owned(),
             machine: hardware().0.clone(),
             cpu: hardware().1.clone(),
+            chassis: chassis(hardware().0.as_deref()),
         })
     }
 }
@@ -284,6 +285,20 @@ impl System for MacSystem {
 fn hardware() -> &'static (Option<String>, Option<CpuInfo>) {
     static HARDWARE: OnceLock<(Option<String>, Option<CpuInfo>)> = OnceLock::new();
     HARDWARE.get_or_init(|| (model(), cpu()))
+}
+
+/// The form factor in systemd's words, from the model: a MacBook is a laptop,
+/// a virtual Mac (`VirtualMac2,1`) a VM, and the rest are desktops.
+fn chassis(model: Option<&str>) -> Option<String> {
+    let model = model?;
+    let kind = if model.starts_with("MacBook") {
+        "laptop"
+    } else if model.contains("VirtualMac") {
+        "vm"
+    } else {
+        "desktop"
+    };
+    Some(kind.to_owned())
 }
 
 /// The model's name with its identifier, such as `Mac mini (Mac16,10)`, else
