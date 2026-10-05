@@ -16,6 +16,7 @@ mod keys;
 mod launchd;
 mod local_api;
 mod logging;
+mod logs;
 mod outbox;
 mod policy;
 mod privd;

@@ -316,6 +316,7 @@ dependencies = [
  "futures-util",
  "procfs-core",
  "rustix",
+ "serde_json",
  "sysinfo",
  "tempfile",
  "tokio",

@@ -126,6 +126,11 @@ install_linux() {
         say "Creating the cntrl user"
         useradd --system --user-group --no-create-home --shell /usr/sbin/nologin cntrl
     fi
+    # Members of systemd-journal read the system journal, which the agent
+    # streams for logs (angle 11). Done on every install, so updates get it.
+    if getent group systemd-journal >/dev/null 2>&1; then
+        usermod -a -G systemd-journal cntrl
+    fi
     # Stop both halves so the binary isn't replaced under them, and so privd
     # starts again from the new one.
     systemctl stop cntrl-agent.service cntrl-privd.service 2>/dev/null || true

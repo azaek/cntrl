@@ -6,6 +6,7 @@ use std::fmt;
 
 mod gpu;
 mod hwmon;
+pub mod journal;
 #[cfg(target_os = "macos")]
 pub mod launchd;
 pub mod linux;

@@ -179,6 +179,17 @@
       "event": {
         "$ref": "#/$defs/ProcessesSample"
       }
+    },
+    {
+      "name": "logs",
+      "capability": "logs.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/LogsParams"
+      },
+      "event": {
+        "$ref": "#/$defs/LogsBatch"
+      }
     }
   ]
 }

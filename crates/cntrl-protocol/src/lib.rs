@@ -8,6 +8,7 @@ pub mod capability;
 pub mod codes;
 pub mod enroll;
 pub mod frame;
+pub mod logs;
 pub mod ops;
 pub mod power;
 pub mod process;

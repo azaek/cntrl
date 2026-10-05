@@ -15,6 +15,8 @@ test-util = []
 
 [dependencies]
 cntrl-protocol.workspace = true
+# journalctl's JSON lines, for logs (angle 11).
+serde_json.workspace = true
 # Parsing only, no OS calls, so the Linux backend builds and tests anywhere.
 procfs-core = { version = "0.18", default-features = false }
 

@@ -127,4 +127,12 @@ define_topics! {
         capability: "processes.read",
         since: 1,
     },
+    /// A service's or the system's log: the latest lines, then new ones as
+    /// they come, only while someone is subscribed (angle 11).
+    Logs = "logs" {
+        params: crate::logs::LogsParams,
+        event: crate::logs::LogsBatch,
+        capability: "logs.read",
+        since: 1,
+    },
 }

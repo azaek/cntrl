@@ -16,6 +16,7 @@ use cntrl_protocol::frame::{
     AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Records, Request, Response, SigAlg,
     Subscribe, Welcome,
 };
+use cntrl_protocol::logs::{LogsBatch, LogsParams};
 use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
@@ -42,6 +43,7 @@ use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
+use super::logs;
 use super::outbox::Outbox;
 use super::policy::PolicyState;
 use super::processes::{self, Table};
@@ -495,6 +497,11 @@ async fn online(
                     return end;
                 }
             }
+            Some((id, batch)) = session.subs.log_batches.recv() => {
+                if let Err(end) = session.subs.publish_logs(ws, &id, &batch).await {
+                    return end;
+                }
+            }
             () = outbox.added.notified() => {
                 if let Err(end) = session.send_records(ws).await {
                     return end;
@@ -930,11 +937,39 @@ const DUE_SLACK_MS: u64 = 500;
 /// receiver of the sampler's latest sample, and every `processes` one a
 /// receiver of the latest process table, each held only while such a
 /// subscription is open, so the samplers work only while someone watches.
-#[derive(Default)]
+/// Each `logs` subscription has a reader of its own, which sends its batches
+/// through `log_batches`.
 struct Subscriptions {
     stats: Option<watch::Receiver<Option<Arc<StatsSample>>>>,
     processes: Option<watch::Receiver<Option<Arc<Table>>>>,
     open: HashMap<String, Subscription>,
+    log_out: logs::Batches,
+    log_batches: mpsc::Receiver<(String, LogsBatch)>,
+}
+
+impl Default for Subscriptions {
+    fn default() -> Self {
+        let (log_out, log_batches) = mpsc::channel(64);
+        Self {
+            stats: None,
+            processes: None,
+            open: HashMap::new(),
+            log_out,
+            log_batches,
+        }
+    }
+}
+
+/// A session that ends stops its log readers, which may be waiting on a quiet
+/// log and wouldn't notice otherwise.
+impl Drop for Subscriptions {
+    fn drop(&mut self) {
+        for sub in self.open.values() {
+            if let Watching::Logs(reader) = &sub.topic {
+                reader.stop();
+            }
+        }
+    }
 }
 
 /// One open subscription. It's scheduled by the samples' own times, so events
@@ -948,10 +983,11 @@ struct Subscription {
 }
 
 /// What a subscription watches. Each `processes` subscription gets its own
-/// view of the table.
+/// view of the table; each `logs` one, its own reader.
 enum Watching {
     Stats,
     Processes(ProcessesParams),
+    Logs(logs::Reader),
 }
 
 /// A process table this recent goes to a new subscription at once.
@@ -1039,6 +1075,92 @@ impl Subscriptions {
                 debug!(id = %subscribe.id, "processes subscription opened");
                 self.open.insert(subscribe.id, sub);
             }
+            Topic::Logs(params) => {
+                if cfg!(not(target_os = "linux")) {
+                    let msg = "this agent can't read logs on this OS yet".to_owned();
+                    return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                }
+                if let Some(oldest) = self.crowded_out() {
+                    let last = LogsBatch {
+                        ended: Some(format!(
+                            "the device closed it for a newer one, since it keeps {} logs open at most",
+                            logs::MAX_OPEN
+                        )),
+                        ..LogsBatch::default()
+                    };
+                    self.publish_logs(ws, &oldest, &last).await?;
+                }
+                let unit = match params
+                    .unit
+                    .as_deref()
+                    .map(cntrl_host::services::service_name)
+                {
+                    Some(Err(e)) => {
+                        return send(ws, &refuse(ErrorCode::BadRequest, e.to_string())).await;
+                    }
+                    Some(Ok(unit)) => Some(unit),
+                    None => None,
+                };
+                let params = LogsParams {
+                    unit,
+                    priority: params.priority.map(|p| p.min(7)),
+                    lines: Some(
+                        params
+                            .lines
+                            .unwrap_or(cntrl_host::journal::DEFAULT_LINES)
+                            .min(cntrl_host::journal::MAX_LINES),
+                    ),
+                    grep: params.grep.filter(|g| !g.trim().is_empty()),
+                };
+                let accepted = encode(&params)?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let reader = logs::start(subscribe.id.clone(), params, self.log_out.clone());
+                let sub = Subscription {
+                    topic: Watching::Logs(reader),
+                    every_ms: 0,
+                    next_ts: 0,
+                    seq: 0,
+                };
+                debug!(id = %subscribe.id, "logs subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+        }
+        Ok(())
+    }
+
+    /// The `logs` subscription to close for a new one, when `MAX_OPEN` are
+    /// open: the oldest.
+    fn crowded_out(&self) -> Option<String> {
+        let readers: Vec<_> = self
+            .open
+            .iter()
+            .filter_map(|(id, sub)| match &sub.topic {
+                Watching::Logs(reader) => Some((reader.started, id)),
+                _ => None,
+            })
+            .collect();
+        if readers.len() < logs::MAX_OPEN {
+            return None;
+        }
+        readers
+            .into_iter()
+            .min_by_key(|(started, _)| *started)
+            .map(|(_, id)| id.clone())
+    }
+
+    /// Sends a log reader's batch to its subscription; the last batch, which
+    /// says why the reader stopped, closes it.
+    async fn publish_logs(&mut self, ws: &mut Ws, id: &str, batch: &LogsBatch) -> Result<(), End> {
+        let Some(sub) = self.open.get_mut(id) else {
+            return Ok(());
+        };
+        send_event(ws, id, sub, now_ms(), batch).await?;
+        if batch.ended.is_some() {
+            self.close(id);
         }
         Ok(())
     }
@@ -1046,7 +1168,10 @@ impl Subscriptions {
     /// Ends a subscription; an unknown ID is ignored. A sampler's receiver goes
     /// with the last subscription that needed it.
     fn close(&mut self, id: &str) {
-        if self.open.remove(id).is_some() {
+        if let Some(sub) = self.open.remove(id) {
+            if let Watching::Logs(reader) = &sub.topic {
+                reader.stop();
+            }
             debug!(id, "subscription closed");
         }
         if !self
@@ -1381,6 +1506,34 @@ pub(super) fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_new_log_past_the_limit_closes_the_oldest() {
+        let mut subs = Subscriptions::default();
+        let now = std::time::Instant::now();
+        let add = |subs: &mut Subscriptions, id: &str, topic: Watching| {
+            let sub = Subscription {
+                topic,
+                every_ms: 0,
+                next_ts: 0,
+                seq: 0,
+            };
+            subs.open.insert(id.to_owned(), sub);
+        };
+        add(&mut subs, "sub_stats", Watching::Stats);
+        for i in 1..logs::MAX_OPEN {
+            let started = now + Duration::from_secs(i as u64);
+            add(
+                &mut subs,
+                &format!("sub_{i}"),
+                Watching::Logs(logs::Reader::idle(started)),
+            );
+        }
+        // Below the limit, nothing gives way.
+        assert_eq!(subs.crowded_out(), None);
+        add(&mut subs, "sub_0", Watching::Logs(logs::Reader::idle(now)));
+        assert_eq!(subs.crowded_out().as_deref(), Some("sub_0"));
+    }
 
     #[test]
     fn backoff_stays_under_its_ceiling() {

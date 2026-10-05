@@ -1,0 +1,1 @@
+{"t":"evt","sub":"01JC0000000000000000000SUL","seq":3,"data":{"entries":[{"ts":1791000000123,"priority":6,"source":"nginx.service","pid":812,"message":"started"},{"ts":1791000000456,"priority":3,"source":"nginx.service","pid":812,"message":"bind() to 0.0.0.0:80 failed (98: Address in use)"}],"skipped":12}}

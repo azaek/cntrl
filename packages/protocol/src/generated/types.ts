@@ -354,6 +354,52 @@ export interface LoadAverage {
     fifteen: number;
 }
 
+/** One log line. */
+export interface LogEntry {
+    /** When it was logged, in milliseconds since the Unix epoch. */
+    ts: number;
+    /** Its syslog priority: 0 (emergency) to 7 (debug). */
+    priority?: number | null;
+    /** Who logged it: the service, or the program's name. */
+    source?: string | null;
+    pid?: number | null;
+    /** The message, cut at 4 KiB. */
+    message: string;
+}
+
+/** Log lines, in the order they were logged. */
+export interface LogsBatch {
+    entries: LogEntry[];
+    /**
+     * Lines left out since the last batch because they came faster than the
+     * agent sends them.
+     */
+    skipped?: number;
+    /**
+     * Why no more lines will come, such as the log reader stopping; absent
+     * while the log is live.
+     */
+    ended?: string | null;
+}
+
+/** Parameters of the `logs` topic. */
+export interface LogsParams {
+    /**
+     * One service's log, such as `nginx.service`; the whole system's when
+     * absent.
+     */
+    unit?: string | null;
+    /**
+     * The least important to show, as a syslog priority: 0 (emergency) to
+     * 7 (debug); everything when absent.
+     */
+    priority?: number | null;
+    /** Only lines whose message contains this, ignoring case. */
+    grep?: string | null;
+    /** How many earlier lines come first: 0 to 1,000, and 100 when absent. */
+    lines?: number | null;
+}
+
 /** Memory at sample time. */
 export interface MemoryStats {
     total: number;
