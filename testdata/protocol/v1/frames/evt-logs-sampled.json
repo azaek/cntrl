@@ -1,0 +1,1 @@
+{"t":"evt","sub":"01JC0000000000000000000SUM","seq":9,"data":{"entries":[{"ts":1791185638212,"priority":5,"source":"nginx","pid":812,"message":"upstream timed out"},{"ts":0,"source":"nginx.log","message":"2026/10/05 12:00:02 [emerg] still could not bind()"}],"skipped":4210,"one_in":10,"counts":{"nginx":4602,"postgres":118}}}

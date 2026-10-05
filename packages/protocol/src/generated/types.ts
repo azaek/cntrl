@@ -383,6 +383,16 @@ export interface LogsBatch {
      * while the log is live.
      */
     ended?: string | null;
+    /**
+     * While new lines come faster than the agent sends them, it sends an
+     * even sample of about one in this many; absent while it sends them all.
+     */
+    one_in?: number | null;
+    /**
+     * How many new lines each source logged since the last batch, sampled
+     * or not: the busiest 20.
+     */
+    counts?: { [key: string]: number };
 }
 
 /** Parameters of the `logs` topic. */
@@ -406,6 +416,20 @@ export interface LogsParams {
     grep?: string | null;
     /** How many earlier lines come first: 0 to 1,000, and 100 when absent. */
     lines?: number | null;
+    /**
+     * Whether the whole system's log takes in the operating system's own
+     * processes: on a Mac, Apple's processes and subsystems and the kernel,
+     * which make nearly all of it. Everything comes when absent; Linux takes
+     * everything either way.
+     */
+    include_os?: boolean | null;
+    /**
+     * Only lines from these sources, named as entries name them; every
+     * source when empty.
+     */
+    only?: string[];
+    /** No lines from these sources. */
+    hide?: string[];
 }
 
 /** Memory at sample time. */

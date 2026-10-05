@@ -1128,6 +1128,12 @@ impl Subscriptions {
                     Some(Ok(unit)) => Some(unit),
                     None => None,
                 };
+                if let Some(problem) = [&params.only, &params.hide]
+                    .into_iter()
+                    .find_map(|names| source_names(names))
+                {
+                    return send(ws, &refuse(ErrorCode::BadRequest, problem)).await;
+                }
                 let params = LogsParams {
                     unit,
                     user,
@@ -1139,6 +1145,9 @@ impl Subscriptions {
                             .min(cntrl_host::journal::MAX_LINES),
                     ),
                     grep: params.grep.filter(|g| !g.trim().is_empty()),
+                    include_os: params.include_os,
+                    only: params.only,
+                    hide: params.hide,
                 };
                 let accepted = encode(&params)?;
                 send(
@@ -1534,6 +1543,18 @@ pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, millis)
+}
+
+/// Why a list of sources to show or hide can't be used, if it can't: at most
+/// 20, each a name of 1 to 256 characters without control characters.
+fn source_names(names: &[String]) -> Option<String> {
+    if names.len() > 20 {
+        return Some("at most 20 sources can be named".to_owned());
+    }
+    names
+        .iter()
+        .find(|name| name.is_empty() || name.len() > 256 || name.chars().any(char::is_control))
+        .map(|name| format!("`{name}` isn't a source's name"))
 }
 
 /// A user name as macOS and Linux allow it: letters, digits and `._-`, not

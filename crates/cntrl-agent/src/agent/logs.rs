@@ -5,6 +5,7 @@
 //! part 3). A session ends its readers with its subscriptions, and stopping a
 //! reader ends what it runs.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -25,9 +26,12 @@ const FLUSH: Duration = Duration::from_millis(250);
 /// A batch goes out early once it holds this many lines or bytes.
 const BATCH_LINES: usize = 200;
 const BATCH_BYTES: usize = 64 * 1024;
-/// New lines per second a subscription passes on; more are counted as
-/// skipped. The earlier lines it starts with aren't counted.
+/// New lines per second a subscription passes on; past it, an even sample of
+/// about this many goes (angle 11 part 4). The earlier lines a stream starts
+/// with aren't counted.
 const RATE: u32 = 500;
+/// How many sources a batch counts lines for: the busiest.
+const COUNTED_SOURCES: usize = 20;
 
 /// A subscription's running reader.
 pub struct Reader {
@@ -71,13 +75,17 @@ pub fn start(id: String, params: LogsParams, privd: PathBuf, out: Batches) -> Re
 }
 
 /// Gathers a reader's lines into batches: one goes out when it's full, the
-/// rest on each [`FLUSH`] tick. A search is matched here, as plain text
-/// ignoring case. New lines past [`RATE`] a second are counted as skipped.
+/// rest on each [`FLUSH`] tick. A search and the sources asked for are matched
+/// here, as plain text. New lines are counted by source, and past [`RATE`] a
+/// second they're sampled.
 pub struct Batcher {
     batch: LogsBatch,
     bytes: usize,
-    window: (Instant, u32),
     needle: Option<String>,
+    only: Vec<String>,
+    hide: Vec<String>,
+    sampler: Sampler,
+    counts: HashMap<String, u64>,
 }
 
 impl Batcher {
@@ -85,31 +93,34 @@ impl Batcher {
         Self {
             batch: LogsBatch::default(),
             bytes: 0,
-            window: (Instant::now(), 0),
             needle: params
                 .grep
                 .as_deref()
                 .map(|needle| needle.trim().to_lowercase())
                 .filter(|needle| !needle.is_empty()),
+            only: params.only.clone(),
+            hide: params.hide.clone(),
+            sampler: Sampler::new(Instant::now()),
+            counts: HashMap::new(),
         }
     }
 
     /// Adds a line, `live` when it's new rather than one of the earlier lines
     /// a stream starts with; returns a batch that's full and should go now.
     pub fn push(&mut self, entry: LogEntry, live: bool) -> Option<LogsBatch> {
-        if self
-            .needle
-            .as_ref()
-            .is_some_and(|needle| !entry.message.to_lowercase().contains(needle))
-        {
+        self.push_at(entry, live, Instant::now())
+    }
+
+    fn push_at(&mut self, entry: LogEntry, live: bool, now: Instant) -> Option<LogsBatch> {
+        if !self.wanted(&entry) {
             return None;
         }
         if live {
-            if self.window.0.elapsed() >= Duration::from_secs(1) {
-                self.window = (Instant::now(), 0);
-            }
-            self.window.1 += 1;
-            if self.window.1 > RATE {
+            *self
+                .counts
+                .entry(entry.source.clone().unwrap_or_default())
+                .or_default() += 1;
+            if !self.sampler.admit(now) {
                 self.batch.skipped += 1;
                 return None;
             }
@@ -121,12 +132,100 @@ impl Batcher {
 
     /// What's gathered, if there's anything.
     pub fn take(&mut self) -> Option<LogsBatch> {
-        (!self.batch.entries.is_empty() || self.batch.skipped > 0).then(|| self.drain())
+        (!self.batch.entries.is_empty() || self.batch.skipped > 0 || !self.counts.is_empty())
+            .then(|| self.drain())
     }
 
+    fn wanted(&self, entry: &LogEntry) -> bool {
+        if self
+            .needle
+            .as_ref()
+            .is_some_and(|needle| !entry.message.to_lowercase().contains(needle))
+        {
+            return false;
+        }
+        let source = entry.source.as_deref().unwrap_or_default();
+        (self.only.is_empty() || self.only.iter().any(|only| only == source))
+            && !self.hide.iter().any(|hidden| hidden == source)
+    }
+
+    /// The batch so far, with the busiest sources' counts and the sampling.
     fn drain(&mut self) -> LogsBatch {
         self.bytes = 0;
-        std::mem::take(&mut self.batch)
+        let mut busiest: Vec<_> = self.counts.drain().collect();
+        busiest.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        busiest.truncate(COUNTED_SOURCES);
+        LogsBatch {
+            counts: busiest.into_iter().collect(),
+            one_in: self.sampler.one_in(),
+            ..std::mem::take(&mut self.batch)
+        }
+    }
+}
+
+/// Chooses which new lines go once more than [`RATE`] come a second: each
+/// with the chance that would have let about [`RATE`] of the last second's
+/// through, so what goes is an even sample of what came, as Datadog's and
+/// Cloudflare's live tails do (angle 11 part 4). A sudden flood within one
+/// second still stops at twice the rate.
+struct Sampler {
+    window: Instant,
+    seen: u32,
+    sent: u32,
+    chance: f64,
+    random: u64,
+}
+
+impl Sampler {
+    fn new(now: Instant) -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.subsec_nanos())
+            .unwrap_or(1);
+        Self {
+            window: now,
+            seen: 0,
+            sent: 0,
+            chance: 1.0,
+            random: u64::from(seed) | 1,
+        }
+    }
+
+    fn admit(&mut self, now: Instant) -> bool {
+        if now.duration_since(self.window) >= Duration::from_secs(1) {
+            self.chance = if self.seen > RATE {
+                f64::from(RATE) / f64::from(self.seen)
+            } else {
+                1.0
+            };
+            self.window = now;
+            self.seen = 0;
+            self.sent = 0;
+        }
+        self.seen += 1;
+        if self.sent >= 2 * RATE || (self.chance < 1.0 && self.next() >= self.chance) {
+            return false;
+        }
+        self.sent += 1;
+        true
+    }
+
+    /// About one in how many lines go, while sampling.
+    fn one_in(&self) -> Option<u32> {
+        // The chance is at least RATE over a second's lines, so this fits.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        (self.chance < 1.0).then(|| (1.0 / self.chance).round() as u32)
+    }
+
+    /// A number from 0 to 1 (xorshift64*), plenty for picking lines.
+    fn next(&mut self) -> f64 {
+        self.random ^= self.random >> 12;
+        self.random ^= self.random << 25;
+        self.random ^= self.random >> 27;
+        let value = self.random.wrapping_mul(0x2545_F491_4F6C_DD1D);
+        #[allow(clippy::cast_precision_loss)]
+        let fraction = (value >> 11) as f64 / (1u64 << 53) as f64;
+        fraction
     }
 }
 
@@ -553,6 +652,98 @@ pub mod mac {
             command.uid(uid).gid(gid);
         }
         command
+    }
+}
+
+#[cfg(test)]
+mod batching {
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    use cntrl_protocol::logs::{LogEntry, LogsBatch, LogsParams};
+
+    use super::{Batcher, RATE};
+
+    fn line(source: &str, i: usize) -> LogEntry {
+        LogEntry {
+            ts: 1,
+            priority: None,
+            source: Some(source.to_owned()),
+            pid: None,
+            message: format!("line {i}"),
+        }
+    }
+
+    /// Everything a second's worth of lines at `at` sends, with the last batch.
+    fn second(batcher: &mut Batcher, at: Instant, lines: usize) -> (usize, Vec<LogsBatch>) {
+        let mut batches: Vec<LogsBatch> = (0..lines)
+            .filter_map(|i| {
+                batcher.push_at(line(if i % 5 == 0 { "quiet" } else { "loud" }, i), true, at)
+            })
+            .collect();
+        batches.extend(batcher.take());
+        (
+            batches.iter().map(|batch| batch.entries.len()).sum(),
+            batches,
+        )
+    }
+
+    #[test]
+    fn past_the_rate_an_even_sample_goes() {
+        let mut batcher = Batcher::new(&LogsParams::default());
+        let start = Instant::now();
+        // A flood within one second stops at twice the rate.
+        let (sent, batches) = second(&mut batcher, start, 5_000);
+        assert_eq!(sent, 2 * RATE as usize);
+        let counted: u64 = batches.iter().flat_map(|batch| batch.counts.values()).sum();
+        assert_eq!(counted, 5_000, "every line is counted, sent or not");
+        // The next second sends about RATE of the 5,000 it gets: one in ten.
+        let (sent, batches) = second(&mut batcher, start + Duration::from_secs(1), 5_000);
+        assert!((400..=600).contains(&sent), "sent {sent}");
+        assert_eq!(batches.last().and_then(|batch| batch.one_in), Some(10));
+        // A quiet second goes back to sending everything.
+        let (sent, _) = second(&mut batcher, start + Duration::from_secs(2), 100);
+        let (quiet, batches) = second(&mut batcher, start + Duration::from_secs(3), 100);
+        assert!(sent <= 100 && quiet == 100);
+        assert_eq!(batches.last().and_then(|batch| batch.one_in), None);
+    }
+
+    #[test]
+    fn sources_can_be_hidden_or_picked_and_the_busiest_are_counted() {
+        let hide = LogsParams {
+            hide: vec!["loud".to_owned()],
+            ..LogsParams::default()
+        };
+        let mut batcher = Batcher::new(&hide);
+        for source in ["loud", "quiet", "loud"] {
+            batcher.push(line(source, 0), true);
+        }
+        let batch = batcher.take().expect("a batch");
+        assert_eq!(batch.entries.len(), 1);
+        assert_eq!(batch.counts, BTreeMap::from([("quiet".to_owned(), 1)]));
+
+        let only = LogsParams {
+            only: vec!["loud".to_owned()],
+            ..LogsParams::default()
+        };
+        let mut batcher = Batcher::new(&only);
+        for source in ["loud", "quiet"] {
+            batcher.push(line(source, 0), true);
+        }
+        assert_eq!(batcher.take().expect("a batch").entries.len(), 1);
+
+        // 25 sources, the last the busiest: 20 are counted, busiest first.
+        let mut batcher = Batcher::new(&LogsParams::default());
+        for i in 0..25 {
+            let lines = if i == 24 { 5 } else { 1 };
+            for _ in 0..lines {
+                batcher.push(line(&format!("source{i:02}"), i), true);
+            }
+        }
+        let batch = batcher.take().expect("a batch");
+        assert_eq!(batch.counts.len(), 20);
+        assert_eq!(batch.counts.get("source24"), Some(&5));
+        assert!(!batch.counts.contains_key("source23"));
     }
 }
 

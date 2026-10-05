@@ -2,6 +2,8 @@
 //! the latest lines first, then new ones as they come, only while subscribed.
 //! Nothing is kept anywhere but the viewer's screen (D26).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Parameters of the `logs` topic.
@@ -26,6 +28,19 @@ pub struct LogsParams {
     /// How many earlier lines come first: 0 to 1,000, and 100 when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lines: Option<u32>,
+    /// Whether the whole system's log takes in the operating system's own
+    /// processes: on a Mac, Apple's processes and subsystems and the kernel,
+    /// which make nearly all of it. Everything comes when absent; Linux takes
+    /// everything either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_os: Option<bool>,
+    /// Only lines from these sources, named as entries name them; every
+    /// source when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// No lines from these sources.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hide: Vec<String>,
 }
 
 /// Log lines, in the order they were logged.
@@ -41,6 +56,14 @@ pub struct LogsBatch {
     /// while the log is live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<String>,
+    /// While new lines come faster than the agent sends them, it sends an
+    /// even sample of about one in this many; absent while it sends them all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_in: Option<u32>,
+    /// How many new lines each source logged since the last batch, sampled
+    /// or not: the busiest 20.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub counts: BTreeMap<String, u64>,
 }
 
 /// One log line.

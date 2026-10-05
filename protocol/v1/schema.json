@@ -1973,6 +1973,27 @@
           "format": "uint32",
           "minimum": 0,
           "description": "How many earlier lines come first: 0 to 1,000, and 100 when absent."
+        },
+        "include_os": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the whole system's log takes in the operating system's own\nprocesses: on a Mac, Apple's processes and subsystems and the kernel,\nwhich make nearly all of it. Everything comes when absent; Linux takes\neverything either way."
+        },
+        "only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only lines from these sources, named as entries name them; every\nsource when empty."
+        },
+        "hide": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "No lines from these sources."
         }
       },
       "description": "Parameters of the `logs` topic."
@@ -1998,6 +2019,24 @@
             "null"
           ],
           "description": "Why no more lines will come, such as the log reader stopping; absent\nwhile the log is live."
+        },
+        "one_in": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "While new lines come faster than the agent sends them, it sends an\neven sample of about one in this many; absent while it sends them all."
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "description": "How many new lines each source logged since the last batch, sampled\nor not: the busiest 20."
         }
       },
       "required": [

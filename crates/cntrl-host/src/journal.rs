@@ -63,9 +63,12 @@ pub fn parse(line: &str) -> Option<LogEntry> {
     Some(LogEntry {
         ts: micros / 1_000,
         priority: text("PRIORITY").and_then(|p| p.parse().ok()),
-        source: text("_SYSTEMD_UNIT")
-            .or_else(|| text("SYSLOG_IDENTIFIER"))
-            .or_else(|| text("_COMM")),
+        // Named as journalctl names it, by its identifier; the unit only when
+        // there's nothing else, since a program outside a service, such as
+        // systemd itself, runs in a scope like `init.scope` (angle 11 part 4).
+        source: text("SYSLOG_IDENTIFIER")
+            .or_else(|| text("_COMM"))
+            .or_else(|| text("_SYSTEMD_UNIT")),
         pid: text("_PID").and_then(|pid| pid.parse().ok()),
         message: cut(text("MESSAGE").unwrap_or_default()),
     })
@@ -128,7 +131,7 @@ mod tests {
             Some(LogEntry {
                 ts: 1_791_000_000_123,
                 priority: Some(3),
-                source: Some("nginx.service".to_owned()),
+                source: Some("nginx".to_owned()),
                 pid: Some(812),
                 message: "bind() failed".to_owned(),
             })

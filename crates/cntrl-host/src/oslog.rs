@@ -13,6 +13,17 @@ use crate::journal::cut;
 pub const SERVICE_WINDOW: &str = "1h";
 pub const SYSTEM_WINDOW: &str = "2m";
 
+/// Apple's own lines: its subsystems, the programs where macOS keeps its own,
+/// and the kernel, which together make nearly all of a Mac's log (angle 11
+/// part 4).
+const APPLE: &str = concat!(
+    r#"(subsystem BEGINSWITH "com.apple." OR processImagePath BEGINSWITH "/System/""#,
+    r#" OR processImagePath BEGINSWITH "/usr/libexec/" OR processImagePath BEGINSWITH "/usr/sbin/""#,
+    r#" OR processImagePath BEGINSWITH "/usr/bin/" OR processImagePath BEGINSWITH "/sbin/""#,
+    r#" OR processImagePath BEGINSWITH "/bin/" OR processImagePath BEGINSWITH "/Library/Apple/""#,
+    r#" OR processImagePath == "/kernel")"#,
+);
+
 /// Which processes a launchd job's lines come from: its program, and while it
 /// runs its process, which still matches once a wrapper has handed over to
 /// another program.
@@ -23,8 +34,9 @@ pub struct Job {
 }
 
 /// The predicate for a subscription: log events, not `log`'s own, at the
-/// priority asked for, containing the search, and from the job when there is
-/// one. Values are quoted, so nothing typed can change its shape.
+/// priority asked for, containing the search, from the job when there is one
+/// or else without Apple's own when asked, and from the sources asked for.
+/// Values are quoted, so nothing typed can change its shape.
 pub fn predicate(params: &LogsParams, job: Option<&Job>) -> String {
     let mut clauses = vec![
         r#"eventType == "logEvent""#.to_owned(),
@@ -46,6 +58,16 @@ pub fn predicate(params: &LogsParams, job: Option<&Job>) -> String {
     {
         clauses.push(format!("eventMessage CONTAINS[c] {}", quote(grep)));
     }
+    // A service's log is never thinned so; it may be one of Apple's.
+    if job.is_none() && params.include_os == Some(false) {
+        clauses.push(format!("NOT {APPLE}"));
+    }
+    if !params.only.is_empty() {
+        clauses.push(format!("({})", from_sources(&params.only)));
+    }
+    if !params.hide.is_empty() {
+        clauses.push(format!("NOT ({})", from_sources(&params.hide)));
+    }
     if let Some(job) = job {
         let mut from = Vec::new();
         if let Some(program) = &job.program {
@@ -57,6 +79,16 @@ pub fn predicate(params: &LogsParams, job: Option<&Job>) -> String {
         clauses.push(format!("({})", from.join(" OR ")));
     }
     clauses.join(" AND ")
+}
+
+/// Lines from any of `sources`, named as [`parse`] names them: the last part
+/// of the program's path.
+fn from_sources(sources: &[String]) -> String {
+    sources
+        .iter()
+        .map(|source| format!("processImagePath ENDSWITH {}", quote(&format!("/{source}"))))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 /// `log stream`'s arguments, for new lines from now on.
@@ -262,5 +294,27 @@ mod tests {
             predicate(&LogsParams::default(), None),
             r#"eventType == "logEvent" AND process != "log""#
         );
+    }
+
+    #[test]
+    fn the_system_view_can_leave_out_apples_own_and_pick_sources() {
+        let params = LogsParams {
+            include_os: Some(false),
+            only: vec!["nginx".to_owned(), "kernel".to_owned()],
+            hide: vec!["appstoreagent".to_owned()],
+            ..LogsParams::default()
+        };
+        let system = predicate(&params, None);
+        assert!(system.contains(&format!("NOT {APPLE}")));
+        assert!(system.contains(
+            r#"(processImagePath ENDSWITH "/nginx" OR processImagePath ENDSWITH "/kernel")"#
+        ));
+        assert!(system.ends_with(r#"NOT (processImagePath ENDSWITH "/appstoreagent")"#));
+        // A service's own view keeps Apple's lines, since it may be Apple's.
+        let job = Job {
+            program: Some("/usr/sbin/sshd".to_owned()),
+            pid: None,
+        };
+        assert!(!predicate(&params, Some(&job)).contains("BEGINSWITH"));
     }
 }
