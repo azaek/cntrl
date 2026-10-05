@@ -202,6 +202,20 @@
             "t"
           ],
           "description": "The gateway has recorded a pause."
+        },
+        {
+          "$ref": "#/$defs/AlertRules",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "alerts"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The alert rules this device decides itself (D43), the whole set."
         }
       ],
       "description": "Any frame of protocol v1."
@@ -760,11 +774,20 @@
       "description": "One outbox record."
     },
     "RecordKind": {
-      "type": "string",
-      "enum": [
-        "audit_checkpoint",
-        "metrics",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "audit_checkpoint",
+            "metrics",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "alert",
+          "description": "A rule the device decides fired or resolved (`records::AlertRecord`)."
+        }
       ],
       "description": "What an outbox record holds."
     },
@@ -856,6 +879,138 @@
     "Paused": {
       "type": "object",
       "description": "The gateway's answer to `pause`, once it has recorded it."
+    },
+    "AlertRule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the rule last changed, in Unix milliseconds: a changed rule starts\nover, resolving what it had firing."
+        },
+        "kind": {
+          "$ref": "#/$defs/AlertRuleKind"
+        },
+        "minutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many minutes in a row the condition has to hold."
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AlertMetric"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a `metric` rule, the reading."
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What the reading is of: a mount point for a disk, a sensor kind (`cpu`,\n`gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.\nFor a `service` rule, the service's name, as `service.restart` takes it."
+        },
+        "op": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AlertOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "The line, in the metric's unit: percent for `cpu`, `memory`, `swap`,\n`disk_used`, `gpu_busy` and `gpu_memory`; GiB for `disk_free`; the load\naverage itself for `load`; degrees Celsius for temperatures."
+        }
+      },
+      "required": [
+        "id",
+        "rev",
+        "kind",
+        "minutes"
+      ],
+      "description": "One rule."
+    },
+    "AlertRuleKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "metric",
+          "description": "A reading beyond a line."
+        },
+        {
+          "type": "string",
+          "const": "service",
+          "description": "A service that isn't running."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A kind from a newer hub; the agent skips the rule."
+        }
+      ]
+    },
+    "AlertMetric": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "memory",
+            "swap",
+            "disk_used",
+            "disk_free",
+            "load",
+            "temperature",
+            "gpu_busy",
+            "gpu_memory",
+            "gpu_temperature"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A reading from a newer hub; the agent skips the rule."
+        }
+      ],
+      "description": "A reading a rule watches, judged by each minute's average."
+    },
+    "AlertOp": {
+      "type": "string",
+      "enum": [
+        "above",
+        "below"
+      ]
+    },
+    "AlertRules": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AlertRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "description": "Every rule this device decides, replacing any before."
     },
     "NoParams": {
       "type": "object",
@@ -2451,6 +2606,66 @@
         "sig"
       ],
       "description": "`audit_checkpoint`: privd's signature over the head of the device's audit\nlog. Console keeps them, so the log can later be checked against them."
+    },
+    "AlertRecord": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "The rule's `rev` the agent judged it by."
+        },
+        "state": {
+          "$ref": "#/$defs/AlertState"
+        },
+        "since": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the condition began, in Unix milliseconds."
+        },
+        "at": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the agent decided, in Unix milliseconds."
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "The minute's reading that decided it, in the rule's unit; absent for a\nservice."
+        },
+        "peak": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "On resolving, the furthest past the line it went while firing."
+        }
+      },
+      "required": [
+        "rule",
+        "rev",
+        "state",
+        "since",
+        "at"
+      ],
+      "description": "An `alert` record: a rule this device decides fired or resolved (D43). The\noutbox keeps it until the hub has it, so it survives a dropped link."
+    },
+    "AlertState": {
+      "type": "string",
+      "enum": [
+        "firing",
+        "resolved"
+      ]
     }
   }
 }

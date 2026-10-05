@@ -10,7 +10,7 @@ use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
 use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesSample;
-use cntrl_protocol::records::{AuditCheckpoint, StatsRecord};
+use cntrl_protocol::records::{AlertRecord, AuditCheckpoint, StatsRecord};
 use cntrl_protocol::stats::{SensorKind, StatsSample};
 use cntrl_protocol::system::SystemInfo;
 use cntrl_protocol::{ErrorCode, Frame};
@@ -51,6 +51,7 @@ fn golden_frames_round_trip() {
                         RecordKind::AuditCheckpoint => {
                             serde_json::from_value::<AuditCheckpoint>(data).map(drop)
                         }
+                        RecordKind::Alert => serde_json::from_value::<AlertRecord>(data).map(drop),
                         RecordKind::Unknown => panic!("{name}: a record of unknown type"),
                     };
                     decoded.unwrap_or_else(|e| panic!("{name}: record {}: {e}", record.seq));

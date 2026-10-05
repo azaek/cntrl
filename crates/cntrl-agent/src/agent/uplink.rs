@@ -40,6 +40,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use super::alerts::Alerts;
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call, CallError};
@@ -219,6 +220,8 @@ pub struct UplinkConfig {
     pub processes: Arc<processes::Latest>,
     /// Records for Console, sent and acknowledged over the link.
     pub outbox: Arc<Outbox>,
+    /// The alert rules this device decides itself, which the hub sends (D43).
+    pub alerts: Arc<Alerts>,
 }
 
 /// How a session ended, and what to do next.
@@ -744,6 +747,10 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             return None;
         }
         Frame::Goaway(goaway) => return Some(go_away(ws, &goaway, stable).await),
+        Frame::Alerts(rules) => {
+            session.config.alerts.set(rules.rules).await;
+            return None;
+        }
         other => {
             debug!(?other, "ignoring a frame");
             return None;
@@ -1000,19 +1007,19 @@ async fn power_info() -> Result<PowerInfo, HostError> {
 
 /// The services at system scope. Listing needs no root, so the agent does it.
 #[cfg(target_os = "linux")]
-async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
     cntrl_host::systemd::Systemd::connect().await?.list().await
 }
 
 #[cfg(target_os = "macos")]
-async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
     tokio::task::spawn_blocking(cntrl_host::launchd::list)
         .await
         .map_err(|e| HostError::Failed(e.to_string()))?
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
     Err(HostError::Unsupported)
 }
 

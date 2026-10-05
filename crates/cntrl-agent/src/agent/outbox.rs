@@ -3,7 +3,7 @@
 //! a reconnect or a restart; Console drops repeats by number. Since Console
 //! keeps no device data (D26), nothing records into it: the stats and audit
 //! checkpoints it used to carry are gone, and any still queued are dropped on
-//! opening. It stays for the alerts and events to come.
+//! opening. Alerts the device decides itself go through it (D43).
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -19,22 +19,8 @@ use super::uplink::now_ms;
 
 pub const OUTBOX_FILE: &str = "outbox.json";
 /// How many records the outbox holds.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "nothing records since D26; alerts and events will"
-    )
-)]
 const MAX_RECORDS: usize = 10_000;
 /// The records' data stays under about this many bytes.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "nothing records since D26; alerts and events will"
-    )
-)]
 const MAX_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -101,13 +87,6 @@ impl Outbox {
     }
 
     /// Adds a record. When the outbox is full the oldest records go first.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing records since D26; alerts and events will"
-        )
-    )]
     pub async fn push(&self, kind: RecordKind, data: Value) {
         let mut saved = self.saved.lock().await;
         let seq = saved.next_seq;
@@ -156,13 +135,6 @@ impl Outbox {
 }
 
 /// Drops the oldest stats records until the outbox fits its limits.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "nothing records since D26; alerts and events will"
-    )
-)]
 fn trim(records: &mut VecDeque<OutboxRecord>) {
     let mut bytes: usize = records.iter().map(size).sum();
     while records.len() > MAX_RECORDS || bytes > MAX_BYTES {
@@ -179,13 +151,6 @@ fn trim(records: &mut VecDeque<OutboxRecord>) {
 }
 
 /// Roughly what a record adds to the file.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "nothing records since D26; alerts and events will"
-    )
-)]
 fn size(record: &OutboxRecord) -> usize {
     serde_json::to_vec(&record.data).map_or(0, |data| data.len()) + 40
 }

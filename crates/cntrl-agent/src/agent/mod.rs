@@ -1,6 +1,7 @@
 //! The agent on Unix: command dispatch, the `run` loop of the network half, and
 //! `privd`, the privileged half.
 
+mod alerts;
 mod audit;
 mod cli;
 mod client;
@@ -112,6 +113,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let latest_processes = Arc::new(processes::Latest::new(None));
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
+        let alert_rules = Arc::new(alerts::Alerts::open(&state_dir).await);
         let privd_socket = config.paths.privd_socket.clone();
         let uplink_config = UplinkConfig {
             state_dir: state_dir.clone(),
@@ -120,6 +122,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             stats: Arc::clone(&latest_stats),
             processes: Arc::clone(&latest_processes),
             outbox: Arc::clone(&outbox),
+            alerts: Arc::clone(&alert_rules),
         };
         let state = Arc::new(AgentState::new(
             config,
@@ -140,6 +143,15 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         );
         supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
         let host_stats = cntrl_host::stats::backend();
+        supervisor.spawn(
+            "alerts",
+            alerts::run(
+                Arc::clone(&alert_rules),
+                Arc::clone(&latest_stats),
+                Arc::clone(&outbox),
+                token.clone(),
+            ),
+        );
         supervisor.spawn("stats", stats::run(host_stats, latest_stats, token.clone()));
         supervisor.spawn(
             "processes",

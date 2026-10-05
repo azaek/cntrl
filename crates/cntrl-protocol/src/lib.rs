@@ -2,6 +2,7 @@
 //! and error and close codes. Shared by the agent and, through generated types,
 //! by the gateway and the SDKs. No OS code and no async runtime.
 
+pub mod alerts;
 pub mod app;
 pub mod auth;
 pub mod capability;

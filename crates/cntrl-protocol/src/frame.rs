@@ -37,6 +37,8 @@ pub enum Frame {
     Pause(Pause),
     /// The gateway has recorded a pause.
     Paused(Paused),
+    /// The alert rules this device decides itself (D43), the whole set.
+    Alerts(crate::alerts::AlertRules),
     /// A frame type from a newer protocol revision. Receivers ignore it.
     #[serde(other)]
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -335,6 +337,8 @@ pub struct OutboxRecord {
 pub enum RecordKind {
     AuditCheckpoint,
     Metrics,
+    /// A rule the device decides fired or resolved (`records::AlertRecord`).
+    Alert,
     #[serde(other)]
     Unknown,
 }

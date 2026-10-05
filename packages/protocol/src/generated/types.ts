@@ -32,6 +32,72 @@ export interface AgentInfo {
     machine_id_hash: string;
 }
 
+/** A reading a rule watches, judged by each minute's average. */
+export type AlertMetric =
+    | ("cpu" | "memory" | "swap" | "disk_used" | "disk_free" | "load" | "temperature" | "gpu_busy" | "gpu_memory" | "gpu_temperature")
+    | "unknown";
+
+export type AlertOp = "above" | "below";
+
+/**
+ * An `alert` record: a rule this device decides fired or resolved (D43). The
+ * outbox keeps it until the hub has it, so it survives a dropped link.
+ */
+export interface AlertRecord {
+    rule: string;
+    /** The rule's `rev` the agent judged it by. */
+    rev: number;
+    state: AlertState;
+    /** When the condition began, in Unix milliseconds. */
+    since: number;
+    /** When the agent decided, in Unix milliseconds. */
+    at: number;
+    /**
+     * The minute's reading that decided it, in the rule's unit; absent for a
+     * service.
+     */
+    value?: number | null;
+    /** On resolving, the furthest past the line it went while firing. */
+    peak?: number | null;
+}
+
+/** One rule. */
+export interface AlertRule {
+    id: string;
+    /**
+     * When the rule last changed, in Unix milliseconds: a changed rule starts
+     * over, resolving what it had firing.
+     */
+    rev: number;
+    kind: AlertRuleKind;
+    /** How many minutes in a row the condition has to hold. */
+    minutes: number;
+    /** For a `metric` rule, the reading. */
+    metric?: AlertMetric | null;
+    /**
+     * What the reading is of: a mount point for a disk, a sensor kind (`cpu`,
+     * `gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.
+     * For a `service` rule, the service's name, as `service.restart` takes it.
+     */
+    target?: string | null;
+    op?: AlertOp | null;
+    /**
+     * The line, in the metric's unit: percent for `cpu`, `memory`, `swap`,
+     * `disk_used`, `gpu_busy` and `gpu_memory`; GiB for `disk_free`; the load
+     * average itself for `load`; degrees Celsius for temperatures.
+     */
+    threshold?: number | null;
+}
+
+export type AlertRuleKind = "metric" | "service" | "unknown";
+
+/** Every rule this device decides, replacing any before. */
+export interface AlertRules {
+    rules: AlertRule[];
+}
+
+export type AlertState = "firing" | "resolved";
+
 /** `app.quit`: one app to quit, named by its bundle ID as `service.list` gives it. */
 export interface AppQuit {
     app: string;
@@ -252,7 +318,8 @@ export type Frame =
     | (Ack & { t: "ack" })
     | (GoAway & { t: "goaway" })
     | (Pause & { t: "pause" })
-    | (Paused & { t: "paused" });
+    | (Paused & { t: "paused" })
+    | (AlertRules & { t: "alerts" });
 
 /**
  * Asks the agent to disconnect and come back within a window, for example
@@ -634,7 +701,7 @@ export interface ReconnectWindow {
 }
 
 /** What an outbox record holds. */
-export type RecordKind = "audit_checkpoint" | "metrics" | "unknown";
+export type RecordKind = ("audit_checkpoint" | "metrics" | "unknown") | "alert";
 
 /** Records from the agent's outbox, delivered at least once. */
 export interface Records {

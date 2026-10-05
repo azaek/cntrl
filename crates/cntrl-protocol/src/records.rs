@@ -73,3 +73,33 @@ mod tests {
         );
     }
 }
+
+/// An `alert` record: a rule this device decides fired or resolved (D43). The
+/// outbox keeps it until the hub has it, so it survives a dropped link.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AlertRecord {
+    pub rule: String,
+    /// The rule's `rev` the agent judged it by.
+    pub rev: u64,
+    pub state: AlertState,
+    /// When the condition began, in Unix milliseconds.
+    pub since: u64,
+    /// When the agent decided, in Unix milliseconds.
+    pub at: u64,
+    /// The minute's reading that decided it, in the rule's unit; absent for a
+    /// service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    /// On resolving, the furthest past the line it went while firing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AlertState {
+    Firing,
+    Resolved,
+}
