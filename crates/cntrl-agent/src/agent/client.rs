@@ -18,7 +18,7 @@ use tokio::net::UnixStream;
 use super::audit;
 use super::config::Config;
 use super::enroll::{EnrollCommand, EnrollOutcome};
-use super::local_api::Status;
+use super::local_api::{PauseCommand, PauseOutcome, ResumeOutcome, Status};
 use super::policy::{self, Policy, PolicyState, Source};
 use super::uplink::{UplinkStatus, now_ms};
 
@@ -66,6 +66,21 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
             println!("uplink: retrying in {wait}s; {reason}");
         }
         UplinkStatus::Stopped { reason } => println!("uplink: stopped; {reason}"),
+        UplinkStatus::Paused {
+            by,
+            reason,
+            since_ms,
+        } => {
+            let ago = now_ms().saturating_sub(*since_ms) / 1000;
+            let why = reason
+                .as_deref()
+                .map(|r| format!(": {r}"))
+                .unwrap_or_default();
+            println!(
+                "uplink: paused by {by} {} ago{why}; `sudo cntrl resume` reconnects",
+                uptime(ago)
+            );
+        }
     }
     if let Some(device) = &status.device_id {
         println!("device: {device}");
@@ -235,6 +250,75 @@ pub fn change_capability(config: &Config, capability: &str, allowed: bool) -> Ex
         Err(_) => println!("The agent isn't running; it reads the policy when it starts."),
     }
     ExitCode::SUCCESS
+}
+
+/// `cntrl pause`: the agent tells Console who paused it and why, then hangs
+/// up until `cntrl resume` (D46). Needs root.
+pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
+    if !rustix::process::geteuid().is_root() {
+        return fail("pausing cuts Console off from this machine; run `sudo cntrl pause`");
+    }
+    // Who ran sudo, as this machine names them.
+    let by = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .unwrap_or_else(|| "root".to_owned());
+    let body = match serde_json::to_vec(&PauseCommand { by, reason }) {
+        Ok(body) => body,
+        Err(e) => return fail(&e.to_string()),
+    };
+    match block_on(request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/pause",
+        body,
+    )) {
+        Ok((status, bytes)) if status.is_success() => {
+            let told =
+                serde_json::from_slice::<PauseOutcome>(&bytes).is_ok_and(|outcome| outcome.told);
+            if told {
+                println!(
+                    "Paused. Console shows this machine as paused, and nothing reaches it until `sudo cntrl resume`."
+                );
+            } else {
+                println!(
+                    "Paused, but Console couldn't be told, since the link was down: it shows this machine as offline. `sudo cntrl resume` reconnects."
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
+        Err(_) => fail("the agent isn't running, so there's nothing to pause"),
+    }
+}
+
+/// `cntrl resume`: the agent reconnects to Console. Needs root.
+pub fn resume(config: &Config) -> ExitCode {
+    if !rustix::process::geteuid().is_root() {
+        return fail("only root resumes the agent; run `sudo cntrl resume`");
+    }
+    match block_on(request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/resume",
+        Vec::new(),
+    )) {
+        Ok((status, bytes)) if status.is_success() => {
+            let was = serde_json::from_slice::<ResumeOutcome>(&bytes)
+                .is_ok_and(|outcome| outcome.was_paused);
+            println!(
+                "{}",
+                if was {
+                    "Resumed; the agent is reconnecting to Console."
+                } else {
+                    "The agent wasn't paused."
+                }
+            );
+            ExitCode::SUCCESS
+        }
+        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
+        Err(_) => fail("the agent isn't running; start its service to bring it back"),
+    }
 }
 
 fn read_token(file: Option<&Path>) -> Result<String, String> {

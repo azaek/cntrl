@@ -250,7 +250,9 @@ export type Frame =
     | (Unsubscribe & { t: "unsub" })
     | (Records & { t: "rec" })
     | (Ack & { t: "ack" })
-    | (GoAway & { t: "goaway" });
+    | (GoAway & { t: "goaway" })
+    | (Pause & { t: "pause" })
+    | (Paused & { t: "paused" });
 
 /**
  * Asks the agent to disconnect and come back within a window, for example
@@ -470,6 +472,17 @@ export interface OutboxState {
     next_seq: number;
     oldest_unacked?: number | null;
 }
+
+/** Pausing the agent on its machine, as `cntrl pause` does. */
+export interface Pause {
+    /** The account that paused it, as the machine names it. */
+    by: string;
+    /** Why, when they said. */
+    reason?: string | null;
+}
+
+/** The gateway's answer to `pause`, once it has recorded it. */
+export type Paused = { [key: string]: never };
 
 /** The device policy in force, by hash. */
 export interface PolicySummary {

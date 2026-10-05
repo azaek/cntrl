@@ -2,18 +2,19 @@
 //! challenge with a hello signed by the device key, keeps the link alive with
 //! heartbeats, and reconnects with full-jitter backoff. Close codes that mean
 //! "stop" (revoked, locked, unsupported version) park it until the device is
-//! enrolled again; it never ends the agent.
+//! enrolled again; it never ends the agent. `cntrl pause` parks it too, after
+//! telling the gateway, until `cntrl resume` (D46).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cntrl_host::HostError;
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::frame::{
-    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Records, Request, Response, SigAlg,
+    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Pause, Records, Request, Response, SigAlg,
     Subscribe, Welcome,
 };
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
@@ -27,7 +28,7 @@ use futures_util::{SinkExt, StreamExt};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, watch};
+use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 use tokio::time::{MissedTickBehavior, timeout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -45,6 +46,7 @@ use super::ipc::{self, Call, CallError};
 use super::keys::SigningKey;
 use super::logs;
 use super::outbox::Outbox;
+use super::paused::{self, PausedState};
 use super::policy::PolicyState;
 use super::processes::{self, Table};
 use super::stats::Latest;
@@ -58,6 +60,8 @@ const BACKOFF_CAP: Duration = Duration::from_secs(60);
 const AUTH_RETRY: Duration = Duration::from_secs(300);
 /// A session that lasted this long resets the backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
+/// How long a pause waits for the gateway to record it before hanging up anyway.
+const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bounds on the heartbeat the gateway asks for.
 const HEARTBEAT_MIN: Duration = Duration::from_secs(5);
 const HEARTBEAT_MAX: Duration = Duration::from_secs(300);
@@ -87,6 +91,20 @@ pub enum UplinkStatus {
     Stopped {
         reason: String,
     },
+    /// Paused on this machine (`cntrl pause`) until `cntrl resume`.
+    Paused {
+        by: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        since_ms: u64,
+    },
+}
+
+/// A pause for the online session to tell the gateway about, and where to say
+/// whether the gateway recorded it.
+struct PauseRequest {
+    notice: Pause,
+    told: oneshot::Sender<bool>,
 }
 
 /// What the uplink shares with the local API.
@@ -99,6 +117,11 @@ pub struct Uplink {
     policy_changed: Notify,
     /// Held while the identity file is written.
     identity: Mutex<()>,
+    /// A pause waiting for the online session, which `pausing` wakes.
+    pause: std::sync::Mutex<Option<PauseRequest>>,
+    pausing: Notify,
+    /// Signalled by `cntrl resume`.
+    resumed: Notify,
 }
 
 impl Uplink {
@@ -108,7 +131,55 @@ impl Uplink {
             enrolled: Notify::new(),
             policy_changed: Notify::new(),
             identity: Mutex::new(()),
+            pause: std::sync::Mutex::new(None),
+            pausing: Notify::new(),
+            resumed: Notify::new(),
         }
+    }
+
+    /// Pauses the agent (`cntrl pause`): saves the pause, so it holds across
+    /// restarts, then has the online session tell the gateway and hang up. True
+    /// when the gateway recorded it; false when the link was down, and Console
+    /// sees the device go offline instead.
+    pub async fn pause(
+        &self,
+        state_dir: &Path,
+        by: String,
+        reason: Option<String>,
+    ) -> Result<bool, String> {
+        let state = PausedState {
+            by: by.clone(),
+            reason: reason.clone(),
+            since_ms: now_ms(),
+        };
+        paused::save(state_dir, &state).map_err(|e| format!("can't save the pause: {e}"))?;
+        let (told, answer) = oneshot::channel();
+        *self.pause.lock().unwrap_or_else(PoisonError::into_inner) = Some(PauseRequest {
+            notice: Pause { by, reason },
+            told,
+        });
+        self.pausing.notify_one();
+        Ok(timeout(PAUSE_TIMEOUT.saturating_mul(2), answer)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(false))
+    }
+
+    /// Ends a pause (`cntrl resume`), and the uplink reconnects. False when the
+    /// agent wasn't paused.
+    pub fn resume(&self, state_dir: &Path) -> Result<bool, String> {
+        let was = paused::clear(state_dir).map_err(|e| format!("can't clear the pause: {e}"))?;
+        self.resumed.notify_one();
+        Ok(was)
+    }
+
+    /// The pause waiting for the session, if any.
+    fn take_pause(&self) -> Option<PauseRequest> {
+        self.pause
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
 
     /// Serializes writes to the identity file: enrollments and credential renewals.
@@ -155,6 +226,8 @@ enum End {
     Shutdown,
     /// The identity or the policy changed: reconnect now.
     Reconnect,
+    /// Paused on this machine: park until resumed.
+    Paused,
     Retry {
         reason: String,
         at_least: Duration,
@@ -187,6 +260,24 @@ pub async fn run(
 ) -> Result<(), String> {
     let mut attempt: u32 = 0;
     loop {
+        if let Some(state) = paused::load(&config.state_dir) {
+            // Nobody is online to tell; a session that was told the gateway already.
+            if let Some(request) = uplink.take_pause() {
+                let _ = request.told.send(false);
+            }
+            info!(by = %state.by, "uplink paused; `cntrl resume` reconnects");
+            uplink.set(UplinkStatus::Paused {
+                by: state.by,
+                reason: state.reason,
+                since_ms: state.since_ms,
+            });
+            tokio::select! {
+                () = uplink.resumed.notified() => {}
+                () = token.cancelled() => return Ok(()),
+            }
+            attempt = 0;
+            continue;
+        }
         let identity = match identity::load(&config.state_dir) {
             Ok(Some(identity)) => identity,
             Ok(None) => {
@@ -216,7 +307,7 @@ pub async fn run(
 
         let retry = match session(&config, &identity, &url, &uplink, &token).await {
             End::Shutdown => return Ok(()),
-            End::Reconnect => {
+            End::Reconnect | End::Paused => {
                 attempt = 0;
                 continue;
             }
@@ -262,6 +353,8 @@ pub async fn run(
         tokio::select! {
             () = tokio::time::sleep(delay) => {}
             () = uplink.enrolled.notified() => attempt = 0,
+            // Paused while away: the loop parks without waiting out the backoff.
+            () = uplink.pausing.notified() => {}
             () = token.cancelled() => return Ok(()),
         }
     }
@@ -522,12 +615,46 @@ async fn online(
                 close_link(ws, close::DISCONNECTED_BY_DEVICE, "policy changed").await;
                 return End::Reconnect;
             }
+            () = uplink.pausing.notified() => {
+                if let Some(request) = uplink.take_pause() {
+                    return pause(ws, request).await;
+                }
+            }
             () = token.cancelled() => {
                 close_link(ws, close::RESTARTING, "agent stopping").await;
                 return End::Shutdown;
             }
         }
     }
+}
+
+/// Tells the gateway who paused the agent and why, waits for it to record the
+/// pause, and hangs up.
+async fn pause(ws: &mut Ws, request: PauseRequest) -> End {
+    let told = send(ws, &Frame::Pause(request.notice)).await.is_ok() && recorded(ws).await;
+    let _ = request.told.send(told);
+    close_link(ws, close::DISCONNECTED_BY_DEVICE, "paused").await;
+    End::Paused
+}
+
+/// Whether the gateway answers `paused` before the pause times out. The session
+/// is ending, so anything else it sends goes unanswered.
+async fn recorded(ws: &mut Ws) -> bool {
+    let wait = async {
+        while let Some(message) = ws.next().await {
+            match message {
+                Ok(Message::Text(text)) => {
+                    if matches!(serde_json::from_str::<Frame>(&text), Ok(Frame::Paused(_))) {
+                        return true;
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => return false,
+                Ok(_) => {}
+            }
+        }
+        false
+    };
+    timeout(PAUSE_TIMEOUT, wait).await.unwrap_or(false)
 }
 
 /// What an online session serves from and keeps track of.

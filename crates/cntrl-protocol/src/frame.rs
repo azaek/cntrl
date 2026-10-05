@@ -31,6 +31,12 @@ pub enum Frame {
     Rec(Records),
     Ack(Ack),
     Goaway(GoAway),
+    /// The agent is being paused on its machine (`cntrl pause`): who paused it
+    /// and why. The gateway answers `paused`; the agent then hangs up and stays
+    /// away until someone resumes it there.
+    Pause(Pause),
+    /// The gateway has recorded a pause.
+    Paused(Paused),
     /// A frame type from a newer protocol revision. Receivers ignore it.
     #[serde(other)]
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -348,6 +354,22 @@ pub struct GoAway {
     pub reason: String,
     pub reconnect_after: ReconnectWindow,
 }
+
+/// Pausing the agent on its machine, as `cntrl pause` does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Pause {
+    /// The account that paused it, as the machine names it.
+    pub by: String,
+    /// Why, when they said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The gateway's answer to `pause`, once it has recorded it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Paused {}
 
 /// A random delay between `min_ms` and `max_ms` spreads reconnects out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

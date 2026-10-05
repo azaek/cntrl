@@ -171,6 +171,8 @@ pub async fn serve(
         .route("/v1/status", get(status))
         .route("/v1/enroll", post(enroll_device))
         .route("/v1/policy/reload", post(reload_policy))
+        .route("/v1/pause", post(pause))
+        .route("/v1/resume", post(resume))
         .with_state(state);
     axum::serve(listener, app.into_make_service_with_connect_info::<Peer>())
         .with_graceful_shutdown(async move { token.cancelled().await })
@@ -228,6 +230,77 @@ async fn reload_policy(
     }
     state.uplink.policy_changed();
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// What `cntrl pause` sends: who ran it, and why.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PauseCommand {
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Whether the gateway recorded a pause; when the link was down, it couldn't.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PauseOutcome {
+    pub told: bool,
+}
+
+/// Whether `cntrl resume` ended a pause.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResumeOutcome {
+    pub was_paused: bool,
+}
+
+/// The longest name and reason a pause carries, as Console shows them.
+const PAUSED_BY_MAX: usize = 64;
+const PAUSE_REASON_MAX: usize = 200;
+
+/// `cntrl pause` (D46): the uplink tells the gateway, hangs up, and stays away
+/// until `cntrl resume`.
+async fn pause(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+    Json(command): Json<PauseCommand>,
+) -> Result<Json<PauseOutcome>, (StatusCode, String)> {
+    if peer.uid != Some(0) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "pausing cuts Console off from this machine; run `sudo cntrl pause`".to_owned(),
+        ));
+    }
+    let clip = |text: &str, max: usize| text.trim().chars().take(max).collect::<String>();
+    let by = Some(clip(&command.by, PAUSED_BY_MAX))
+        .filter(|by| !by.is_empty())
+        .unwrap_or_else(|| "root".to_owned());
+    let reason = command
+        .reason
+        .map(|reason| clip(&reason, PAUSE_REASON_MAX))
+        .filter(|reason| !reason.is_empty());
+    let told = state
+        .uplink
+        .pause(&state.config.paths.state_dir, by, reason)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(PauseOutcome { told }))
+}
+
+/// `cntrl resume`: the uplink reconnects.
+async fn resume(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+) -> Result<Json<ResumeOutcome>, (StatusCode, String)> {
+    if peer.uid != Some(0) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only root resumes the agent; run `sudo cntrl resume`".to_owned(),
+        ));
+    }
+    let was_paused = state
+        .uplink
+        .resume(&state.config.paths.state_dir)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(ResumeOutcome { was_paused }))
 }
 
 #[cfg(test)]

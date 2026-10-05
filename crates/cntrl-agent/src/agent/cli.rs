@@ -56,6 +56,16 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Pause the agent: it tells Console who paused it and why, then hangs up
+    /// and stays away, even across restarts, until `cntrl resume`. Console
+    /// shows the device as paused, and it never alerts. Needs root.
+    Pause {
+        /// Why, for whoever sees it in Console.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// End a pause: the agent reconnects to Console. Needs root.
+    Resume,
     /// Work with the config file.
     #[command(subcommand)]
     Config(ConfigCommand),

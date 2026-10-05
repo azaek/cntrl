@@ -18,6 +18,7 @@ mod local_api;
 mod logging;
 mod logs;
 mod outbox;
+mod paused;
 mod policy;
 mod privd;
 mod processes;
@@ -64,6 +65,8 @@ pub fn main() -> ExitCode {
             replace,
         } => client::run_enroll(&config, token_file.as_deref(), replace),
         Command::Update { check, force } => update::run(&config, check, force),
+        Command::Pause { reason } => client::pause(&config, reason),
+        Command::Resume => client::resume(&config),
         Command::Config(ConfigCommand::Check) => {
             println!("{}: OK", cli.config.display());
             ExitCode::SUCCESS
