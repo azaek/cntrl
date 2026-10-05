@@ -23,8 +23,9 @@
 # again updates the agent when the release is newer, and otherwise only makes
 # sure it runs; either way the agent keeps its identity. From agent 0.1.8,
 # `sudo cntrl update` does the same after checking the release's signature,
-# running the installer that comes in the release's archive (D41). Everything runs from
-# main(), called on the last line, so a download cut short runs nothing.
+# running the installer that comes in the release's archive (D41).
+# Everything runs from main(), called on the last line, so a download cut
+# short runs nothing.
 
 set -eu
 
@@ -79,19 +80,70 @@ sha256() {
     fi
 }
 
+# Downloads $1 to $2, which should come to $3 bytes. On a terminal it draws
+# its own progress from the file's size as it grows, since curl's bar starts
+# with an animation while it follows the release's redirect.
 download() {
     if command -v curl >/dev/null 2>&1; then
-        # A bar on a terminal, since a slow link would otherwise look like a hang.
-        if [ -t 2 ]; then
-            curl -fL --retry 3 --progress-bar -o "$2" "$1"
-        else
-            curl -fsSL --retry 3 -o "$2" "$1"
-        fi
+        set -- "$1" "$2" "$3" curl -fsSL --retry 3 -o "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$2" "$1"
+        set -- "$1" "$2" "$3" wget -qO "$2" "$1"
     else
         fail "this needs curl or wget to download the agent"
     fi
+    if [ ! -t 2 ]; then
+        shift 3
+        "$@" || fail "the download failed"
+        return
+    fi
+    url=$1 file=$2 total=$3
+    shift 3
+    # In the background the download ignores Ctrl-C, so cleanup() stops it if
+    # the script ends first. Once reaped, its pid is no longer ours to stop.
+    "$@" &
+    downloading=$!
+    while kill -0 "$downloading" 2>/dev/null; do
+        progress "$file" "$total"
+        sleep 0.2 2>/dev/null || sleep 1
+    done
+    if ! wait "$downloading"; then
+        downloading=
+        printf '\n' >&2
+        fail "the download from $url failed"
+    fi
+    downloading=
+    progress "$file" "$total"
+    printf '\n' >&2
+}
+
+# One line of progress for $1 out of $2 bytes, drawn over the last: a bar, the
+# share done, and how much of how much.
+progress() {
+    have=0
+    if [ -f "$1" ]; then have=$(wc -c <"$1"); fi
+    case ${LC_ALL:-${LC_CTYPE:-${LANG:-}}} in
+    *UTF-8* | *utf8* | *UTF8* | *utf-8*) full=$(printf '\342\226\210') empty=$(printf '\342\226\221') ;;
+    *) full='#' empty='.' ;;
+    esac
+    awk -v have="$have" -v total="$2" -v full="$full" -v empty="$empty" 'BEGIN {
+        share = total > 0 ? have / total : 0
+        if (share > 1) share = 1
+        width = 28
+        filled = int(share * width + 0.5)
+        bar = ""
+        for (i = 0; i < width; i++) bar = bar (i < filled ? full : empty)
+        printf "\r  %s %3d%%  %.1f of %.1f MB\033[K", bar, share * 100, have / 1048576, total / 1048576
+    }' >&2
+}
+
+# However the script ends: stops a download still going, ending its progress
+# line, and removes the work directory.
+cleanup() {
+    if [ -n "${downloading:-}" ]; then
+        kill "$downloading" 2>/dev/null || true
+        printf '\n' >&2
+    fi
+    rm -rf "$work"
 }
 
 # Downloads this machine's build and checks it against the SHA-256 Console
@@ -101,9 +153,10 @@ fetch() {
     [ -n "$line" ] || fail "release $CNTRL_VERSION has no build for $1"
     url=$(printf '%s\n' "$line" | awk '{ print $2 }')
     want=$(printf '%s\n' "$line" | awk '{ print $4 }')
+    bytes=$(printf '%s\n' "$line" | awk '{ print $3 }')
     size=$(printf '%s\n' "$line" | awk '{ printf "%.1f MB", $3 / 1048576 }')
     say "Downloading cntrl agent $CNTRL_VERSION for $1 ($size)"
-    download "$url" "$2"
+    download "$url" "$2" "$bytes"
     got=$(sha256 "$2")
     [ "$got" = "$want" ] || fail "the download doesn't match the release's SHA-256 (got $got)"
 }
@@ -308,7 +361,11 @@ main() {
     fi
 
     work=$(mktemp -d)
-    trap 'rm -rf "$work"' EXIT
+    # Signals become exits so every shell runs the EXIT trap.
+    trap cleanup EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     if [ -n "$binary" ]; then
         # A build from this repo: the packaging files sit beside this script.
         mkdir -p "$work/files"
