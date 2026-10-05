@@ -30,6 +30,11 @@ const INSTALLER: &str = include_str!("../../../../packaging/install.sh");
 const RELEASES: &str = "https://github.com/azaek/cntrl/releases/download";
 /// The largest archive the update downloads; releases are about 5 MB.
 const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
+/// How long connecting may take, which reqwest's connector splits across a
+/// host's addresses. GitHub's download host has four, and a network that
+/// drops one (as the owner's did on 2026-10-05) otherwise holds each request
+/// for the system's own connect timeout, 75 s on macOS, before the next.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a release's signed manifest says.
 #[derive(Debug, Deserialize)]
@@ -74,6 +79,7 @@ async fn update(
     let client = reqwest::Client::builder()
         .user_agent(concat!("cntrl-agent/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(CONNECT_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())?;
     let latest = latest_version(&client, &config.console.url).await?;
@@ -93,6 +99,14 @@ async fn update(
         return Ok(ExitCode::SUCCESS);
     }
 
+    // Say what's happening before each wait on the network, never after.
+    if reinstall {
+        println!("Installing cntrl agent {latest} again. Checking the release's signature…");
+    } else {
+        println!(
+            "cntrl agent {latest} is out; this one is {current}. Checking the release's signature…"
+        );
+    }
     let target = release_target()?;
     let base = format!("{RELEASES}/agent-v{latest}");
     let manifest = fetch(&client, &format!("{base}/manifest.json"), MAX_ARCHIVE, None).await?;
@@ -111,7 +125,7 @@ async fn update(
         .get(&target)
         .ok_or_else(|| format!("release {latest} has no build for {target}"))?;
     println!(
-        "Checked release {latest}'s signature. Downloading its build for {target} ({:.1} MB).",
+        "The signature checks. Downloading the build for {target} ({:.1} MB)…",
         megabytes(artifact.size)
     );
     let archive = fetch(

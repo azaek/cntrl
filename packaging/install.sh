@@ -82,10 +82,12 @@ sha256() {
 
 # Downloads $1 to $2, which should come to $3 bytes. On a terminal it draws
 # its own progress from the file's size as it grows, since curl's bar starts
-# with an animation while it follows the release's redirect.
+# with an animation while it follows the release's redirect. curl gives each
+# of a host's addresses a share of --connect-timeout, so one that a network
+# drops costs seconds, not the system's own connect timeout.
 download() {
     if command -v curl >/dev/null 2>&1; then
-        set -- "$1" "$2" "$3" curl -fsSL --retry 3 -o "$2" "$1"
+        set -- "$1" "$2" "$3" curl -fsSL --retry 3 --connect-timeout 20 -o "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
         set -- "$1" "$2" "$3" wget -qO "$2" "$1"
     else
