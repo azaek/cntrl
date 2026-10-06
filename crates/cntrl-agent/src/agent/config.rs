@@ -1,6 +1,7 @@
-//! The agent config: `/etc/cntrl/agent.toml`, then `CNTRL_*` environment
-//! variables. A missing file means defaults. A file that can't be read or parsed
-//! stops the agent and is never rewritten.
+//! The agent config: `/etc/cntrl/agent.toml`, or `%ProgramData%\cntrl\agent.toml`
+//! on Windows, then `CNTRL_*` environment variables. A missing file means
+//! defaults. A file that can't be read or parsed stops the agent and is never
+//! rewritten.
 
 use std::fmt;
 use std::fs;
@@ -48,12 +49,36 @@ pub struct Paths {
     pub policy: PathBuf,
     /// The local audit log.
     pub audit_dir: PathBuf,
+    /// Logs: launchd writes the agent's and privd's here on macOS, and on
+    /// Windows they write their own, a file a day (D58). systemd's journal
+    /// keeps them on Linux.
+    pub logs: PathBuf,
+}
+
+/// The config file read unless `--config` or `CNTRL_CONFIG` names another.
+pub fn default_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        program_data().join("cntrl").join("agent.toml")
+    }
+    #[cfg(not(windows))]
+    {
+        "/etc/cntrl/agent.toml".into()
+    }
+}
+
+/// `%ProgramData%`, where Windows keeps what services share.
+#[cfg(windows)]
+fn program_data() -> PathBuf {
+    std::env::var_os("ProgramData").map_or_else(|| r"C:\ProgramData".into(), PathBuf::from)
 }
 
 impl Default for Paths {
     /// systemd makes the Linux sockets' directories; on macOS launchd makes
     /// the sockets themselves in `/var/run`, and state lives under
-    /// `/Library/Application Support` (D20).
+    /// `/Library/Application Support` (D20). On Windows the endpoints are
+    /// named pipes, privd's where only administrators can create one, and the
+    /// rest is under `%ProgramData%\cntrl` (D58).
     fn default() -> Self {
         #[cfg(target_os = "macos")]
         {
@@ -64,9 +89,23 @@ impl Default for Paths {
                 privd_state_dir: "/Library/Application Support/cntrl/privd".into(),
                 policy: "/etc/cntrl/policy.toml".into(),
                 audit_dir: "/var/log/cntrl/audit".into(),
+                logs: "/var/log/cntrl".into(),
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            let data = program_data().join("cntrl");
+            Self {
+                agent_socket: r"\\.\pipe\cntrl\agent".into(),
+                privd_socket: r"\\.\pipe\ProtectedPrefix\Administrators\cntrl\privd".into(),
+                state_dir: data.join("agent"),
+                privd_state_dir: data.join("privd"),
+                policy: data.join("policy.toml"),
+                audit_dir: data.join("audit"),
+                logs: data.join("logs"),
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
         {
             Self {
                 agent_socket: "/run/cntrl-agent/agent.sock".into(),
@@ -75,6 +114,7 @@ impl Default for Paths {
                 privd_state_dir: "/var/lib/cntrl-privd".into(),
                 policy: "/etc/cntrl/policy.toml".into(),
                 audit_dir: "/var/log/cntrl/audit".into(),
+                logs: "/var/log/cntrl".into(),
             }
         }
     }

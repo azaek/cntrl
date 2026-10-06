@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use super::config;
+
 /// The cntrl agent: a headless, system-level server-management agent.
 #[derive(Debug, Parser)]
 #[command(name = "cntrl-agent", version, about)]
@@ -12,7 +14,7 @@ pub struct Cli {
     #[arg(
         long,
         env = "CNTRL_CONFIG",
-        default_value = "/etc/cntrl/agent.toml",
+        default_value_os_t = config::default_path(),
         global = true
     )]
     pub config: PathBuf,

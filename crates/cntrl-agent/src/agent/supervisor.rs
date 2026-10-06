@@ -1,17 +1,17 @@
 //! Runs the agent's subsystems as tasks under one cancellation token. A
 //! subsystem that stops on its own takes the process down with exit code 70, so
-//! systemd restarts it cleanly instead of leaving a running but broken agent.
+//! the service manager restarts it cleanly instead of leaving a running but
+//! broken agent.
 
 use std::future::Future;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use super::systemd;
+use super::service;
 
 /// `EX_SOFTWARE` from sysexits(3).
 const EXIT_SOFTWARE: u8 = 70;
@@ -25,9 +25,10 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn new() -> Self {
+    /// `token` is the service's: the service manager may cancel it to stop.
+    pub fn new(token: CancellationToken) -> Self {
         Self {
-            token: CancellationToken::new(),
+            token,
             tasks: JoinSet::new(),
         }
     }
@@ -45,19 +46,24 @@ impl Supervisor {
         self.tasks.spawn(async move { (name, task.await) });
     }
 
-    /// Waits for SIGTERM, SIGINT or a subsystem stopping, then cancels everything
-    /// and waits up to 10 s for the rest to finish.
+    /// Waits for SIGTERM, an interrupt, the service manager's stop request or
+    /// a subsystem stopping, then cancels everything and waits up to 10 s for
+    /// the rest to finish.
     pub async fn run_until_shutdown(mut self) -> ExitCode {
-        let mut sigterm = match signal(SignalKind::terminate()) {
-            Ok(sigterm) => sigterm,
+        let mut terminate = match service::Terminate::listen() {
+            Ok(terminate) => terminate,
             Err(e) => {
-                error!("can't listen for SIGTERM: {e}");
+                error!("{e}");
                 return ExitCode::FAILURE;
             }
         };
         let failure = tokio::select! {
-            _ = sigterm.recv() => {
-                info!("SIGTERM received, shutting down");
+            reason = terminate.recv() => {
+                info!("{reason}, shutting down");
+                None
+            }
+            () = self.token.cancelled() => {
+                info!("the service manager asked to stop, shutting down");
                 None
             }
             _ = tokio::signal::ctrl_c() => {
@@ -71,7 +77,7 @@ impl Supervisor {
             }),
         };
 
-        systemd::stopping();
+        service::stopping();
         self.token.cancel();
         let drain = async { while self.tasks.join_next().await.is_some() {} };
         if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {

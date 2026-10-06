@@ -1,5 +1,6 @@
 //! privd, the privileged half of the agent. It runs as root with no network,
-//! started on demand by its systemd or launchd socket, and is the only part that
+//! started on demand by its systemd or launchd socket, or on Windows as a
+//! LocalSystem service that keeps running (D58), and is the only part that
 //! reads the policy, writes the audit log, holds the audit key and acts on the
 //! machine. It accepts connections only from root, the agent's user (`cntrl`,
 //! `_cntrl` on macOS, `NT SERVICE\cntrl-agent` on Windows) and its own user,
@@ -23,6 +24,7 @@ use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::service::{JobResult, ServiceAction, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use super::audit::AuditLog;
@@ -34,6 +36,9 @@ use super::os::{self, Private};
 use super::{logging, policy};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Whether privd exits when idle: systemd and launchd start it again when the
+/// agent next connects, and Windows' Service Control Manager doesn't.
+const EXITS_WHEN_IDLE: bool = cfg!(unix);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
 const AUDIT_KEY_FILE: &str = "audit.key";
 /// How long privd waits for systemd's verdict on a job.
@@ -54,8 +59,10 @@ struct State {
     processes: Mutex<Option<cntrl_host::processes::Sampler>>,
 }
 
-pub fn main(config: &Config) -> ExitCode {
-    logging::init(&config.log.level);
+/// privd; `stop` is the service's token, which the service manager may
+/// cancel.
+pub fn main(config: &Config, stop: CancellationToken) -> ExitCode {
+    logging::init(&config.log.level, &config.paths.logs, "privd");
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -66,7 +73,7 @@ pub fn main(config: &Config) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(serve(config)) {
+    match runtime.block_on(serve(config, stop)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!("{e}");
@@ -75,7 +82,7 @@ pub fn main(config: &Config) -> ExitCode {
     }
 }
 
-async fn serve(config: &Config) -> Result<(), String> {
+async fn serve(config: &Config, stop: CancellationToken) -> Result<(), String> {
     let mut listener = os::LocalListener::listen(&config.paths.privd_socket, os::Endpoint::Privd)?;
     let audit = AuditLog::open(&config.paths.audit_dir)?;
     let state_dir = &config.paths.privd_state_dir;
@@ -116,8 +123,12 @@ async fn serve(config: &Config) -> Result<(), String> {
                     activity.finish();
                 });
             }
+            () = stop.cancelled() => {
+                info!("asked to stop, exiting");
+                return Ok(());
+            }
             () = tokio::time::sleep(IDLE_CHECK) => {
-                if activity.idle_for(IDLE_TIMEOUT) {
+                if EXITS_WHEN_IDLE && activity.idle_for(IDLE_TIMEOUT) {
                     info!("idle for {IDLE_TIMEOUT:?}, exiting");
                     return Ok(());
                 }
@@ -937,7 +948,7 @@ mod tests {
             ..Config::default()
         };
         let socket = config.paths.privd_socket.clone();
-        let server = tokio::spawn(async move { serve(&config).await });
+        let server = tokio::spawn(async move { serve(&config, CancellationToken::new()).await });
         for _ in 0..50 {
             if socket.exists() {
                 break;

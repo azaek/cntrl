@@ -45,8 +45,10 @@ rustix = { version = "1.1", default-features = false, features = ["std", "proces
 sd-notify = "0.4"
 tracing-journald = "0.3"
 
-# The Windows halves of the os layer (D58).
+# The Windows halves of the os layer, the service and its log files (D58).
 [target.'cfg(windows)'.dependencies]
+tracing-appender = "0.2"
+windows-service = "0.8"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",

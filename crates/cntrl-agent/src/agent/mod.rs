@@ -30,10 +30,10 @@ mod policy;
 mod privd;
 mod processes;
 mod say;
+mod service;
 mod stats;
 mod storage;
 mod supervisor;
-mod systemd;
 mod update;
 mod uplink;
 
@@ -42,6 +42,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::Parser;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use cli::{AuditCommand, Cli, Command, ConfigCommand, HistoryCommand, PolicyCommand};
@@ -67,8 +68,11 @@ pub fn main() -> ExitCode {
         }
     };
     match cli.command {
-        Command::Run => run(&cli.config, config),
-        Command::Privd => privd::main(&config),
+        Command::Run => {
+            let path = cli.config;
+            service::run("cntrl-agent", move |stop| run(&path, config, stop))
+        }
+        Command::Privd => service::run("cntrl-privd", move |stop| privd::main(&config, stop)),
         Command::Status { json } => client::print_status(&config, json),
         Command::Enroll {
             token_file,
@@ -99,8 +103,10 @@ pub fn main() -> ExitCode {
     }
 }
 
-fn run(config_path: &Path, config: Config) -> ExitCode {
-    logging::init(&config.log.level);
+/// The agent; `stop` is the service's token, which the service manager may
+/// cancel.
+fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode {
+    logging::init(&config.log.level, &config.paths.logs, "agent");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .max_blocking_threads(16)
@@ -156,7 +162,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             Arc::clone(&history),
         ));
 
-        let mut supervisor = Supervisor::new();
+        let mut supervisor = Supervisor::new(stop);
         let token = supervisor.token();
         supervisor.spawn(
             "local-api",
@@ -166,7 +172,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             "heartbeat",
             health::heartbeat(Arc::clone(&health), token.clone()),
         );
-        supervisor.spawn("watchdog", systemd::watchdog(health, token.clone()));
+        supervisor.spawn("watchdog", service::watchdog(health, token.clone()));
         let host_stats = cntrl_host::stats::backend();
         supervisor.spawn(
             "alerts",
@@ -203,7 +209,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 
         record_start(&privd_socket).await;
-        systemd::ready("running");
+        service::ready("running");
         info!(version = env!("CARGO_PKG_VERSION"), "cntrl-agent started");
         supervisor.run_until_shutdown().await
     })
