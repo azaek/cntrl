@@ -19,12 +19,16 @@ use windows_service::service_control_handler::{
 use windows_service::service_dispatcher;
 
 use super::super::health::Health;
+use super::super::supervisor::EXIT_SOFTWARE;
 
 /// `ERROR_FAILED_SERVICE_CONTROLLER_CONNECT`: the Service Control Manager
 /// didn't start this process.
 const NOT_A_SERVICE: i32 = 1063;
 /// How long stopping may take: the supervisor's grace, and a margin.
 const STOP_WAIT: Duration = Duration::from_secs(15);
+/// How stale the health check may get before the agent counts as hung:
+/// systemd's `WatchdogSec=` on Linux.
+const HUNG_AFTER: Duration = Duration::from_secs(30);
 
 type Body = Box<dyn FnOnce(CancellationToken) -> ExitCode + Send>;
 
@@ -150,8 +154,28 @@ pub fn ready(_status: &str) {}
 /// The dispatcher's thread reports stopping when the stop request comes.
 pub fn stopping() {}
 
-/// The Service Control Manager has no watchdog; this waits to be cancelled.
-pub async fn watchdog(_health: Arc<Health>, token: CancellationToken) -> Result<(), String> {
+/// The Service Control Manager has no watchdog, so a thread of the agent's
+/// own watches the health check, outside the runtime it proves alive. When
+/// the check goes stale the runtime is stuck, and the process exits, for the
+/// recovery actions to restart it. Run by hand, nothing watches.
+pub async fn watchdog(health: Arc<Health>, token: CancellationToken) -> Result<(), String> {
+    if managed() {
+        let watching = token.clone();
+        std::thread::Builder::new()
+            .name("watchdog".to_owned())
+            .spawn(move || {
+                while !watching.is_cancelled() {
+                    std::thread::sleep(HUNG_AFTER / 2);
+                    if !watching.is_cancelled() && !health.fresh(HUNG_AFTER) {
+                        tracing::error!(
+                            "the health check is over {HUNG_AFTER:?} old, so the agent is stuck; exiting for the service to restart"
+                        );
+                        std::process::exit(i32::from(EXIT_SOFTWARE));
+                    }
+                }
+            })
+            .map_err(|e| format!("can't start the watchdog: {e}"))?;
+    }
     token.cancelled().await;
     Ok(())
 }

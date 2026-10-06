@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 use super::service;
 
 /// `EX_SOFTWARE` from sysexits(3).
-const EXIT_SOFTWARE: u8 = 70;
+pub const EXIT_SOFTWARE: u8 = 70;
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 type Outcome = (&'static str, Result<(), String>);

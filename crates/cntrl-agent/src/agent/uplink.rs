@@ -1903,7 +1903,8 @@ impl Subscription {
         for process in &mut view.processes {
             process.protected = process.pid <= 1
                 || process.kernel
-                || process.user.as_deref() == Some(super::os::AGENT_ACCOUNT)
+                // The table names accounts without their domain.
+                || process.user.as_deref() == super::os::AGENT_ACCOUNT.rsplit('\\').next()
                 || process
                     .unit
                     .as_deref()

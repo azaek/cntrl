@@ -333,8 +333,28 @@ pub async fn connect(path: &Path) -> io::Result<LocalStream> {
     }
 }
 
+/// A local endpoint for a test: a pipe named after `dir`, a temporary
+/// directory whose name no other test has.
+#[cfg(test)]
+pub fn test_endpoint(dir: &Path, name: &str) -> PathBuf {
+    let unique = dir.file_name().unwrap_or_default().to_string_lossy();
+    PathBuf::from(format!(r"\\.\pipe\cntrl-test-{unique}-{name}"))
+}
+
+/// Whether a local endpoint is there to connect to: a pipe of that name.
+/// Pipes are listed, not opened, since opening one connects to its server.
+pub fn is_endpoint(path: &Path) -> bool {
+    let Some(name) = path.file_name() else {
+        return false;
+    };
+    std::fs::read_dir(r"\\.\pipe\")
+        .is_ok_and(|mut pipes| pipes.any(|pipe| pipe.is_ok_and(|pipe| pipe.file_name() == name)))
+}
+
 /// Checks that the agent, or SYSTEM, serves a connection to the agent's pipe:
-/// outside the protected prefix, whoever made it first could.
+/// outside the protected prefix, whoever made it first could. A program of
+/// the CLI's own account may too, as it could read whatever the CLI sends
+/// anyway.
 pub fn check_agent(stream: &LocalStream) -> Result<(), String> {
     let mut pid = 0u32;
     // SAFETY: the handle is a pipe's open client end.
@@ -342,8 +362,8 @@ pub fn check_agent(stream: &LocalStream) -> Result<(), String> {
         return Err("can't tell which program serves the agent's pipe".to_owned());
     }
     let server = process_account(pid);
-    let agent = account(AGENT_ACCOUNT);
-    if server.system || (agent.is_some() && server.sid == agent) {
+    let trusted = [account(AGENT_ACCOUNT), own_account()];
+    if server.system || (server.sid.is_some() && trusted.contains(&server.sid)) {
         Ok(())
     } else {
         Err("another program serves the agent's pipe, so cntrl won't talk to it".to_owned())
@@ -382,15 +402,15 @@ pub struct LocalListener {
 
 impl LocalListener {
     /// Creates the pipe at `path`, failing if another program made it first.
-    /// SYSTEM and Administrators may do anything with it; the agent's account
-    /// may connect to privd's, and serves its own.
+    /// SYSTEM, Administrators and the account serving it may do anything with
+    /// it, and the agent's account may connect to privd's.
     pub fn listen(path: &Path, endpoint: Endpoint) -> Result<Self, String> {
         let mut sddl = String::from("D:P(A;;GA;;;SY)(A;;GA;;;BA)");
-        if let Some(agent) = account(AGENT_ACCOUNT) {
-            match endpoint {
-                Endpoint::Privd => sddl.push_str(&format!("(A;;{CLIENT_RIGHTS:#x};;;{agent})")),
-                Endpoint::Agent => sddl.push_str(&format!("(A;;GA;;;{agent})")),
-            }
+        if let Some(own) = own_account() {
+            sddl.push_str(&format!("(A;;GA;;;{own})"));
+        }
+        if let (Endpoint::Privd, Some(agent)) = (endpoint, account(AGENT_ACCOUNT)) {
+            sddl.push_str(&format!("(A;;{CLIENT_RIGHTS:#x};;;{agent})"));
         }
         let descriptor = SecurityDescriptor::from_sddl(&sddl)?;
         let next = create(path, &descriptor, true)

@@ -403,7 +403,10 @@ async fn stop_process(
             if pid <= 1 || target.kernel {
                 Some(format!("process {pid} is part of the operating system"))
             } else if pid == std::process::id()
-                || target.uid.is_some_and(|uid| state.agent == Some(uid))
+                || target
+                    .owner
+                    .as_ref()
+                    .is_some_and(|owner| state.agent.as_ref() == Some(owner))
             {
                 Some("that's the cntrl agent, which stops with its service".to_owned())
             } else {
@@ -939,7 +942,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let config = Config {
             paths: Paths {
-                privd_socket: dir.path().join("privd.sock"),
+                privd_socket: os::test_endpoint(dir.path(), "privd"),
                 privd_state_dir: dir.path().join("privd"),
                 policy: dir.path().join("policy.toml"),
                 audit_dir: dir.path().join("audit"),
@@ -950,7 +953,7 @@ mod tests {
         let socket = config.paths.privd_socket.clone();
         let server = tokio::spawn(async move { serve(&config, CancellationToken::new()).await });
         for _ in 0..50 {
-            if socket.exists() {
+            if os::is_endpoint(&socket) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;

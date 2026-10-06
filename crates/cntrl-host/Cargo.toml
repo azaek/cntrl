@@ -43,6 +43,17 @@ futures-util = "0.3"
 zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.26200", default-features = false, features = ["systemd1", "login1", "zbus-async-tokio"] }
 
+# The process table on Windows, and what sysinfo can't do there: naming
+# service accounts, and stopping a process without running taskkill (D58).
+[target.'cfg(windows)'.dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
+
 [lints]
 workspace = true
 

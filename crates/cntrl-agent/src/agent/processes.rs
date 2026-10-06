@@ -2,7 +2,8 @@
 //! every 2 s, only while some session has a `processes` subscription. It keeps
 //! the latest table in a watch channel, whose receiver count says whether
 //! anyone is watching. On Linux the agent reads the table itself; on macOS
-//! only root sees other users' processes, so it asks privd.
+//! and Windows only root, or SYSTEM, sees other users' processes, so it asks
+//! privd.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,12 +97,12 @@ impl Reader {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 struct Reader {
     privd: PathBuf,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 impl Reader {
     fn new(privd: PathBuf) -> Self {
         Self { privd }
@@ -123,10 +124,10 @@ impl Reader {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 struct Reader;
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 impl Reader {
     fn new(_privd: PathBuf) -> Self {
         Self

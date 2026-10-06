@@ -154,6 +154,18 @@ pub async fn connect(path: &Path) -> std::io::Result<LocalStream> {
     tokio::net::UnixStream::connect(path).await
 }
 
+/// A local endpoint for a test: a socket in `dir`.
+#[cfg(test)]
+pub fn test_endpoint(dir: &Path, name: &str) -> std::path::PathBuf {
+    dir.join(format!("{name}.sock"))
+}
+
+/// Whether a local endpoint is there to connect to: a socket.
+pub fn is_endpoint(path: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path).is_ok_and(|meta| meta.file_type().is_socket())
+}
+
 /// Checks that the agent serves a connection to its endpoint. On Unix the
 /// service manager makes the socket, or the agent does in a directory only it
 /// and root can write, so nobody else can stand in for it.

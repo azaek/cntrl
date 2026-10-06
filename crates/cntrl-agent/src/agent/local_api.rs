@@ -389,7 +389,7 @@ mod tests {
         CancellationToken,
         tokio::task::JoinHandle<Result<(), String>>,
     ) {
-        let socket = dir.join("agent.sock");
+        let socket = os::test_endpoint(dir, "agent");
         let listener = os::LocalListener::listen(&socket, os::Endpoint::Agent).expect("listen");
         let config = Config {
             paths: Paths {

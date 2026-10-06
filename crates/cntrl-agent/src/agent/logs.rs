@@ -363,7 +363,17 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// On Windows a container's log comes through privd, as on Linux; Windows'
+/// own Event Log isn't read yet.
+#[cfg(windows)]
+async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
+    if params.container.is_some() {
+        return through_privd(id, params, privd, out).await;
+    }
+    "this agent can't read Windows' Event Log yet".to_owned()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn read(_id: &str, _params: &LogsParams, _privd: &Path, _out: &Batches) -> String {
     "this agent can't read logs on this OS yet".to_owned()
 }

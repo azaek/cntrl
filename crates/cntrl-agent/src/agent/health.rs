@@ -1,5 +1,6 @@
 //! The agent's own health check. A heartbeat task proves the runtime still makes
-//! progress, and the systemd watchdog is fed only while it's fresh.
+//! progress, and the systemd watchdog is fed only while it's fresh; on Windows
+//! a thread of the agent's own watches it instead.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};

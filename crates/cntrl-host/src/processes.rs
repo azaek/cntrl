@@ -1,8 +1,9 @@
 //! The process table, and stopping a process (D24, research angle 06). One row
-//! per process with its threads folded in, read with sysinfo on Linux and
-//! macOS. On macOS only root sees other users' processes, so privd reads the
-//! table there; on Linux the unprivileged agent can. A stop names the process
-//! by PID and start time, so a PID that has been reused is left alone.
+//! per process with its threads folded in, read with sysinfo on Linux, macOS
+//! and Windows. On macOS and Windows only root, or SYSTEM, sees other users'
+//! processes, so privd reads the table there; on Linux the unprivileged agent
+//! can. A stop names the process by PID and start time, so a PID that has been
+//! reused is left alone.
 
 use cntrl_protocol::process::{ProcessInfo, ProcessSort, ProcessesParams, ProcessesSample};
 
@@ -13,6 +14,11 @@ pub const MAX_LIMIT: u32 = 500;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use os::{Sampler, Target, stop, target};
+#[cfg(windows)]
+pub use windows::{Sampler, Target, stop, target};
+
+#[cfg(windows)]
+mod windows;
 
 /// A subscription's view of the table: the processes matching its query,
 /// sorted its way, at most `limit` of them.
@@ -189,7 +195,8 @@ mod os {
     /// What privd checks before it stops a process.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Target {
-        pub uid: Option<u32>,
+        /// Its user's ID.
+        pub owner: Option<u32>,
         pub started: u64,
         pub kernel: bool,
         pub unit: Option<String>,
@@ -206,7 +213,7 @@ mod os {
             return None;
         }
         Some(Target {
-            uid: process.user_id().map(|uid| **uid),
+            owner: process.user_id().map(|uid| **uid),
             started: process.start_time(),
             kernel: is_kernel(pid, process.parent().map(Pid::as_u32)),
             unit: unit(pid),

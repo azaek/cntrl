@@ -1,4 +1,5 @@
-//! Docker and Podman, through their API on a Unix socket (D54, angle 19).
+//! Docker and Podman, through their API on a Unix socket, or a named pipe on
+//! Windows (D54, angle 19, D58).
 //! The socket is root on the host, so only privd talks to it, and only for
 //! its own calls: the containers with their counters, one container's log,
 //! and start, stop and restart. Paths carry no version prefix, so the engine
@@ -8,7 +9,6 @@
 //! rootless engine keeps it under `/run/user`.
 
 use std::collections::HashMap;
-use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -25,16 +25,24 @@ use hyper::{Method, Request, StatusCode, header};
 use hyper_util::rt::TokioIo;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
 use super::logs::{Batcher, flush_timer};
+use super::os;
 use super::uplink::now_ms;
 
 /// Where the system's engines listen, in the order they're tried: Docker's,
 /// then rootful Podman's. On a Mac the first is there only when Docker
 /// Desktop is set to make it.
+#[cfg(unix)]
 const SYSTEM_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/podman/podman.sock"];
+/// Docker Desktop's pipe, which Docker Engine on Windows Server also uses,
+/// then Podman's machine's.
+#[cfg(windows)]
+const SYSTEM_SOCKETS: &[&str] = &[
+    r"\\.\pipe\docker_engine",
+    r"\\.\pipe\podman-machine-default",
+];
 /// Where a Mac's engines keep their socket, in a user's home: Docker Desktop,
 /// OrbStack, Colima and Rancher Desktop.
 #[cfg(target_os = "macos")]
@@ -148,15 +156,9 @@ pub fn container_name(name: &str) -> Result<&str, String> {
 
 /// The first engine socket there is: the system's, then a user's.
 async fn socket() -> Option<PathBuf> {
-    let candidates = tokio::task::spawn_blocking(candidates).await.ok()?;
-    for path in candidates {
-        if let Ok(meta) = tokio::fs::metadata(&path).await
-            && meta.file_type().is_socket()
-        {
-            return Some(path);
-        }
-    }
-    None
+    tokio::task::spawn_blocking(|| candidates().into_iter().find(|path| os::is_endpoint(path)))
+        .await
+        .ok()?
 }
 
 /// Every place an engine's socket may be, in the order they're tried.
@@ -176,7 +178,7 @@ fn candidates() -> Vec<PathBuf> {
 
 /// Each user's sockets, as `sockets` names them under each of `parent`'s
 /// directories: a Mac's homes, or Linux's runtime directories.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
 fn candidates_in(parent: &Path, sockets: &[&str]) -> Vec<PathBuf> {
     subdirectories(parent)
         .into_iter()
@@ -185,7 +187,7 @@ fn candidates_in(parent: &Path, sockets: &[&str]) -> Vec<PathBuf> {
 }
 
 /// A directory's subdirectories, by name, without hidden ones.
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
 fn subdirectories(parent: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return Vec::new();
@@ -202,7 +204,9 @@ fn subdirectories(parent: &Path) -> Vec<PathBuf> {
 
 #[cfg(target_os = "macos")]
 const NO_ENGINE: &str = "No Docker or Podman found: no socket at /var/run/docker.sock, or in a user's Docker Desktop, OrbStack, Colima or Rancher Desktop folder.";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const NO_ENGINE: &str = r"No Docker or Podman found: no pipe at \\.\pipe\docker_engine or \\.\pipe\podman-machine-default.";
+#[cfg(not(any(target_os = "macos", windows)))]
 const NO_ENGINE: &str = "No Docker or Podman found: no socket at /var/run/docker.sock or /run/podman/podman.sock, or a rootless one under /run/user.";
 
 /// Every container, and with `counters`, each running one's counters.
@@ -543,7 +547,7 @@ async fn call(
     method: Method,
     path: &str,
 ) -> Result<hyper::Response<Incoming>, String> {
-    let stream = UnixStream::connect(socket)
+    let stream = os::connect(socket)
         .await
         .map_err(|e| format!("can't reach the engine at {}: {e}", socket.display()))?;
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
@@ -934,6 +938,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn looks_in_each_users_folder_after_the_systems() {
         let dir = tempfile::tempdir().expect("temp dir");
         for user in ["bob", "alice", ".hidden"] {
