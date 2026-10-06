@@ -117,16 +117,21 @@ jobs:
                   if ($LASTEXITCODE -ne 0) { Get-Content "$dir\admin.txt"; Write-Error 'the survey failed as an administrator'; exit 1 }
                   Set-Content -Path "$dir\run.cmd" -Encoding ascii -Value @(
                       '@echo off',
-                      "`"$dir\test.exe`" $survey --exact --nocapture > `"$dir\service.txt`" 2>&1",
-                      "> `"$dir\code.txt`" echo %ERRORLEVEL%"
+                      'cd /d "%~dp0"',
+                      'whoami /user /groups > whoami.txt 2>&1',
+                      "test.exe $survey --exact --nocapture > service.txt 2>&1 || > failed.txt echo the survey or its output failed",
+                      '> code.txt echo %ERRORLEVEL%'
                   )
-                  sc.exe create cntrl-gpu-test binPath= "$env:ComSpec /d /c $dir\run.cmd" obj= 'NT SERVICE\cntrl-gpu-test' | Out-Null
-                  sc.exe sidtype cntrl-gpu-test unrestricted | Out-Null
-                  sc.exe privs cntrl-gpu-test SeChangeNotifyPrivilege | Out-Null
-                  sc.exe start cntrl-gpu-test | Out-Null
+                  sc.exe create cntrl-gpu-test binPath= "$env:ComSpec /d /c $dir\run.cmd" obj= 'NT SERVICE\cntrl-gpu-test'
+                  sc.exe sidtype cntrl-gpu-test unrestricted
+                  sc.exe privs cntrl-gpu-test SeChangeNotifyPrivilege
+                  sc.exe start cntrl-gpu-test
                   $deadline = (Get-Date).AddMinutes(2)
                   while (-not (Test-Path "$dir\code.txt") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
-                  sc.exe delete cntrl-gpu-test | Out-Null
+                  sc.exe delete cntrl-gpu-test
+                  Get-ChildItem $dir | Format-Table Name, Length -AutoSize | Out-String
+                  'The account:'; Get-Content "$dir\whoami.txt" -ErrorAction SilentlyContinue
+                  Get-Content "$dir\failed.txt" -ErrorAction SilentlyContinue
                   $lines = { param($file) Get-Content $file -ErrorAction SilentlyContinue | Select-String '(adapter|gpus): .*' | ForEach-Object { $_.Matches[0].Value } }
                   $admin = (& $lines "$dir\admin.txt") -join "`n"
                   $service = (& $lines "$dir\service.txt") -join "`n"
@@ -134,7 +139,7 @@ jobs:
                   'As a virtual account:'; Get-Content "$dir\service.txt" -ErrorAction SilentlyContinue
                   if (-not (Test-Path "$dir\code.txt")) { Write-Error 'the survey never finished'; exit 1 }
                   $code = (Get-Content "$dir\code.txt").Trim()
-                  if ($code -ne '0') { Write-Error "the survey failed as a virtual account ($code)"; exit 1 }
+                  if ($code -ne '0' -or (Test-Path "$dir\failed.txt")) { Write-Error "the survey failed as a virtual account ($code)"; exit 1 }
                   if (-not $admin -or $admin -ne $service) { Write-Error 'a virtual account reads differently from an administrator'; exit 1 }
                   exit 0
 

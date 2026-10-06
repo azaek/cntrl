@@ -414,6 +414,10 @@ fn lock(times: &EngineTimes) -> MutexGuard<'_, Option<Times>> {
 
 #[cfg(test)]
 mod tests {
+    use windows_sys::Wdk::Graphics::Direct3D::{
+        D3DKMT_DRIVERVERSION, KMT_DRIVERVERSION_WDDM_2_0, KMTQAITYPE_DRIVERVERSION,
+    };
+
     use super::*;
 
     /// Each display adapter Windows lists, software ones too, as a line of
@@ -438,18 +442,24 @@ mod tests {
         println!("gpus: {}", gpus[1].len());
         for gpu in gpus.iter().flatten() {
             assert!(!gpu.name.is_empty());
+            // None with a driver older than WDDM 2.0, which keeps no
+            // engine statistics.
             assert!(
-                gpu.busy.is_some_and(|busy| (0.0..=1.0).contains(&busy)),
+                gpu.busy.is_none_or(|busy| (0.0..=1.0).contains(&busy)),
                 "{gpu:?}"
             );
         }
     }
 
     /// What reads of the adapter, with the first failure's status for each
-    /// kind of read, and whether everything did.
+    /// kind of read, and whether everything its driver keeps did: engine
+    /// statistics need WDDM 2.0, as Task Manager's GPU data does.
     fn survey(adapter: &Adapter) -> (String, bool) {
         let node = adapter.node.expect("a device node");
         let name = description(node).expect("a description");
+        let mut version: D3DKMT_DRIVERVERSION = 0;
+        // SAFETY: the driver's version answers into D3DKMT_DRIVERVERSION.
+        let versioned = unsafe { adapter.query(KMTQAITYPE_DRIVERVERSION, &mut version) };
         let mut kind = D3DKMT_ADAPTERTYPE::default();
         // SAFETY: as in `is_gpu`.
         let typed = unsafe { adapter.query(KMTQAITYPE_ADAPTERTYPE, &mut kind) };
@@ -471,12 +481,19 @@ mod tests {
             // SAFETY: as in `temperature`.
             unsafe { adapter.query(KMTQAITYPE_ADAPTERPERFDATA, &mut data) }
         });
-        let complete = typed.is_ok()
+        let complete = versioned.is_ok()
+            && typed.is_ok()
             && sized.is_ok()
             && power.is_some()
-            && engines.iter().chain(&segments).all(Result::is_ok);
+            && segments.iter().all(Result::is_ok)
+            && (version < KMT_DRIVERVERSION_WDDM_2_0 || engines.iter().all(Result::is_ok));
         let line = format!(
-            "{name}, type {} {bits:#x}; engines {}; segments {}; sizes {}; power {}; performance data {}",
+            "{name}, WDDM {}, type {} {bits:#x}; engines {}; segments {}; sizes {}; power {}; performance data {}",
+            versioned.map_or_else(hex, |()| format!(
+                "{}.{}",
+                version / 1000,
+                version % 1000 / 100
+            )),
             status(typed),
             reads(&engines),
             reads(&segments),
