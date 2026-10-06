@@ -18,6 +18,22 @@ pub struct ProcessesParams {
     /// case, or whose PID it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
+    /// Keeps only the system's processes, or only people's (D60), before the
+    /// limit. Agents before 0.1.17 keep every process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<ProcessOwner>,
+}
+
+/// Whose processes a subscription keeps (D60).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessOwner {
+    /// The operating system's: kernel threads, and processes that run as
+    /// root, SYSTEM or another system or service account.
+    System,
+    /// People's: processes that run as a person's account.
+    User,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +84,11 @@ pub struct ProcessInfo {
     /// A kernel thread, which can't be stopped.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kernel: bool,
+    /// It runs as the operating system, not a person (D60): a kernel thread,
+    /// or root, SYSTEM or another system or service account. Agents before
+    /// 0.1.17 leave it false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub system: bool,
     /// The device won't stop it: it's part of the operating system, it's the
     /// agent, or its unit is one the device policy protects.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

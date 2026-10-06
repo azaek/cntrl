@@ -15,9 +15,11 @@ use cntrl_protocol::stats::{Filesystem, GpuStats, LoadAverage, MemoryStats, Swap
 use cntrl_protocol::system::{CpuInfo, OsInfo, SystemInfo};
 use sysinfo::{DiskRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind};
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, FILETIME};
+use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows_sys::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
+    HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    RegGetValueW,
 };
 use windows_sys::Win32::System::Threading::GetSystemTimes;
 
@@ -330,6 +332,41 @@ fn wide(text: &str) -> Vec<u16> {
 
 /// A string value under `HKEY_LOCAL_MACHINE`.
 fn registry_string(key: &str, value: &str) -> Option<String> {
+    registry_text(key, value, RRF_RT_REG_SZ)
+}
+
+/// A path under `HKEY_LOCAL_MACHINE`, plain or with environment variables,
+/// as a service's `ImagePath` is, with its variables expanded.
+fn registry_path(key: &str, value: &str) -> Option<String> {
+    registry_text(
+        key,
+        value,
+        RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND,
+    )
+    .map(|path| expand(&path))
+}
+
+/// Text with its `%variables%` expanded, or as it is if they can't be.
+fn expand(text: &str) -> String {
+    if !text.contains('%') {
+        return text.to_owned();
+    }
+    let source = wide(text);
+    // SAFETY: a NUL-terminated source, and a size query.
+    let needed = unsafe { ExpandEnvironmentStringsW(source.as_ptr(), null_mut(), 0) };
+    let mut buffer = vec![0u16; needed as usize];
+    // SAFETY: the buffer holds `needed` characters.
+    let written =
+        unsafe { ExpandEnvironmentStringsW(source.as_ptr(), buffer.as_mut_ptr(), needed) };
+    if needed == 0 || written == 0 || written > needed {
+        return text.to_owned();
+    }
+    let length = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..length])
+}
+
+/// A string value under `HKEY_LOCAL_MACHINE` of the types `flags` allows.
+fn registry_text(key: &str, value: &str, flags: u32) -> Option<String> {
     let (key, value) = (wide(key), wide(value));
     let mut size = 0u32;
     // SAFETY: a size query.
@@ -338,7 +375,7 @@ fn registry_string(key: &str, value: &str) -> Option<String> {
             HKEY_LOCAL_MACHINE,
             key.as_ptr(),
             value.as_ptr(),
-            RRF_RT_REG_SZ,
+            flags,
             null_mut(),
             null_mut(),
             &mut size,
@@ -354,7 +391,7 @@ fn registry_string(key: &str, value: &str) -> Option<String> {
             HKEY_LOCAL_MACHINE,
             key.as_ptr(),
             value.as_ptr(),
-            RRF_RT_REG_SZ,
+            flags,
             null_mut(),
             buffer.as_mut_ptr().cast(),
             &mut size,

@@ -2,6 +2,7 @@
 //! and root to act on units.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use cntrl_protocol::service::{
     JobResult, ServiceAction, ServiceKind, ServiceScope, ServiceState, ServiceStatus,
@@ -84,9 +85,10 @@ impl Systemd {
             .list_units_by_patterns(Vec::new(), vec!["*.service".to_owned()])
             .await
             .map_err(failed)?;
-        // Whether each starts at boot, from its unit file. Failing to read it
-        // only leaves enable and disable out.
-        let files: HashMap<String, Option<bool>> = self
+        // Whether each starts at boot, and where its unit file is. Failing
+        // to read them only leaves enable and disable out, and counts every
+        // unit as the system's.
+        let files: HashMap<String, (Option<bool>, String)> = self
             .manager
             .list_unit_files_by_patterns(Vec::new(), vec!["*.service".to_owned()])
             .await
@@ -94,9 +96,18 @@ impl Systemd {
             .into_iter()
             .filter_map(|(path, state)| {
                 let name = path.rsplit('/').next()?.to_owned();
-                Some((name, enablement(&state)))
+                Some((name, (enablement(&state), path)))
             })
             .collect();
+        let packaged = |unit: &str| {
+            PACKAGED
+                .iter()
+                .any(|dir| Path::new(dir).join(unit).exists())
+        };
+        let vendor = |unit: &str| {
+            let (file, path) = unit_file(&files, unit);
+            is_vendor(&file, path.map(String::as_str), packaged)
+        };
         let loaded: std::collections::HashSet<&str> = units
             .iter()
             .filter(|unit| unit.2 == "loaded")
@@ -108,10 +119,10 @@ impl Systemd {
         // templates (`name@.service`) are systemd's own plumbing and stay out.
         let mut unloaded: Vec<ServiceStatus> = files
             .iter()
-            .filter(|(name, enabled)| {
+            .filter(|(name, (enabled, _))| {
                 enabled.is_some() && !name.ends_with("@.service") && !loaded.contains(name.as_str())
             })
-            .map(|(name, enabled)| ServiceStatus {
+            .map(|(name, (enabled, _))| ServiceStatus {
                 unit: name.clone(),
                 description: None,
                 state: ServiceState::Stopped,
@@ -122,6 +133,7 @@ impl Systemd {
                 user: None,
                 kind: ServiceKind::Service,
                 enabled: *enabled,
+                vendor: vendor(name),
             })
             .collect();
         let mut services: Vec<ServiceStatus> = units
@@ -136,13 +148,62 @@ impl Systemd {
                 scope: ServiceScope::System,
                 user: None,
                 kind: ServiceKind::Service,
-                enabled: files.get(&unit).copied().flatten(),
+                enabled: files.get(&unit).and_then(|(enabled, _)| *enabled),
+                vendor: vendor(&unit),
                 unit,
             })
             .collect();
         services.append(&mut unloaded);
         services.sort_by(|a, b| a.unit.cmp(&b.unit));
         Ok(services)
+    }
+}
+
+/// The folders systemd.unit(5) gives units made on the machine: by its
+/// administrator, by hand or installed from source, or through systemd's API,
+/// as transient units and attached portable services are (angle 23).
+const MADE_HERE: [&str; 7] = [
+    "/etc/systemd/system/",
+    "/usr/local/lib/systemd/system/",
+    "/run/systemd/transient/",
+    "/etc/systemd/system.control/",
+    "/run/systemd/system.control/",
+    "/etc/systemd/system.attached/",
+    "/run/systemd/system.attached/",
+];
+/// Where packages install units: "System units installed by the distribution
+/// package manager".
+const PACKAGED: [&str; 2] = ["/usr/lib/systemd/system", "/lib/systemd/system"];
+
+/// A unit's file, by its name or, for an instance such as `getty@tty1.service`,
+/// its template's: the name its file has, and its path.
+fn unit_file<'a, T>(
+    files: &'a HashMap<String, (T, String)>,
+    unit: &str,
+) -> (String, Option<&'a String>) {
+    if let Some((_, path)) = files.get(unit) {
+        return (unit.to_owned(), Some(path));
+    }
+    let template = unit
+        .split_once('@')
+        .map(|(prefix, _)| format!("{prefix}@.service"));
+    match template {
+        Some(template) => {
+            let path = files.get(&template).map(|(_, path)| path);
+            (template, path)
+        }
+        None => (unit.to_owned(), None),
+    }
+}
+
+/// Whether a unit came with the system (D60): its file isn't in a folder for
+/// units made on the machine, or it is, but masks, aliases or overrides one a
+/// package installed by the same name. A unit with no file it can tell is
+/// the system's.
+fn is_vendor(file: &str, path: Option<&str>, packaged: impl Fn(&str) -> bool) -> bool {
+    match path {
+        Some(path) if MADE_HERE.iter().any(|dir| path.starts_with(dir)) => packaged(file),
+        _ => true,
     }
 }
 
@@ -211,6 +272,46 @@ mod tests {
         assert_eq!(unit_state("failed", "failed"), ServiceState::Failed);
         assert_eq!(unit_state("activating", "start"), ServiceState::Starting);
         assert_eq!(unit_state("maintenance", "x"), ServiceState::Unknown);
+    }
+
+    #[test]
+    fn units_made_on_the_machine_are_the_users() {
+        let files: HashMap<String, ((), String)> = [
+            ("nginx.service", "/usr/lib/systemd/system/nginx.service"),
+            ("docker.service", "/lib/systemd/system/docker.service"),
+            ("myapp.service", "/etc/systemd/system/myapp.service"),
+            (
+                "built.service",
+                "/usr/local/lib/systemd/system/built.service",
+            ),
+            ("run-u12.service", "/run/systemd/transient/run-u12.service"),
+            ("resolved.service", "/etc/systemd/system/resolved.service"),
+            ("getty@.service", "/usr/lib/systemd/system/getty@.service"),
+            ("tty-fs.service", "/run/systemd/generator/tty-fs.service"),
+        ]
+        .into_iter()
+        .map(|(name, path)| (name.to_owned(), ((), path.to_owned())))
+        .collect();
+        // resolved.service is masked or overridden in /etc, over a package's.
+        let packaged = |unit: &str| ["nginx.service", "resolved.service"].contains(&unit);
+        let vendor = |unit: &str| {
+            let (file, path) = unit_file(&files, unit);
+            is_vendor(&file, path.map(String::as_str), packaged)
+        };
+        for unit in [
+            "nginx.service",
+            "docker.service",
+            "resolved.service",
+            "getty@tty1.service",
+            "tty-fs.service",
+            "unknown.service",
+        ] {
+            assert!(vendor(unit), "{unit}");
+        }
+        for unit in ["myapp.service", "built.service", "run-u12.service"] {
+            assert!(!vendor(unit), "{unit}");
+        }
+        assert_eq!(unit_file(&files, "getty@tty1.service").0, "getty@.service");
     }
 
     #[test]

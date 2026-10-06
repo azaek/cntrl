@@ -5,7 +5,10 @@
 //! unit startable. A service that stopped with an error has failed, as
 //! systemd says.
 
+use std::collections::HashMap;
+use std::ffi::c_void;
 use std::ptr::{null, null_mut};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use cntrl_protocol::service::{
@@ -13,6 +16,9 @@ use cntrl_protocol::service::{
 };
 use windows_sys::Win32::Foundation::{
     ERROR_MORE_DATA, ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_NOT_ACTIVE,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfigW, CloseServiceHandle, ControlService, ENUM_SERVICE_STATUS_PROCESSW,
@@ -104,6 +110,7 @@ fn status(name: String, display: String, process: &SERVICE_STATUS_PROCESS) -> Se
         _ => (ServiceState::Unknown, String::new()),
     };
     let start = super::registry_dword(&format!(r"{SERVICES_KEY}\{name}"), "Start");
+    let vendor = microsofts(&name);
     ServiceStatus {
         description: (!display.is_empty() && display != name).then_some(display),
         unit: name,
@@ -116,7 +123,107 @@ fn status(name: String, display: String, process: &SERVICE_STATUS_PROCESS) -> Se
         kind: ServiceKind::Service,
         // Disabled services can't be started, but they're off at boot too.
         enabled: start.map(|start| start == SERVICE_AUTO_START),
+        vendor,
     }
+}
+
+/// Whether a service came with Windows (D60): its program is Microsoft's, by
+/// the company its version information names, as msconfig's Hide all
+/// Microsoft services goes; a service svchost runs is its DLL's. A program
+/// can name any company, so this sorts services, it doesn't vouch for them.
+fn microsofts(name: &str) -> bool {
+    let key = format!(r"{SERVICES_KEY}\{name}");
+    let Some(mut file) = super::registry_path(&key, "ImagePath").and_then(|image| program(&image))
+    else {
+        return false;
+    };
+    if file.to_ascii_lowercase().ends_with(r"\svchost.exe")
+        && let Some(dll) = super::registry_path(&format!(r"{key}\Parameters"), "ServiceDll")
+    {
+        file = dll;
+    }
+    static KNOWN: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+    let mut known = KNOWN
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    *known.entry(file.to_lowercase()).or_insert_with(|| {
+        company(&file).is_some_and(|company| company.to_ascii_lowercase().starts_with("microsoft"))
+    })
+}
+
+/// The program an `ImagePath` runs: the quoted path, else the text through
+/// `.exe`, as Windows finds an unquoted path with spaces in it, and one
+/// relative to the Windows folder from there.
+fn program(image: &str) -> Option<String> {
+    let image = image.trim();
+    let path = match image.strip_prefix('"') {
+        Some(quoted) => quoted.split('"').next()?,
+        None => match image.to_ascii_lowercase().find(".exe") {
+            Some(end) => &image[..end + 4],
+            None => image.split_whitespace().next()?,
+        },
+    };
+    let path = path.strip_prefix(r"\??\").unwrap_or(path);
+    if path.is_empty() {
+        None
+    } else if path.contains(':') || path.starts_with(r"\\") {
+        Some(path.to_owned())
+    } else {
+        Some(format!(
+            r"{}\{}",
+            super::expand("%SystemRoot%"),
+            path.trim_start_matches('\\')
+        ))
+    }
+}
+
+/// The company a file's version information names.
+fn company(file: &str) -> Option<String> {
+    let path = super::wide(file);
+    let mut ignored = 0u32;
+    // SAFETY: a NUL-terminated path, and a size query.
+    let size = unsafe { GetFileVersionInfoSizeW(path.as_ptr(), &mut ignored) };
+    if size == 0 {
+        return None;
+    }
+    // Aligned for the version information's 16- and 32-bit fields.
+    let mut data = vec![0u64; (size as usize).div_ceil(8)];
+    // SAFETY: the buffer holds `size` bytes.
+    if unsafe { GetFileVersionInfoW(path.as_ptr(), 0, size, data.as_mut_ptr().cast()) } == 0 {
+        return None;
+    }
+    let value = |name: &str| -> Option<(*const c_void, u32)> {
+        let name = super::wide(name);
+        let mut pointer: *mut c_void = null_mut();
+        let mut length = 0u32;
+        // SAFETY: `data` holds the version information, and outlives the
+        // pointer into it that the call returns.
+        let found = unsafe {
+            VerQueryValueW(
+                data.as_ptr().cast(),
+                name.as_ptr(),
+                &mut pointer,
+                &mut length,
+            )
+        };
+        (found != 0 && !pointer.is_null() && length > 0).then_some((pointer.cast_const(), length))
+    };
+    // The first language and code page the file lists, else US English.
+    let language = value(r"\VarFileInfo\Translation")
+        .filter(|&(_, bytes)| bytes >= 4)
+        .map(|(pointer, _)| {
+            // SAFETY: the translations are pairs of a 16-bit language and code
+            // page, at least one of them.
+            let pair = unsafe { std::slice::from_raw_parts(pointer.cast::<u16>(), 2) };
+            format!("{:04x}{:04x}", pair[0], pair[1])
+        })
+        .unwrap_or_else(|| "040904b0".to_owned());
+    let (pointer, length) = value(&format!(r"\StringFileInfo\{language}\CompanyName"))?;
+    // SAFETY: a string value is `length` UTF-16 characters, its NUL included.
+    let text = unsafe { std::slice::from_raw_parts(pointer.cast::<u16>(), length as usize) };
+    let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+    Some(String::from_utf16_lossy(&text[..end]).trim().to_owned()).filter(|name| !name.is_empty())
 }
 
 /// A stopped service's error, as Windows records it.
@@ -370,6 +477,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn finds_the_program_a_service_runs() {
+        let root = crate::windows::expand("%SystemRoot%");
+        assert_eq!(
+            program(r#""C:\Program Files\NVIDIA Corporation\Display.NvContainer\NVDisplay.Container.exe" -s NVDisplay.ContainerLocalSystem"#).as_deref(),
+            Some(r"C:\Program Files\NVIDIA Corporation\Display.NvContainer\NVDisplay.Container.exe")
+        );
+        assert_eq!(
+            program(r"C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p")
+                .as_deref(),
+            Some(r"C:\WINDOWS\system32\svchost.exe")
+        );
+        assert_eq!(
+            program(r"C:\Program Files\Some App\app.EXE --service").as_deref(),
+            Some(r"C:\Program Files\Some App\app.EXE")
+        );
+        assert_eq!(
+            program(r"system32\svchost.exe -k netsvcs").as_deref(),
+            Some(format!(r"{root}\system32\svchost.exe").as_str())
+        );
+        assert_eq!(program("  "), None);
+    }
+
+    #[test]
     fn lists_this_machines_services() {
         let services = list().expect("services");
         let event_log = services
@@ -379,6 +509,8 @@ mod tests {
         assert_eq!(event_log.state, ServiceState::Running);
         assert!(event_log.pid.is_some());
         assert_eq!(event_log.enabled, Some(true));
+        // svchost runs it, from Microsoft's wevtsvc.dll.
+        assert!(event_log.vendor, "{event_log:?}");
         assert_eq!(
             display_name("EventLog").as_deref(),
             Some("Windows Event Log")

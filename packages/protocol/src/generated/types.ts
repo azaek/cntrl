@@ -1011,11 +1011,20 @@ export interface ProcessInfo {
     /** A kernel thread, which can't be stopped. */
     kernel?: boolean;
     /**
+     * It runs as the operating system, not a person (D60): a kernel thread,
+     * or root, SYSTEM or another system or service account. Agents before
+     * 0.1.17 leave it false.
+     */
+    system?: boolean;
+    /**
      * The device won't stop it: it's part of the operating system, it's the
      * agent, or its unit is one the device policy protects.
      */
     protected?: boolean;
 }
+
+/** Whose processes a subscription keeps (D60). */
+export type ProcessOwner = "system" | "user";
 
 /** `process.signal`: one process to stop, as the process table named it. */
 export interface ProcessSignal {
@@ -1051,6 +1060,11 @@ export interface ProcessesParams {
      * case, or whose PID it is.
      */
     query?: string | null;
+    /**
+     * Keeps only the system's processes, or only people's (D60), before the
+     * limit. Agents before 0.1.17 keep every process.
+     */
+    owner?: ProcessOwner | null;
 }
 
 /**
@@ -1205,6 +1219,13 @@ export interface ServiceStatus {
      * Apple's own jobs, and from agents before 0.1.5.
      */
     enabled?: boolean | null;
+    /**
+     * It came with the operating system rather than being added to the
+     * machine (D60): on Windows, its program is Microsoft's; on a Mac, it's
+     * Apple's; on Linux, a package installed its unit file, which wasn't
+     * made on the machine. Agents before 0.1.17 leave it false.
+     */
+    vendor?: boolean;
 }
 
 /** A signed-in user. */

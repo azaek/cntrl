@@ -14,8 +14,9 @@ use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
 use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
-use cntrl_protocol::process::ProcessesSample;
+use cntrl_protocol::process::{ProcessOwner, ProcessesParams, ProcessesSample};
 use cntrl_protocol::records::{AlertRecord, AuditCheckpoint, StatsRecord};
+use cntrl_protocol::service::{ServiceList, ServiceState};
 use cntrl_protocol::stats::{SensorKind, StatsSample};
 use cntrl_protocol::storage::{DiskKind, DisksHealth, HealthStatus, StorageSample};
 use cntrl_protocol::system::SystemInfo;
@@ -144,6 +145,32 @@ fn the_processes_event_decodes() {
     assert_eq!(sample.processes.len(), 2);
     assert_eq!(sample.processes[0].unit.as_deref(), Some("nginx.service"));
     assert!(!sample.processes[0].kernel);
+    // root and www-data are system accounts (D60).
+    assert!(sample.processes.iter().all(|process| process.system));
+    let Frame::Sub(sub) = serde_json::from_value(
+        serde_json::from_str::<Value>(
+            &fs::read_to_string(frames_dir().join("sub-processes-owner.json")).expect("read"),
+        )
+        .expect("JSON"),
+    )
+    .expect("a frame") else {
+        panic!("sub-processes-owner.json isn't a subscription");
+    };
+    let params: ProcessesParams = serde_json::from_value(sub.data).expect("processes params");
+    assert_eq!(params.owner, Some(ProcessOwner::User));
+}
+
+#[test]
+fn the_service_list_decodes() {
+    let list: ServiceList =
+        serde_json::from_value(data_of("res-service-list.json")).expect("a service list");
+    let [mine, nginx] = list.services.as_slice() else {
+        panic!("two services");
+    };
+    // Made on the machine, and installed by a package (D60).
+    assert!(!mine.vendor && nginx.vendor);
+    assert_eq!(mine.state, ServiceState::Failed);
+    assert_eq!(nginx.enabled, Some(true));
 }
 
 #[test]

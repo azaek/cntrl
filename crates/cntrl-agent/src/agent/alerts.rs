@@ -637,6 +637,7 @@ mod tests {
             user: None,
             kind: ServiceKind::Service,
             enabled: None,
+            vendor: false,
         }
     }
 

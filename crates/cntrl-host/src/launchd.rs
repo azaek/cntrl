@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -26,6 +27,12 @@ const NO_SUCH_JOB: i32 = 113;
 /// Third-party daemons' plists. A daemon that was stopped (booted out) is
 /// loaded again from here; Apple's own live in /System and are left alone.
 const DAEMONS: &str = "/Library/LaunchDaemons";
+/// Apple's own daemons' and agents' plists, which System Integrity Protection
+/// keeps anyone else from adding to (angle 23).
+const APPLE_JOBS: [&str; 2] = [
+    "/System/Library/LaunchDaemons",
+    "/System/Library/LaunchAgents",
+];
 
 /// Restarts `label` in `domain` with `launchctl kickstart -k`, which stops a
 /// running instance first, then waits until launchd shows the job running, or
@@ -154,6 +161,8 @@ pub fn list() -> Result<Vec<ServiceStatus>, HostError> {
                 scope: ServiceScope::System,
                 user: None,
                 kind: ServiceKind::Service,
+                // From /Library, a third party's.
+                vendor: false,
             }),
     );
     services.sort_by(|a, b| a.unit.cmp(&b.unit));
@@ -232,6 +241,7 @@ fn services(printed: &str) -> Vec<ServiceStatus> {
                 user: None,
                 kind: ServiceKind::Service,
                 enabled: None,
+                vendor: apple(label),
             })
         })
         .collect()
@@ -299,6 +309,7 @@ pub fn list_session(user: &str, uid: u32) -> Result<Vec<ServiceStatus>, HostErro
             service.user = Some(user.to_owned());
             if service.unit.starts_with("application.") {
                 describe_app(&domain, &mut service);
+                service.vendor = apple(&service.unit);
             }
             service
         })
@@ -310,6 +321,54 @@ pub fn list_session(user: &str, uid: u32) -> Result<Vec<ServiceStatus>, HostErro
 /// An open app's job is `application.<bundle ID>.<n>.<n>`, which changes with
 /// every launch. launchd knows the bundle ID and the program, whose `.app`
 /// folder gives the app's name.
+/// Whether a job, or an app by its bundle ID, is Apple's own (D60): its label
+/// starts `com.apple.`, or one of Apple's plists names it, as
+/// `com.openssh.sshd` and `org.cups.cupsd` are named.
+fn apple(label: &str) -> bool {
+    label.starts_with("com.apple.") || apple_labels().contains(label)
+}
+
+/// The labels of Apple's plists that don't start `com.apple.`, read once:
+/// they change only with macOS. Most plists are named for their label; the
+/// rest are read with `plutil`, which takes XML and binary plists alike.
+fn apple_labels() -> &'static HashSet<String> {
+    static LABELS: OnceLock<HashSet<String>> = OnceLock::new();
+    LABELS.get_or_init(|| {
+        APPLE_JOBS
+            .iter()
+            .filter_map(|dir| std::fs::read_dir(dir).ok())
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let stem = path
+                    .file_name()?
+                    .to_str()?
+                    .strip_suffix(".plist")?
+                    .to_owned();
+                if stem.starts_with("com.apple.") {
+                    return None;
+                }
+                Some(plist_label(&path).unwrap_or(stem))
+            })
+            .filter(|label| !label.starts_with("com.apple."))
+            .collect()
+    })
+}
+
+/// A plist's `Label`.
+fn plist_label(path: &Path) -> Option<String> {
+    let output = Command::new("/usr/bin/plutil")
+        .args(["-extract", "Label", "raw", "-o", "-"])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let label = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (output.status.success() && !label.is_empty()).then_some(label)
+}
+
 fn describe_app(domain: &str, service: &mut ServiceStatus) {
     service.kind = ServiceKind::App;
     let Ok(output) = launchctl(&["print", &format!("{domain}/{}", service.unit)]) else {
@@ -655,6 +714,21 @@ mod tests {
     fn lists_this_macs_system_domain() {
         let services = list().expect("launchctl print system");
         assert!(services.iter().any(|s| s.unit.starts_with("com.apple.")));
+        assert!(
+            services
+                .iter()
+                .filter(|s| s.unit.starts_with("com.apple."))
+                .all(|s| s.vendor)
+        );
+    }
+
+    #[test]
+    fn knows_apples_jobs_outside_com_apple() {
+        // ssh.plist in /System/Library/LaunchDaemons names com.openssh.sshd.
+        assert!(apple("com.openssh.sshd"));
+        assert!(apple("com.apple.anything"));
+        assert!(!apple("homebrew.mxcl.nginx"));
+        assert!(!apple("pw.cntrl.agent"));
     }
 
     /// Lists this user's own session, which needs no root:

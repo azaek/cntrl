@@ -5,7 +5,11 @@
 //! can. A stop names the process by PID and start time, so a PID that has been
 //! reused is left alone.
 
-use cntrl_protocol::process::{ProcessInfo, ProcessSort, ProcessesParams, ProcessesSample};
+use std::ops::RangeInclusive;
+
+use cntrl_protocol::process::{
+    ProcessInfo, ProcessOwner, ProcessSort, ProcessesParams, ProcessesSample,
+};
 
 /// Rows a subscription gets when it doesn't say.
 pub const DEFAULT_LIMIT: u32 = 50;
@@ -20,8 +24,8 @@ pub use windows::{Sampler, Target, stop, target};
 #[cfg(windows)]
 mod windows;
 
-/// A subscription's view of the table: the processes matching its query,
-/// sorted its way, at most `limit` of them.
+/// A subscription's view of the table: the processes matching its query and
+/// its owner, sorted its way, at most `limit` of them.
 pub fn view(table: &[ProcessInfo], params: &ProcessesParams, ts: u64) -> ProcessesSample {
     let query = params
         .query
@@ -32,6 +36,11 @@ pub fn view(table: &[ProcessInfo], params: &ProcessesParams, ts: u64) -> Process
     let mut matched: Vec<&ProcessInfo> = table
         .iter()
         .filter(|process| query.as_deref().is_none_or(|query| matches(process, query)))
+        .filter(|process| {
+            params
+                .owner
+                .is_none_or(|owner| process.system == (owner == ProcessOwner::System))
+        })
         .collect();
     match params.sort {
         ProcessSort::Cpu => matched.sort_by(|a, b| {
@@ -69,6 +78,25 @@ fn matches(process: &ProcessInfo, query: &str) -> bool {
         || contains(process.unit.as_deref())
 }
 
+/// The user IDs people's accounts take on Linux (D60): `UID_MIN` to `UID_MAX`
+/// from `/etc/login.defs`, 1000 and 60000 where it doesn't say, as systemd's
+/// regular users. The rest are the system's.
+pub fn linux_people(login_defs: &str) -> RangeInclusive<u32> {
+    let value = |key: &str| {
+        login_defs.lines().find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next()? == key)
+                .then(|| words.next()?.parse::<u32>().ok())
+                .flatten()
+        })
+    };
+    value("UID_MIN").unwrap_or(1000)..=value("UID_MAX").unwrap_or(60000)
+}
+
+/// A Mac's: 501 up, as the first person's account is, short of `nobody`, -2,
+/// and -1.
+pub const MAC_PEOPLE: RangeInclusive<u32> = 501..=u32::MAX - 2;
+
 /// The service a process runs in, from its `/proc/<pid>/cgroup`: on cgroup v2,
 /// or v1's systemd hierarchy, the innermost `.service` in its path.
 pub fn parse_unit(cgroup: &str) -> Option<String> {
@@ -85,6 +113,7 @@ pub fn parse_unit(cgroup: &str) -> Option<String> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod os {
     use std::collections::HashMap;
+    use std::ops::RangeInclusive;
     use std::time::{Duration, Instant};
 
     use cntrl_protocol::process::{ProcessInfo, StopResult};
@@ -111,6 +140,8 @@ mod os {
         system: System,
         users: Users,
         users_read: Instant,
+        /// The user IDs people's accounts take; the rest are the system's.
+        people: RangeInclusive<u32>,
         read: Option<Instant>,
         /// Each process's unit, by PID and start time, since it doesn't change.
         units: HashMap<(u32, u64), Option<String>>,
@@ -128,6 +159,12 @@ mod os {
                 system: System::new(),
                 users: Users::new_with_refreshed_list(),
                 users_read: Instant::now(),
+                #[cfg(target_os = "linux")]
+                people: super::linux_people(
+                    &std::fs::read_to_string("/etc/login.defs").unwrap_or_default(),
+                ),
+                #[cfg(target_os = "macos")]
+                people: super::MAC_PEOPLE,
                 read: None,
                 units: HashMap::new(),
             }
@@ -170,6 +207,8 @@ mod os {
                         .unwrap_or_else(|| unit(pid));
                     units.insert((pid, started), unit.clone());
                     let parent = process.parent().map(Pid::as_u32);
+                    let kernel = is_kernel(pid, parent);
+                    let owner = process.user_id().map(|uid| **uid);
                     ProcessInfo {
                         pid,
                         parent,
@@ -182,7 +221,8 @@ mod os {
                         memory: process.memory(),
                         started,
                         unit,
-                        kernel: is_kernel(pid, parent),
+                        kernel,
+                        system: kernel || owner.is_none_or(|uid| !self.people.contains(&uid)),
                         protected: false,
                     }
                 })
@@ -365,6 +405,8 @@ mod tests {
             started: 1_791_000_000,
             unit: (name == "nginx").then(|| "nginx.service".to_owned()),
             kernel: false,
+            // node runs as a person; the rest as system accounts.
+            system: name != "node",
             protected: false,
         }
     }
@@ -417,6 +459,34 @@ mod tests {
         assert_eq!(search("www-data").len(), 4);
         assert_eq!(search("  ").len(), 4);
         assert!(search("nothing").is_empty());
+    }
+
+    #[test]
+    fn keeps_the_systems_or_peoples_processes_before_the_limit() {
+        let owned = |owner: ProcessOwner, query: Option<&str>| {
+            let params = ProcessesParams {
+                owner: Some(owner),
+                query: query.map(str::to_owned),
+                limit: Some(1),
+                ..ProcessesParams::default()
+            };
+            let sample = view(&table(), &params, 0);
+            (pids(&sample), sample.matched)
+        };
+        // node ties postgres on CPU, but only node is a person's.
+        assert_eq!(owned(ProcessOwner::User, None), (vec![13], 1));
+        assert_eq!(owned(ProcessOwner::System, None), (vec![11], 3));
+        assert_eq!(owned(ProcessOwner::System, Some("node")), (vec![], 0));
+    }
+
+    #[test]
+    fn people_are_login_defs_range_on_linux() {
+        assert_eq!(linux_people(""), 1000..=60000);
+        let defs = "# comment\nUID_MIN\t\t 500\nUID_MAX   59999\nSYS_UID_MIN 101\n";
+        assert_eq!(linux_people(defs), 500..=59999);
+        assert_eq!(linux_people("UID_MIN nonsense\n"), 1000..=60000);
+        assert!(!MAC_PEOPLE.contains(&0) && !MAC_PEOPLE.contains(&500));
+        assert!(MAC_PEOPLE.contains(&501) && !MAC_PEOPLE.contains(&(u32::MAX - 1)));
     }
 
     #[test]

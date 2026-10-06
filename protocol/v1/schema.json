@@ -1444,6 +1444,10 @@
             "null"
           ],
           "description": "Whether it starts at boot, where that can be changed: a systemd unit\nfile that's enabled or disabled, or a third-party LaunchDaemon on a Mac.\nAbsent for units that can't be enabled (systemd's `static` ones), for\nApple's own jobs, and from agents before 0.1.5."
+        },
+        "vendor": {
+          "type": "boolean",
+          "description": "It came with the operating system rather than being added to the\nmachine (D60): on Windows, its program is Microsoft's; on a Mac, it's\nApple's; on Linux, a package installed its unit file, which wasn't\nmade on the machine. Agents before 0.1.17 leave it false."
         }
       },
       "required": [
@@ -2695,6 +2699,17 @@
             "null"
           ],
           "description": "Keeps the processes whose name, user or unit contains it, ignoring\ncase, or whose PID it is."
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessOwner"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Keeps only the system's processes, or only people's (D60), before the\nlimit. Agents before 0.1.17 keep every process."
         }
       },
       "description": "What a `processes` subscription asks for."
@@ -2705,6 +2720,21 @@
         "cpu",
         "memory"
       ]
+    },
+    "ProcessOwner": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "system",
+          "description": "The operating system's: kernel threads, and processes that run as\nroot, SYSTEM or another system or service account."
+        },
+        {
+          "type": "string",
+          "const": "user",
+          "description": "People's: processes that run as a person's account."
+        }
+      ],
+      "description": "Whose processes a subscription keeps (D60)."
     },
     "ProcessesSample": {
       "type": "object",
@@ -2795,6 +2825,10 @@
         "kernel": {
           "type": "boolean",
           "description": "A kernel thread, which can't be stopped."
+        },
+        "system": {
+          "type": "boolean",
+          "description": "It runs as the operating system, not a person (D60): a kernel thread,\nor root, SYSTEM or another system or service account. Agents before\n0.1.17 leave it false."
         },
         "protected": {
           "type": "boolean",

@@ -107,6 +107,12 @@ pub struct ServiceStatus {
     /// Apple's own jobs, and from agents before 0.1.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// It came with the operating system rather than being added to the
+    /// machine (D60): on Windows, its program is Microsoft's; on a Mac, it's
+    /// Apple's; on Linux, a package installed its unit file, which wasn't
+    /// made on the machine. Agents before 0.1.17 leave it false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vendor: bool,
 }
 
 /// What `service.start`, `service.stop`, `service.restart`, `service.enable`

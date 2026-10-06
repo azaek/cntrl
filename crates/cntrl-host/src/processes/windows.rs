@@ -92,6 +92,8 @@ impl Sampler {
             .map(|process| {
                 let pid = process.pid().as_u32();
                 let parent = process.parent().map(Pid::as_u32);
+                let kernel = is_kernel(pid, parent);
+                let sid = process.user_id().map(|sid| sid.to_string());
                 let user = process.user_id().and_then(|sid| {
                     names
                         .entry(sid.to_string())
@@ -107,12 +109,21 @@ impl Sampler {
                     memory: process.memory(),
                     started: process.start_time(),
                     unit: None,
-                    kernel: is_kernel(pid, parent),
+                    kernel,
+                    system: kernel || sid.is_none_or(|sid| !persons(&sid)),
                     protected: false,
                 }
             })
             .collect()
     }
+}
+
+/// Whether a SID is a person's account (D60): a local or domain account,
+/// `S-1-5-21-…`, the Administrator's included. SYSTEM, LocalService,
+/// NetworkService, service accounts (`S-1-5-80-…`), and the window manager's
+/// and font driver's accounts in each session are the system's.
+fn persons(sid: &str) -> bool {
+    sid.starts_with("S-1-5-21-")
 }
 
 /// What privd checks before it stops a process.
@@ -275,4 +286,47 @@ fn account_name(sid: &str) -> Option<String> {
     }
     let length = usize::try_from(name_length).ok()?;
     name.get(..length).map(String::from_utf16_lossy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn people_are_local_and_domain_accounts() {
+        assert!(persons("S-1-5-21-3623811015-3361044348-30300820-1013"));
+        assert!(persons("S-1-5-21-3623811015-3361044348-30300820-500"));
+        for system in [
+            "S-1-5-18",
+            "S-1-5-19",
+            "S-1-5-20",
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            "S-1-5-90-0-1",
+            "S-1-5-96-0-1",
+        ] {
+            assert!(!persons(system), "{system}");
+        }
+    }
+
+    #[test]
+    fn this_machines_table_has_both() {
+        let table = Sampler::new().read();
+        // CI runs the tests as an administrator's account, a person's.
+        let own = table
+            .iter()
+            .find(|process| process.pid == std::process::id())
+            .expect("this test's process");
+        assert!(!own.system, "{own:?}");
+        assert!(
+            table
+                .iter()
+                .any(|process| process.system && !process.kernel)
+        );
+        assert!(
+            table
+                .iter()
+                .filter(|process| process.kernel)
+                .all(|process| process.system)
+        );
+    }
 }
