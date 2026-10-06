@@ -92,17 +92,30 @@ pub enum PolicyCommand {
     Show,
     /// Check the policy file and exit: 0 when it's valid, 1 when it isn't.
     Check,
-    /// Allow a capability, such as `services.manage`: rewrites the policy file
-    /// and reconnects the agent. Needs root.
+    /// Allow capabilities, such as `services.manage`: rewrites the policy
+    /// file and reconnects the agent. Needs root.
     Allow {
-        /// The capability to allow.
-        capability: String,
+        /// The capabilities to allow.
+        #[arg(required = true)]
+        capabilities: Vec<String>,
     },
-    /// Stop allowing a capability: rewrites the policy file and reconnects the
+    /// Stop allowing capabilities: rewrites the policy file and reconnects the
     /// agent. Needs root.
     Deny {
-        /// The capability to stop allowing.
-        capability: String,
+        /// The capabilities to stop allowing.
+        #[arg(required = true)]
+        capabilities: Vec<String>,
+    },
+    /// Allow some capabilities and stop allowing others at once, as Console's
+    /// permissions dialog writes it: rewrites the policy file and reconnects
+    /// the agent once. A wrong name changes nothing. Needs root.
+    Modify {
+        /// Capabilities to allow, comma-separated or repeated.
+        #[arg(long, value_delimiter = ',', value_name = "CAPABILITY")]
+        allow: Vec<String>,
+        /// Capabilities to stop allowing, comma-separated or repeated.
+        #[arg(long, value_delimiter = ',', value_name = "CAPABILITY")]
+        deny: Vec<String>,
     },
 }
 

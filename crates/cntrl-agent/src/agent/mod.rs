@@ -77,11 +77,14 @@ pub fn main() -> ExitCode {
         }
         Command::Policy(PolicyCommand::Show) => client::print_policy(&config, false),
         Command::Policy(PolicyCommand::Check) => client::print_policy(&config, true),
-        Command::Policy(PolicyCommand::Allow { capability }) => {
-            client::change_capability(&config, &capability, true)
+        Command::Policy(PolicyCommand::Allow { capabilities }) => {
+            client::change_capabilities(&config, &capabilities, &[])
         }
-        Command::Policy(PolicyCommand::Deny { capability }) => {
-            client::change_capability(&config, &capability, false)
+        Command::Policy(PolicyCommand::Deny { capabilities }) => {
+            client::change_capabilities(&config, &[], &capabilities)
+        }
+        Command::Policy(PolicyCommand::Modify { allow, deny }) => {
+            client::change_capabilities(&config, &allow, &deny)
         }
         Command::Audit(AuditCommand::Verify) => client::print_audit_verify(&config),
         Command::History(HistoryCommand::Show) => client::print_history(&config),

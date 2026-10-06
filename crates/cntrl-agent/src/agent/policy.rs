@@ -191,42 +191,63 @@ pub fn load(path: &Path, owner: u32) -> PolicyState {
     }
 }
 
-/// Adds `capability` to the policy's allow list and rewrites the file;
-/// `Ok(false)` when it was already allowed. Without a file it starts from the
-/// built-in policy.
-pub fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
-    change(path, owner, capability, true)
+/// What a change to the policy did: the capabilities it turned on and off.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Changed {
+    pub allowed: Vec<String>,
+    pub denied: Vec<String>,
 }
 
-/// Takes `capability` off the policy's allow list and rewrites the file;
-/// `Ok(false)` when it wasn't allowed.
-pub fn deny(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
-    change(path, owner, capability, false)
+impl Changed {
+    pub fn is_empty(&self) -> bool {
+        self.allowed.is_empty() && self.denied.is_empty()
+    }
 }
 
-fn change(path: &Path, owner: u32, capability: &str, allowed: bool) -> Result<bool, String> {
-    if !capability::is_capability(capability) {
+/// Allows the capabilities in `allow` and stops allowing those in `deny`,
+/// rewriting the file once (D53). Every name is checked first, so an unknown
+/// one, or one in both lists, changes nothing. Without a file it starts from
+/// the built-in policy. The answer says what changed, which may be nothing,
+/// and then the file isn't touched.
+pub fn modify(
+    path: &Path,
+    owner: u32,
+    allow: &[String],
+    deny: &[String],
+) -> Result<Changed, String> {
+    if let Some(unknown) = allow
+        .iter()
+        .chain(deny)
+        .find(|name| !capability::is_capability(name))
+    {
         let all = capability::CAPABILITIES.join(", ");
-        return Err(format!(
-            "`{capability}` isn't a capability; there are {all}"
-        ));
+        return Err(format!("`{unknown}` isn't a capability; there are {all}"));
+    }
+    if let Some(both) = allow.iter().find(|name| deny.contains(name)) {
+        return Err(format!("`{both}` can't be both allowed and denied"));
     }
     let policy = match load(path, owner) {
         PolicyState::Valid { policy } => policy,
         PolicyState::Invalid { reason } => return Err(format!("fix the policy first: {reason}")),
     };
-    if policy.allow.contains(capability) == allowed {
-        return Ok(false);
+    let mut allowed = policy.allow;
+    let mut changed = Changed::default();
+    for name in allow {
+        if allowed.insert(name.clone()) {
+            changed.allowed.push(name.clone());
+        }
     }
-    let mut allow = policy.allow;
-    if allowed {
-        allow.insert(capability.to_owned());
-    } else {
-        allow.remove(capability);
+    for name in deny {
+        if allowed.remove(name) {
+            changed.denied.push(name.clone());
+        }
+    }
+    if changed.is_empty() {
+        return Ok(changed);
     }
     let file = PolicyFile {
         version: 1,
-        allow: allow.into_iter().collect(),
+        allow: allowed.into_iter().collect(),
         services: ServicesSection {
             protect: Some(policy.protect.into_iter().collect()),
         },
@@ -237,10 +258,11 @@ fn change(path: &Path, owner: u32, capability: &str, allowed: bool) -> Result<bo
     let text = toml::to_string(&file).map_err(|e| e.to_string())?;
     let text = format!(
         "# The device policy. Only root changes it: edit this file, or run\n\
-         # `sudo cntrl policy allow <capability>` or `deny`, which rewrite it.\n{text}"
+         # `sudo cntrl policy allow <capability>`, `deny`, or\n\
+         # `modify --allow <a,b> --deny <c>`, which rewrite it.\n{text}"
     );
     write_atomically(path, &text)?;
-    Ok(true)
+    Ok(changed)
 }
 
 /// Replaces `path` through a temporary file, so a reader never sees half of it.
@@ -433,6 +455,19 @@ mod tests {
         assert!(state.protects("pw.cntrl.privd"));
     }
 
+    /// Names as the command line passes them.
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    fn allow(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
+        modify(path, owner, &names(&[capability]), &[]).map(|changed| !changed.is_empty())
+    }
+
+    fn deny(path: &Path, owner: u32, capability: &str) -> Result<bool, String> {
+        modify(path, owner, &[], &names(&[capability])).map(|changed| !changed.is_empty())
+    }
+
     #[test]
     fn allow_starts_from_the_built_in_policy() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -498,6 +533,58 @@ mod tests {
         let owner = fs::metadata(dir.path()).expect("temp dir").uid();
         assert!(deny(&path, owner, "root.everything").is_err());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn modify_allows_and_denies_in_one_rewrite() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("policy.toml");
+        let owner = fs::metadata(dir.path()).expect("temp dir").uid();
+        let changed = modify(
+            &path,
+            owner,
+            &names(&["services.manage", "history.manage", "system.read"]),
+            &names(&["processes.read", "power.reboot"]),
+        )
+        .expect("modified");
+        // system.read was on already, and power.reboot off.
+        assert_eq!(
+            changed.allowed,
+            names(&["services.manage", "history.manage"])
+        );
+        assert_eq!(changed.denied, names(&["processes.read"]));
+        let state = load(&path, owner);
+        assert!(state.allows("services.manage") && state.allows("history.manage"));
+        assert!(!state.allows("processes.read"));
+        assert!(state.allows("logs.read"));
+        // Asking again changes nothing, and the file isn't touched.
+        let again = modify(
+            &path,
+            owner,
+            &names(&["services.manage"]),
+            &names(&["power.reboot"]),
+        )
+        .expect("modified");
+        assert!(again.is_empty());
+        assert!(!dir.path().join("policy.toml.bak").exists());
+    }
+
+    #[test]
+    fn modify_changes_nothing_when_a_name_is_wrong_or_in_both_lists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let text = "version = 1\nallow = [\"system.read\"]\n";
+        let path = write_policy(dir.path(), text, 0o644);
+        let owner = own_uid(&path);
+        let typo = modify(
+            &path,
+            owner,
+            &names(&["services.manage", "servics.manage"]),
+            &[],
+        );
+        assert!(typo.is_err_and(|e| e.contains("servics.manage")));
+        let both = modify(&path, owner, &names(&["logs.read"]), &names(&["logs.read"]));
+        assert!(both.is_err_and(|e| e.contains("both")));
+        assert_eq!(fs::read_to_string(&path).expect("the policy"), text);
     }
 
     #[test]

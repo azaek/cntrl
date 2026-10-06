@@ -1,5 +1,5 @@
 //! The CLI commands that talk to the running agent or read its files:
-//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check|allow`,
+//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check|allow|deny|modify`,
 //! `cntrl audit verify` and `cntrl history show|keep|clear`.
 
 use std::fs;
@@ -214,29 +214,47 @@ fn move_hint() -> &'static str {
     }
 }
 
-/// `cntrl policy allow` and `cntrl policy deny`: change the policy file, then
-/// have the running agent reconnect, so Console sees the new policy in its hello.
-pub fn change_capability(config: &Config, capability: &str, allowed: bool) -> ExitCode {
+/// `cntrl policy allow`, `deny` and `modify` (D53): every name is checked
+/// first, then the policy file is rewritten once and the agent reconnects
+/// once, however many change. Writing the file needs root.
+pub fn change_capabilities(config: &Config, allow: &[String], deny: &[String]) -> ExitCode {
+    let clean = |names: &[String]| -> Vec<String> {
+        names
+            .iter()
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect()
+    };
+    let (allow, deny) = (clean(allow), clean(deny));
+    if allow.is_empty() && deny.is_empty() {
+        return fail(
+            "name what to change, such as `--allow services.manage` or `--deny power.poweroff`",
+        );
+    }
     let path = &config.paths.policy;
     // privd reads the file as root, so root must own it.
-    let changed = if allowed {
-        policy::allow(path, 0, capability)
-    } else {
-        policy::deny(path, 0, capability)
+    let changed = match policy::modify(path, 0, &allow, &deny) {
+        Ok(changed) => changed,
+        Err(e) => return fail(&e),
     };
-    match (changed, allowed) {
-        (Ok(false), true) => {
-            println!("{capability} is already allowed.");
-            return ExitCode::SUCCESS;
-        }
-        (Ok(false), false) => {
-            println!("{capability} isn't allowed.");
-            return ExitCode::SUCCESS;
-        }
-        (Ok(true), true) => println!("Allowed {capability} in {}.", path.display()),
-        (Ok(true), false) => println!("Denied {capability} in {}.", path.display()),
-        (Err(e), _) => return fail(&e),
+    for name in allow.iter().filter(|name| !changed.allowed.contains(name)) {
+        println!("{name} is already allowed.");
     }
+    for name in deny.iter().filter(|name| !changed.denied.contains(name)) {
+        println!("{name} isn't allowed.");
+    }
+    if changed.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    let mut done = Vec::new();
+    if !changed.allowed.is_empty() {
+        done.push(format!("Allowed {}", listed(&changed.allowed)));
+    }
+    if !changed.denied.is_empty() {
+        let verb = if done.is_empty() { "Denied" } else { "denied" };
+        done.push(format!("{verb} {}", listed(&changed.denied)));
+    }
+    println!("{} in {}.", done.join("; "), path.display());
     let reload = request(
         &config.paths.agent_socket,
         Method::POST,
@@ -254,6 +272,15 @@ pub fn change_capability(config: &Config, capability: &str, allowed: bool) -> Ex
         Err(_) => println!("The agent isn't running; it reads the policy when it starts."),
     }
     ExitCode::SUCCESS
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn listed(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// `cntrl pause`: the agent tells Console who paused it and why, then hangs
