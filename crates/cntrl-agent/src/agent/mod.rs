@@ -105,7 +105,7 @@ pub fn main() -> ExitCode {
         #[cfg(windows)]
         Command::Install { console, gateway } => install::install(&cli.config, console, gateway),
         #[cfg(windows)]
-        Command::Uninstall { purge } => install::uninstall(&config, &cli.config, purge),
+        Command::Uninstall { purge, wait } => install::uninstall(&config, &cli.config, purge, wait),
     }
 }
 

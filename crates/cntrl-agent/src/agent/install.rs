@@ -111,6 +111,7 @@ fn try_install(
         setup::set_access(folder, sddl)?;
     }
     setup::set_on_path(&programs, true)?;
+    list_in_apps(&bin, &programs)?;
 
     start(&manager, PRIVD)?;
     start(&manager, AGENT)?;
@@ -124,15 +125,56 @@ fn try_install(
 
 /// `cntrl uninstall`: the services and the program go; with `purge`, the
 /// identity, config, audit log and logs too, and the device stays in Console
-/// until someone removes it there.
-pub fn uninstall(config: &Config, config_path: &Path, purge: bool) -> ExitCode {
-    match try_uninstall(config, config_path, purge) {
+/// until someone removes it there. With `wait`, as from Apps & features, the
+/// window stays until Enter.
+pub fn uninstall(config: &Config, config_path: &Path, purge: bool, wait: bool) -> ExitCode {
+    let code = match try_uninstall(config, config_path, purge) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             say_err!("cntrl uninstall: {e}");
             ExitCode::FAILURE
         }
+    };
+    if wait {
+        say!("Press Enter to close.");
+        let _ = std::io::stdin().read_line(&mut String::new());
     }
+    code
+}
+
+/// Lists the agent in Apps & features. Its uninstall runs elevated, as it
+/// must, through PowerShell's `-Verb RunAs`, since Apps & features starts it
+/// as the signed-in user; tools that run elevated use the quiet one.
+fn list_in_apps(bin: &Path, programs: &Path) -> Result<(), String> {
+    use setup::Value::{Number, Text};
+
+    let powershell = std::env::var_os("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let uninstall = format!(
+        r#""{}" -NoProfile -WindowStyle Hidden -Command "Start-Process -Verb RunAs -FilePath '{}' -ArgumentList 'uninstall','--wait'""#,
+        powershell.display(),
+        bin.display()
+    );
+    let quiet = format!(r#""{}" uninstall"#, bin.display());
+    // Two copies of the program, in KiB.
+    let size = std::fs::metadata(bin).map_or(0, |meta| meta.len() * 2 / 1024);
+    setup::set_uninstall_entry(&[
+        ("DisplayName", Text("cntrl agent")),
+        ("DisplayVersion", Text(env!("CARGO_PKG_VERSION"))),
+        ("Publisher", Text("cntrl")),
+        ("URLInfoAbout", Text("https://cntrl.pw")),
+        ("InstallLocation", Text(&programs.display().to_string())),
+        ("DisplayIcon", Text(&bin.display().to_string())),
+        ("UninstallString", Text(&uninstall)),
+        ("QuietUninstallString", Text(&quiet)),
+        (
+            "EstimatedSize",
+            Number(u32::try_from(size).unwrap_or(u32::MAX)),
+        ),
+        ("NoModify", Number(1)),
+        ("NoRepair", Number(1)),
+    ])
 }
 
 fn try_uninstall(config: &Config, config_path: &Path, purge: bool) -> Result<(), String> {
@@ -158,6 +200,7 @@ fn try_uninstall(config: &Config, config_path: &Path, purge: bool) -> Result<(),
     }
     let programs = program_dir();
     setup::set_on_path(&programs, false)?;
+    setup::remove_uninstall_entry()?;
     // A running program, as this one may be, goes when Windows restarts.
     let mut later = false;
     if let Ok(entries) = std::fs::read_dir(&programs) {

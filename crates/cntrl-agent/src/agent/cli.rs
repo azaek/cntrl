@@ -101,6 +101,10 @@ pub enum Command {
         /// stays in Console until someone removes it there.
         #[arg(long)]
         purge: bool,
+        /// Wait for Enter before ending, so the window Apps & features opens
+        /// stays to show what happened.
+        #[arg(long, hide = true)]
+        wait: bool,
     },
 }
 

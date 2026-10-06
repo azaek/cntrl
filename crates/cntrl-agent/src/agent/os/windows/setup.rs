@@ -1,6 +1,6 @@
 //! What installing on Windows asks of the system that windows-service doesn't
 //! cover (D58): access lists made from SDDL, a service's required privileges,
-//! and the machine's PATH.
+//! the machine's PATH, and the entry in Apps & features.
 
 use std::path::Path;
 use std::ptr::{null, null_mut};
@@ -13,8 +13,9 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_EXPAND_SZ, RRF_NOEXPAND,
-    RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegCloseKey, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ,
+    REG_OPTION_NON_VOLATILE, REG_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, QueryServiceStatusEx, SC_STATUS_PROCESS_INFO,
@@ -30,6 +31,52 @@ use super::SecurityDescriptor;
 
 /// Where the machine's environment lives, under `HKEY_LOCAL_MACHINE`.
 const ENVIRONMENT: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+/// Where Apps & features finds the agent, under `HKEY_LOCAL_MACHINE`.
+const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\cntrl-agent";
+
+/// A value in the agent's entry in Apps & features.
+pub enum Value<'a> {
+    Text(&'a str),
+    Number(u32),
+}
+
+/// Lists the agent in Apps & features with these values, replacing what was
+/// there.
+pub fn set_uninstall_entry(values: &[(&str, Value<'_>)]) -> Result<(), String> {
+    remove_uninstall_entry()?;
+    let key = Key::create(UNINSTALL)?;
+    for (name, value) in values {
+        match value {
+            Value::Text(text) => key.write(name, REG_SZ, &text_bytes(text))?,
+            Value::Number(number) => key.write(name, REG_DWORD, &number.to_le_bytes())?,
+        }
+    }
+    Ok(())
+}
+
+/// Takes the agent out of Apps & features; it's gone already when it isn't
+/// there.
+pub fn remove_uninstall_entry() -> Result<(), String> {
+    let name = wide(UNINSTALL);
+    // SAFETY: a NUL-terminated subkey of an open root.
+    let status = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, name.as_ptr()) };
+    // ERROR_FILE_NOT_FOUND: no entry.
+    if status != ERROR_SUCCESS && status != 2 {
+        return Err(format!(
+            "can't remove the agent from Apps & features: {}",
+            std::io::Error::from_raw_os_error(status as i32)
+        ));
+    }
+    Ok(())
+}
+
+/// A string as the registry keeps it: UTF-16 with its NUL.
+fn text_bytes(text: &str) -> Vec<u8> {
+    wide(text)
+        .iter()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect()
+}
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
@@ -204,6 +251,48 @@ pub fn set_on_path(dir: &Path, on: bool) -> Result<(), String> {
 struct Key(HKEY);
 
 impl Key {
+    /// Creates the key, or opens it when it's there, to write.
+    fn create(path: &str) -> Result<Self, String> {
+        let name = wide(path);
+        let mut key: HKEY = null_mut();
+        // SAFETY: the name is NUL-terminated, and the key is closed on drop.
+        let status = unsafe {
+            RegCreateKeyExW(
+                HKEY_LOCAL_MACHINE,
+                name.as_ptr(),
+                0,
+                null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_WRITE,
+                null(),
+                &mut key,
+                null_mut(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(format!(
+                "can't create {path}: {}",
+                std::io::Error::from_raw_os_error(status as i32)
+            ));
+        }
+        Ok(Self(key))
+    }
+
+    /// Writes a value of `kind` from its bytes.
+    fn write(&self, value: &str, kind: u32, data: &[u8]) -> Result<(), String> {
+        let name = wide(value);
+        let size = u32::try_from(data.len()).map_err(|_| format!("{value} is too long"))?;
+        // SAFETY: the name is NUL-terminated, and the data `size` bytes long.
+        let status = unsafe { RegSetValueExW(self.0, name.as_ptr(), 0, kind, data.as_ptr(), size) };
+        if status != ERROR_SUCCESS {
+            return Err(format!(
+                "can't write {value}: {}",
+                std::io::Error::from_raw_os_error(status as i32)
+            ));
+        }
+        Ok(())
+    }
+
     fn open(path: &str) -> Result<Self, String> {
         let name = wide(path);
         let mut key: HKEY = null_mut();
