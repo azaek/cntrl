@@ -126,7 +126,7 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
         }
     };
 
-    runtime.block_on(async move {
+    let code = runtime.block_on(async move {
         let listener =
             match os::LocalListener::listen(&config.paths.agent_socket, os::Endpoint::Agent) {
                 Ok(listener) => listener,
@@ -218,7 +218,9 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
         service::ready("running");
         info!(version = env!("CARGO_PKG_VERSION"), "cntrl-agent started");
         supervisor.run_until_shutdown().await
-    })
+    });
+    runtime.shutdown_timeout(supervisor::LEFTOVER_WAIT);
+    code
 }
 
 /// Records the start in the audit log. privd may be missing in a run by hand,

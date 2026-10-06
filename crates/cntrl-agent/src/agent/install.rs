@@ -68,7 +68,12 @@ fn try_install(
     )
     .map_err(|e| format!("can't reach the Service Control Manager: {}", why(&e)))?;
 
-    // Both halves stop, so their binary can be replaced.
+    // Both halves stop, so their binary can be replaced, with their restarts
+    // held off meanwhile, so neither comes back before the new one is in
+    // place; `configure` sets them again.
+    for name in [AGENT, PRIVD] {
+        hold_restarts(&manager, name);
+    }
     stop(&manager, AGENT)?;
     stop(&manager, PRIVD)?;
     let programs = program_dir();
@@ -140,6 +145,9 @@ fn try_uninstall(config: &Config, config_path: &Path, purge: bool) -> Result<(),
     }
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .map_err(|e| format!("can't reach the Service Control Manager: {}", why(&e)))?;
+    for name in [AGENT, PRIVD] {
+        hold_restarts(&manager, name);
+    }
     for name in [AGENT, PRIVD] {
         stop(&manager, name)?;
         if let Ok(service) = manager.open_service(name, ServiceAccess::DELETE) {
@@ -271,22 +279,45 @@ fn configure(manager: &ServiceManager, info: &ServiceInfo) -> Result<Service, St
     Ok(service)
 }
 
-/// Stops a service and waits for it; one that isn't there is stopped.
+/// Clears a service's restarts after failures, so ending it keeps it
+/// stopped; one that isn't there has none.
+fn hold_restarts(manager: &ServiceManager, name: &str) {
+    if let Ok(service) = manager.open_service(name, ServiceAccess::CHANGE_CONFIG) {
+        let _ = service.update_failure_actions(ServiceFailureActions {
+            reset_period: ServiceFailureResetPeriod::After(FAILURES_RESET),
+            reboot_msg: None,
+            command: None,
+            actions: Some(Vec::new()),
+        });
+    }
+}
+
+/// Stops a service and waits for it; one that isn't there is stopped. One
+/// that doesn't stop in time has its process ended.
 fn stop(manager: &ServiceManager, name: &str) -> Result<(), String> {
     let Ok(service) = manager.open_service(name, ServiceAccess::QUERY_STATUS | ServiceAccess::STOP)
     else {
         return Ok(());
     };
-    let state = service
+    let status = service
         .query_status()
-        .map_err(|e| format!("can't ask about {name}: {}", why(&e)))?
-        .current_state;
-    if state != ServiceState::Stopped {
-        // It may be stopping already, which refuses another stop.
-        let _ = service.stop();
-        wait_for(&service, name, ServiceState::Stopped)?;
+        .map_err(|e| format!("can't ask about {name}: {}", why(&e)))?;
+    if status.current_state == ServiceState::Stopped {
+        return Ok(());
     }
-    Ok(())
+    // It may be stopping already, which refuses another stop.
+    let _ = service.stop();
+    if wait_for(&service, name, ServiceState::Stopped).is_ok() {
+        return Ok(());
+    }
+    let pid = service
+        .query_status()
+        .ok()
+        .and_then(|status| status.process_id)
+        .ok_or_else(|| format!("{name} didn't stop, and its process can't be found"))?;
+    say!("{name} didn't stop within {SERVICE_WAIT:?}, so its process is ended.");
+    setup::end_process(pid)?;
+    wait_for(&service, name, ServiceState::Stopped)
 }
 
 fn start(manager: &ServiceManager, name: &str) -> Result<(), String> {

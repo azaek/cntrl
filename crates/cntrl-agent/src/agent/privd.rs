@@ -73,7 +73,11 @@ pub fn main(config: &Config, stop: CancellationToken) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(serve(config, stop)) {
+    let served = runtime.block_on(serve(config, stop));
+    // A blocking call still under way, such as a service's start, gets a
+    // moment, then is left: the service manager waits on this process.
+    runtime.shutdown_timeout(super::supervisor::LEFTOVER_WAIT);
+    match served {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             error!("{e}");

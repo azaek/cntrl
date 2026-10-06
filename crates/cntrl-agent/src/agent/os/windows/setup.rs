@@ -20,6 +20,7 @@ use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
     SERVICE_REQUIRED_PRIVILEGES_INFOW,
 };
+use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
 };
@@ -94,6 +95,31 @@ pub fn require_privileges(service: &Service, privileges: &[&str]) -> Result<(), 
     if changed == 0 {
         return Err(format!(
             "can't set the service's privileges: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Ends a process at once, as a service that doesn't stop when asked is.
+pub fn end_process(pid: u32) -> Result<(), String> {
+    // SAFETY: a plain call; the handle is closed below.
+    let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if process.is_null() {
+        return Err(format!(
+            "can't open process {pid}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: an open handle with PROCESS_TERMINATE, closed once.
+    let ended = unsafe {
+        let ended = TerminateProcess(process, 1);
+        windows_sys::Win32::Foundation::CloseHandle(process);
+        ended
+    };
+    if ended == 0 {
+        return Err(format!(
+            "can't end process {pid}: {}",
             std::io::Error::last_os_error()
         ));
     }

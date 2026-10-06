@@ -15,6 +15,9 @@ use super::service;
 
 /// `EX_SOFTWARE` from sysexits(3).
 pub const EXIT_SOFTWARE: u8 = 70;
+/// How long work still blocking a thread, such as a slow read, may hold the
+/// process up once it's asked to stop: the service manager waits on it.
+pub const LEFTOVER_WAIT: Duration = Duration::from_secs(5);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 type Outcome = (&'static str, Result<(), String>);
