@@ -1,7 +1,7 @@
 //! Sockets that launchd made for the job from the `Sockets` entry of its
 //! launchd.plist(5), handed over by launch_activate_socket(3). This module is
-//! the agent's only unsafe code (D20): that call into libSystem, and the
-//! free(3) its result needs.
+//! the agent's only unsafe code on Unix (D20): that call into libSystem, and
+//! the free(3) its result needs. Windows' is in `os::windows` (D58).
 
 #![allow(unsafe_code)]
 

@@ -115,13 +115,14 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
     };
 
     runtime.block_on(async move {
-        let listener = match local_api::listen(&config.paths.agent_socket) {
-            Ok(listener) => listener,
-            Err(e) => {
-                error!("{e}");
-                return ExitCode::FAILURE;
-            }
-        };
+        let listener =
+            match os::LocalListener::listen(&config.paths.agent_socket, os::Endpoint::Agent) {
+                Ok(listener) => listener,
+                Err(e) => {
+                    error!("{e}");
+                    return ExitCode::FAILURE;
+                }
+            };
         let health = Arc::new(Health::new());
         let uplink = Arc::new(Uplink::new());
         let latest_stats = Arc::new(stats::Latest::new(None));

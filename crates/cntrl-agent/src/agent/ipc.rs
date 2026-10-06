@@ -1,5 +1,6 @@
 //! The channel between the agent and privd: length-delimited JSON frames over
-//! privd's Unix socket. Each request carries an ID that its response repeats.
+//! privd's socket, or its pipe on Windows. Each request carries an ID that its
+//! response repeats.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,8 +16,10 @@ use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+use super::os;
 
 /// Largest frame either side accepts.
 const MAX_FRAME: usize = 1 << 20;
@@ -203,16 +206,21 @@ impl Response {
     }
 }
 
-pub type Channel = Framed<UnixStream, LengthDelimitedCodec>;
+/// A connection to privd, or privd's end of one.
+pub type Channel<S = os::LocalStream> = Framed<S, LengthDelimitedCodec>;
 
-pub fn channel(stream: UnixStream) -> Channel {
+pub fn channel<S: AsyncRead + AsyncWrite>(stream: S) -> Channel<S> {
     let codec = LengthDelimitedCodec::builder()
         .max_frame_length(MAX_FRAME)
         .new_codec();
     Framed::new(stream, codec)
 }
 
-pub async fn send<T: Serialize>(channel: &mut Channel, message: &T) -> Result<(), String> {
+pub async fn send<S, T>(channel: &mut Channel<S>, message: &T) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    T: Serialize,
+{
     let bytes = serde_json::to_vec(message).map_err(|e| e.to_string())?;
     channel
         .send(Bytes::from(bytes))
@@ -221,7 +229,11 @@ pub async fn send<T: Serialize>(channel: &mut Channel, message: &T) -> Result<()
 }
 
 /// The next message, or `None` once the other side has closed the channel.
-pub async fn receive<T: DeserializeOwned>(channel: &mut Channel) -> Result<Option<T>, String> {
+pub async fn receive<S, T>(channel: &mut Channel<S>) -> Result<Option<T>, String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    T: DeserializeOwned,
+{
     match channel.next().await {
         None => Ok(None),
         Some(Err(e)) => Err(e.to_string()),
@@ -241,7 +253,7 @@ pub async fn call_once(socket: &Path, call: Call) -> Result<Value, String> {
 /// Connects, makes one call and disconnects, within `limit`.
 pub async fn call_within(socket: &Path, call: Call, limit: Duration) -> Result<Value, CallError> {
     let exchange = async {
-        let stream = UnixStream::connect(socket).await.map_err(|e| {
+        let stream = os::connect(socket).await.map_err(|e| {
             CallError::internal(format!("can't reach privd at {}: {e}", socket.display()))
         })?;
         let mut channel = channel(stream);

@@ -2,7 +2,8 @@
 //! started on demand by its systemd or launchd socket, and is the only part that
 //! reads the policy, writes the audit log, holds the audit key and acts on the
 //! machine. It accepts connections only from root, the agent's user (`cntrl`,
-//! or `_cntrl` on macOS) and its own user, and exits after a minute without one.
+//! `_cntrl` on macOS, `NT SERVICE\cntrl-agent` on Windows) and its own user,
+//! and exits after a minute without one.
 
 use std::fs;
 use std::path::PathBuf;
@@ -22,7 +23,6 @@ use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::service::{JobResult, ServiceAction, ServiceJob, ServiceScope, ServiceStatus};
 use serde_json::{Value, json};
-use tokio::net::UnixStream;
 use tracing::{error, info, warn};
 
 use super::audit::AuditLog;
@@ -31,16 +31,11 @@ use super::docker;
 use super::ipc::{self, Call, CallError, Request, Response};
 use super::keys::SigningKey;
 use super::os::{self, Private};
-use super::{local_api, logging, policy};
+use super::{logging, policy};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
 const AUDIT_KEY_FILE: &str = "audit.key";
-/// The account the agent runs as, which the installer creates.
-#[cfg(target_os = "macos")]
-pub(super) const AGENT_USER: &str = "_cntrl";
-#[cfg(not(target_os = "macos"))]
-pub(super) const AGENT_USER: &str = "cntrl";
 /// How long privd waits for systemd's verdict on a job.
 const JOB_LIMIT: Duration = Duration::from_secs(300);
 
@@ -50,9 +45,10 @@ struct State {
     audit_key_path: PathBuf,
     /// The user privd runs as; the policy file must belong to it.
     owner: os::Owner,
-    allowed: Vec<u32>,
+    /// Who may connect besides root: privd's own user and the agent's.
+    allowed: Vec<os::Account>,
     /// The agent's user, whose processes privd won't stop.
-    agent: Option<u32>,
+    agent: Option<os::Account>,
     /// The process table's reader, made on first use; on macOS only privd
     /// sees every process (D24).
     processes: Mutex<Option<cntrl_host::processes::Sampler>>,
@@ -80,7 +76,7 @@ pub fn main(config: &Config) -> ExitCode {
 }
 
 async fn serve(config: &Config) -> Result<(), String> {
-    let listener = local_api::listen(&config.paths.privd_socket)?;
+    let mut listener = os::LocalListener::listen(&config.paths.privd_socket, os::Endpoint::Privd)?;
     let audit = AuditLog::open(&config.paths.audit_dir)?;
     let state_dir = &config.paths.privd_state_dir;
     fs::DirBuilder::new()
@@ -89,9 +85,11 @@ async fn serve(config: &Config) -> Result<(), String> {
         .create(state_dir)
         .map_err(|e| format!("can't create {}: {e}", state_dir.display()))?;
     let owner = os::own_owner();
-    let mut allowed = vec![0, owner];
-    let agent = uid_of(AGENT_USER);
-    allowed.extend(agent);
+    let agent = os::account(os::AGENT_ACCOUNT);
+    let allowed = os::own_account()
+        .into_iter()
+        .chain(agent.iter().cloned())
+        .collect();
     let state = Arc::new(State {
         audit: Mutex::new(audit),
         policy_path: config.paths.policy.clone(),
@@ -107,8 +105,8 @@ async fn serve(config: &Config) -> Result<(), String> {
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let (stream, _) = accepted.map_err(|e| format!("accept failed: {e}"))?;
-                if !peer_allowed(&stream, &state.allowed) {
+                let (stream, peer) = accepted.map_err(|e| format!("accept failed: {e}"))?;
+                if !peer_allowed(&peer, &state.allowed) {
                     continue;
                 }
                 let (state, activity) = (Arc::clone(&state), Arc::clone(&activity));
@@ -128,24 +126,15 @@ async fn serve(config: &Config) -> Result<(), String> {
     }
 }
 
-fn peer_allowed(stream: &UnixStream, allowed: &[u32]) -> bool {
-    match stream.peer_cred() {
-        Ok(cred) if allowed.contains(&cred.uid()) => true,
-        Ok(cred) => {
-            warn!(
-                uid = cred.uid(),
-                "refused a connection from a user that isn't allowed"
-            );
-            false
-        }
-        Err(e) => {
-            warn!("refused a connection without peer credentials: {e}");
-            false
-        }
+fn peer_allowed(peer: &os::Peer, allowed: &[os::Account]) -> bool {
+    if peer.is_root() || allowed.iter().any(|account| peer.is(account)) {
+        return true;
     }
+    warn!(?peer, "refused a connection from a user that isn't allowed");
+    false
 }
 
-async fn handle(stream: UnixStream, state: &Arc<State>) {
+async fn handle(stream: os::ServerStream, state: &Arc<State>) {
     let mut channel = ipc::channel(stream);
     loop {
         let request: Request = match ipc::receive(&mut channel).await {
@@ -760,7 +749,12 @@ async fn blocking(
 /// finds where the log comes from, then sends batches as answers to the one
 /// request until the log stops, which the last says why, or the agent hangs
 /// up, which ends what reads it.
-async fn stream_logs(state: &Arc<State>, id: u64, params: LogsParams, channel: ipc::Channel) {
+async fn stream_logs(
+    state: &Arc<State>,
+    id: u64,
+    params: LogsParams,
+    channel: ipc::Channel<os::ServerStream>,
+) {
     use cntrl_protocol::logs::LogsBatch;
     use futures_util::{SinkExt, StreamExt};
 
@@ -862,7 +856,7 @@ async fn log_source(params: &LogsParams) -> Result<super::logs::mac::Source, Cal
         let (domain, files_as) = match user {
             Some(user) => {
                 let (name, uid) = session(Some(user))?;
-                let gid = gid_of(&name)
+                let gid = os::group_of(&name)
                     .ok_or_else(|| HostError::NotFound(format!("{name} has no group")))?;
                 (launchd::user_domain(uid), Some((uid, gid)))
             }
@@ -878,42 +872,6 @@ async fn log_source(params: &LogsParams) -> Result<super::logs::mac::Source, Cal
     .await
     .map_err(|e| CallError::internal(e.to_string()))?
     .map_err(CallError::from)
-}
-
-/// Looks `user` up in `/etc/passwd`, where the installer creates it.
-#[cfg(not(target_os = "macos"))]
-fn uid_of(user: &str) -> Option<u32> {
-    let passwd = fs::read_to_string("/etc/passwd").ok()?;
-    passwd.lines().find_map(|line| {
-        let mut fields = line.split(':');
-        (fields.next()? == user).then_some(())?;
-        fields.nth(1)?.parse().ok()
-    })
-}
-
-/// Looks `user` up through `id`, which asks Directory Services: macOS keeps the
-/// accounts the installer creates out of `/etc/passwd`.
-#[cfg(target_os = "macos")]
-fn uid_of(user: &str) -> Option<u32> {
-    id_of(user, "-u")
-}
-
-/// `user`'s primary group, through `id`.
-#[cfg(target_os = "macos")]
-fn gid_of(user: &str) -> Option<u32> {
-    id_of(user, "-g")
-}
-
-#[cfg(target_os = "macos")]
-fn id_of(user: &str, which: &str) -> Option<u32> {
-    let output = std::process::Command::new("/usr/bin/id")
-        .args([which, user])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
 }
 
 /// Counts open connections and remembers when the last one ended.
@@ -1016,11 +974,5 @@ mod tests {
         assert_eq!(first["key"], second["key"], "the audit key is created once");
 
         server.abort();
-    }
-
-    #[test]
-    fn finds_users_in_passwd_lines() {
-        assert_eq!(uid_of("root"), Some(0));
-        assert_eq!(uid_of("no-such-user-for-cntrl-tests"), None);
     }
 }

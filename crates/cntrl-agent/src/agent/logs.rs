@@ -315,7 +315,7 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
 async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
     use super::ipc::{self, Call, Request, Response};
 
-    let stream = match tokio::net::UnixStream::connect(privd).await {
+    let stream = match super::os::connect(privd).await {
         Ok(stream) => stream,
         Err(e) => return format!("can't reach the agent's root helper: {e}"),
     };
@@ -330,7 +330,7 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
         return format!("can't ask the agent's root helper: {e}");
     }
     loop {
-        let batch = match ipc::receive::<Response>(&mut channel).await {
+        let batch = match ipc::receive::<_, Response>(&mut channel).await {
             Ok(Some(Response {
                 ok: Some(value), ..
             })) => match serde_json::from_value::<LogsBatch>(value) {

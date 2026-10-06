@@ -1903,7 +1903,7 @@ impl Subscription {
         for process in &mut view.processes {
             process.protected = process.pid <= 1
                 || process.kernel
-                || process.user.as_deref() == Some(super::privd::AGENT_USER)
+                || process.user.as_deref() == Some(super::os::AGENT_ACCOUNT)
                 || process
                     .unit
                     .as_deref()

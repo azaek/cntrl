@@ -14,7 +14,6 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request, StatusCode, header};
 use hyper_util::rt::TokioIo;
-use tokio::net::UnixStream;
 
 use super::audit;
 use super::config::Config;
@@ -570,9 +569,10 @@ pub(super) async fn request(
     path: &str,
     body: Vec<u8>,
 ) -> Result<(StatusCode, Bytes), String> {
-    let stream = UnixStream::connect(socket)
+    let stream = os::connect(socket)
         .await
         .map_err(|e| format!("can't reach the agent at {}: {e}", socket.display()))?;
+    os::check_agent(&stream)?;
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
         .await
         .map_err(|e| e.to_string())?;

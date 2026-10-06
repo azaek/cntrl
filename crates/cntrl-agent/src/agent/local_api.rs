@@ -1,25 +1,20 @@
-//! The local API: HTTP and JSON over a Unix socket, for the `cntrl` CLI. Reads are
-//! open to the socket's group; anything that changes who controls the machine,
-//! or deletes what it recorded, needs a root peer. It also answers
+//! The local API: HTTP and JSON over a Unix socket, or a named pipe on
+//! Windows, for the `cntrl` CLI. Reads are open to whoever may connect;
+//! anything that changes who controls the machine, or deletes what it
+//! recorded, needs a root peer. It also answers
 //! `curl --unix-socket /run/cntrl-agent/agent.sock http://cntrl/v1/status`.
 
-use std::fs;
-use std::io;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::extract::connect_info::{self, ConnectInfo};
+use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::serve::IncomingStream;
 use axum::{Json, Router};
 use cntrl_protocol::ErrorCode;
 use cntrl_protocol::enroll::EnrollErrorCode;
 use cntrl_protocol::history::HistoryStore;
 use serde::{Deserialize, Serialize};
-use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
@@ -28,6 +23,7 @@ use super::health::Health;
 use super::history::History;
 use super::identity;
 use super::ipc::{self, Call};
+use super::os::{self, Peer};
 use super::policy::PolicyState;
 use super::uplink::{Uplink, UplinkStatus, now_ms};
 
@@ -111,65 +107,8 @@ pub struct PrivdStatus {
     pub policy: Option<PolicyState>,
 }
 
-/// The user on the other end of a connection, from the socket's credentials.
-#[derive(Debug, Clone, Copy)]
-struct Peer {
-    uid: Option<u32>,
-}
-
-impl connect_info::Connected<IncomingStream<'_, UnixListener>> for Peer {
-    fn connect_info(stream: IncomingStream<'_, UnixListener>) -> Self {
-        Self {
-            uid: stream.io().peer_cred().ok().map(|cred| cred.uid()),
-        }
-    }
-}
-
-/// The socket the service manager made for this process (systemd's through
-/// `LISTEN_FDS`, launchd's from the job's `Listeners` entry), or else `path`,
-/// bound here.
-pub fn listen(path: &Path) -> Result<UnixListener, String> {
-    match activated()? {
-        Some(listener) => {
-            listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-            UnixListener::from_std(listener).map_err(|e| e.to_string())
-        }
-        None => bind(path),
-    }
-}
-
-fn activated() -> Result<Option<std::os::unix::net::UnixListener>, String> {
-    #[cfg(target_os = "macos")]
-    if let Some(listener) = super::launchd::listener("Listeners") {
-        return Ok(Some(listener));
-    }
-    listenfd::ListenFd::from_env()
-        .take_unix_listener(0)
-        .map_err(|e| e.to_string())
-}
-
-/// Binds the socket, replacing a stale one from an earlier run. Mode 0660: the
-/// owner and its group, and root.
-pub fn bind(path: &Path) -> Result<UnixListener, String> {
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(format!(
-                "can't remove the stale socket {}: {e}",
-                path.display()
-            ));
-        }
-    }
-    let listener =
-        UnixListener::bind(path).map_err(|e| format!("can't bind {}: {e}", path.display()))?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o660))
-        .map_err(|e| format!("can't set permissions on {}: {e}", path.display()))?;
-    Ok(listener)
-}
-
 pub async fn serve(
-    listener: UnixListener,
+    listener: os::LocalListener,
     state: Arc<AgentState>,
     token: CancellationToken,
 ) -> Result<(), String> {
@@ -198,7 +137,7 @@ async fn enroll_device(
     State(state): State<Arc<AgentState>>,
     Json(command): Json<EnrollCommand>,
 ) -> Result<Json<EnrollOutcome>, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "enrolling changes who controls this machine; run `sudo cntrl enroll`".to_owned(),
@@ -231,7 +170,7 @@ async fn reload_policy(
     ConnectInfo(peer): ConnectInfo<Peer>,
     State(state): State<Arc<AgentState>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "only root changes the policy; run it with sudo".to_owned(),
@@ -272,7 +211,7 @@ async fn pause(
     State(state): State<Arc<AgentState>>,
     Json(command): Json<PauseCommand>,
 ) -> Result<Json<PauseOutcome>, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "pausing cuts Console off from this machine; run `sudo cntrl pause`".to_owned(),
@@ -299,7 +238,7 @@ async fn resume(
     ConnectInfo(peer): ConnectInfo<Peer>,
     State(state): State<Arc<AgentState>>,
 ) -> Result<Json<ResumeOutcome>, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "only root resumes the agent; run `sudo cntrl resume`".to_owned(),
@@ -343,7 +282,7 @@ async fn keep_history(
     State(state): State<Arc<AgentState>>,
     Json(command): Json<HistoryKeepCommand>,
 ) -> Result<Json<HistoryStore>, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "only root changes how much history is kept; run `sudo cntrl history keep`".to_owned(),
@@ -370,7 +309,7 @@ async fn clear_history(
     State(state): State<Arc<AgentState>>,
     Json(command): Json<HistoryClearCommand>,
 ) -> Result<Json<HistoryStore>, (StatusCode, String)> {
-    if peer.uid != Some(0) {
+    if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
             "only root clears the history; run `sudo cntrl history clear`".to_owned(),
@@ -413,6 +352,8 @@ async fn record(state: &AgentState, kind: &str, data: serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use hyper::Method;
 
     use super::super::client;
@@ -427,7 +368,7 @@ mod tests {
         tokio::task::JoinHandle<Result<(), String>>,
     ) {
         let socket = dir.join("agent.sock");
-        let listener = bind(&socket).expect("bind");
+        let listener = os::LocalListener::listen(&socket, os::Endpoint::Agent).expect("listen");
         let config = Config {
             paths: Paths {
                 privd_socket: dir.join("no-privd.sock"),
@@ -452,11 +393,15 @@ mod tests {
     async fn status_is_served_over_the_socket() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (socket, token, server) = start(dir.path());
-        let mode = fs::metadata(&socket)
-            .expect("socket metadata")
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o660);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&socket)
+                .expect("socket metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o660);
+        }
 
         let status = client::get_status(&socket).await.expect("status");
         assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
