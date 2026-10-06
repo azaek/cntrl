@@ -73,7 +73,7 @@ pub fn own_owner() -> Owner {
 
 /// Whether this process runs as SYSTEM or an elevated administrator.
 pub fn is_root() -> bool {
-    process_account(std::process::id()).is_root()
+    process_account(std::process::id()).is_some_and(|peer| peer.is_root())
 }
 
 /// Who may change who controls the machine, as a sentence names them.
@@ -256,7 +256,7 @@ pub type Account = String;
 
 /// The account this process runs as.
 pub fn own_account() -> Option<Account> {
-    process_account(std::process::id()).sid
+    process_account(std::process::id()).and_then(|peer| peer.sid)
 }
 
 /// Looks an account up by name, such as the agent's.
@@ -363,7 +363,9 @@ pub fn check_agent(stream: &LocalStream) -> Result<(), String> {
     if unsafe { GetNamedPipeServerProcessId(stream.as_raw_handle(), &mut pid) } == 0 {
         return Err("can't tell which program serves the agent's pipe".to_owned());
     }
-    let server = process_account(pid);
+    let Some(server) = process_account(pid) else {
+        return Err("can't tell which program serves the agent's pipe".to_owned());
+    };
     let trusted = [account(AGENT_ACCOUNT), own_account()];
     if server.system || (server.sid.is_some() && trusted.contains(&server.sid)) {
         Ok(())
@@ -383,6 +385,15 @@ pub struct Peer {
 }
 
 impl Peer {
+    /// An administrator whose process can't be opened to name them.
+    fn administrator() -> Self {
+        Self {
+            sid: None,
+            system: false,
+            administrator: true,
+        }
+    }
+
     /// SYSTEM or an elevated administrator, who may change who controls the
     /// machine.
     pub fn is_root(&self) -> bool {
@@ -397,6 +408,7 @@ impl Peer {
 /// A local endpoint that hands each connection over with its peer.
 pub struct LocalListener {
     path: PathBuf,
+    endpoint: Endpoint,
     descriptor: SecurityDescriptor,
     /// The instance waiting for the next client.
     next: NamedPipeServer,
@@ -405,7 +417,9 @@ pub struct LocalListener {
 impl LocalListener {
     /// Creates the pipe at `path`, failing if another program made it first.
     /// SYSTEM, Administrators and the account serving it may do anything with
-    /// it, and the agent's account may connect to privd's.
+    /// it, and the agent's account may connect to privd's. Administrators get
+    /// in only elevated, since a token that isn't holds the group for denying
+    /// alone. `accept` relies on nobody else getting in.
     pub fn listen(path: &Path, endpoint: Endpoint) -> Result<Self, String> {
         let mut sddl = String::from("D:P(A;;GA;;;SY)(A;;GA;;;BA)");
         if let Some(own) = own_account() {
@@ -419,6 +433,7 @@ impl LocalListener {
             .map_err(|e| format!("can't create the pipe {}: {e}", path.display()))?;
         Ok(Self {
             path: path.to_owned(),
+            endpoint,
             descriptor,
             next,
         })
@@ -434,10 +449,16 @@ impl LocalListener {
         let mut pid = 0u32;
         // SAFETY: the handle is a pipe's connected server end.
         let found = unsafe { GetNamedPipeClientProcessId(instance.as_raw_handle(), &mut pid) };
-        let peer = if found != 0 {
-            process_account(pid)
-        } else {
-            Peer::default()
+        let peer = match (found != 0).then(|| process_account(pid)).flatten() {
+            Some(peer) => peer,
+            // Only SYSTEM, elevated administrators and the agent's own account
+            // get into the agent's pipe (`listen`), and the agent can open its
+            // own account's processes, not an administrator's: one it can't
+            // open is SYSTEM's or an administrator's, such as an elevated
+            // `cntrl enroll`.
+            None if matches!(self.endpoint, Endpoint::Agent) => Peer::administrator(),
+            // privd, as SYSTEM, can open any process: one it can't is gone.
+            None => Peer::default(),
         };
         Ok((instance, peer))
     }
@@ -521,21 +542,22 @@ impl Drop for SecurityDescriptor {
 }
 
 /// A process's account: its user's SID, whether that's SYSTEM, and whether
-/// Administrators is enabled in its token. A process that's gone, or can't be
-/// opened, is nobody.
-fn process_account(pid: u32) -> Peer {
+/// Administrators is enabled in its token. `None` for a process that's gone,
+/// or that this process may not open, as the agent's account may not open an
+/// administrator's.
+fn process_account(pid: u32) -> Option<Peer> {
     let mut peer = Peer::default();
     // SAFETY: each call gets valid arguments; `Handle` closes each handle
     // when it goes out of scope.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
-            return peer;
+            return None;
         }
         let _process = Handle(process);
         let mut token: HANDLE = null_mut();
         if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-            return peer;
+            return None;
         }
         let _token = Handle(token);
         if let Some(buffer) = token_information(token, TokenUser) {
@@ -555,7 +577,7 @@ fn process_account(pid: u32) -> Peer {
             });
         }
     }
-    peer
+    Some(peer)
 }
 
 /// A token's information of one class, in a buffer aligned for its structs.
