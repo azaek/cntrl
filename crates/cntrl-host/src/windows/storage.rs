@@ -1,27 +1,33 @@
 //! The Storage tab on Windows (D58), readable by any account: the physical
 //! disks through storage queries on `\\.\PhysicalDriveN`, which ask for no
 //! access to their data, with I/O counters from IOCTL_DISK_PERFORMANCE and
-//! health from the disk's own failure prediction and temperature; and the
-//! volumes by drive letter, each with its label, filesystem, space and the
-//! disk it's on.
+//! health from the disk's own failure prediction and temperature, and an
+//! NVMe disk's health log, which privd reads as SYSTEM; and the volumes by
+//! drive letter, each with its label, filesystem, space and the disk it's
+//! on.
 
 use std::ptr::{null, null_mut};
 
 use cntrl_protocol::storage::{DiskHealth, DiskKind, DisksHealth, HealthStatus, Volume};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     BusType1394, BusTypeFileBackedVirtual, BusTypeMmc, BusTypeNvme, BusTypeSd, BusTypeUsb,
     BusTypeVirtual, CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
     GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
     IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
+use windows_sys::Win32::Storage::Nvme::NVME_LOG_PAGE_HEALTH_INFO;
 use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::{
     DEVICE_SEEK_PENALTY_DESCRIPTOR, DISK_GEOMETRY_EX, DISK_PERFORMANCE,
     IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_DISK_PERFORMANCE, IOCTL_STORAGE_PREDICT_FAILURE,
-    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
-    STORAGE_PREDICT_FAILURE, STORAGE_PROPERTY_ID, STORAGE_PROPERTY_QUERY,
-    STORAGE_TEMPERATURE_DATA_DESCRIPTOR, StorageDeviceProperty, StorageDeviceSeekPenaltyProperty,
+    IOCTL_STORAGE_QUERY_PROPERTY, NVMeDataTypeLogPage, PropertyStandardQuery, ProtocolTypeNvme,
+    STORAGE_DEVICE_DESCRIPTOR, STORAGE_PREDICT_FAILURE, STORAGE_PROPERTY_ID,
+    STORAGE_PROPERTY_QUERY, STORAGE_PROTOCOL_DATA_DESCRIPTOR, STORAGE_PROTOCOL_SPECIFIC_DATA,
+    STORAGE_TEMPERATURE_DATA_DESCRIPTOR, StorageDeviceProperty,
+    StorageDeviceProtocolSpecificProperty, StorageDeviceSeekPenaltyProperty,
     StorageDeviceTemperatureProperty, VOLUME_DISK_EXTENTS,
 };
 
@@ -113,40 +119,105 @@ fn disk(number: u32) -> Option<DiskReading> {
     })
 }
 
-/// What each disk, by name, says of its health: failing when its own
-/// prediction says so, and a warning when it's past its warning temperature.
-/// A disk that answers neither can't say.
+/// What each disk, by name, says of its health, judged as smartctl's is on
+/// Linux: failing when it predicts its own failure or an NVMe disk raises a
+/// critical warning; a warning when it's past its warning temperature or its
+/// rated life, or has had media errors. A disk that answers none of it can't
+/// say. Opened to read, as privd can, an NVMe disk also gives its wear and
+/// hours.
 pub fn health(disks: &[String]) -> DisksHealth {
-    let disks = disks
-        .iter()
-        .map(|name| {
-            let device = Device::open(&format!(r"\\.\{name}"));
-            let failing = device.as_ref().and_then(Device::predicts_failure);
-            let temperature = device.as_ref().and_then(Device::temperature);
-            let hot = temperature.is_some_and(|(now, warning)| warning > 0 && now >= warning);
-            let (status, detail) = match (failing, hot) {
-                (Some(true), _) => (
-                    HealthStatus::Failing,
-                    Some("it predicts its own failure".to_owned()),
-                ),
-                (_, true) => (
-                    HealthStatus::Warning,
-                    Some("it's past its warning temperature".to_owned()),
-                ),
-                (Some(false), false) => (HealthStatus::Ok, None),
-                (None, false) => (HealthStatus::Unknown, None),
-            };
-            DiskHealth {
-                disk: name.clone(),
-                status,
-                temperature: temperature.map(|(now, _)| f64::from(now)),
-                power_on_hours: None,
-                wear: None,
-                detail,
-            }
-        })
-        .collect();
+    let disks = disks.iter().map(|name| disk_health(name)).collect();
     DisksHealth { disks, note: None }
+}
+
+fn disk_health(name: &str) -> DiskHealth {
+    let path = format!(r"\\.\{name}");
+    let device = Device::open_reading(&path).or_else(|| Device::open(&path));
+    let failing = device.as_ref().and_then(Device::predicts_failure);
+    let nvme = device.as_ref().and_then(Device::nvme_health);
+    let temperature = device.as_ref().and_then(Device::temperature);
+    let mut failures: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    if failing == Some(true) {
+        failures.push("it predicts its own failure".to_owned());
+    }
+    if let Some(log) = &nvme {
+        let words = [
+            (0x01, "spare capacity below its threshold"),
+            (0x02, "temperature outside its limits"),
+            (0x04, "reliability degraded"),
+            (0x08, "media read-only"),
+            (0x10, "backup memory failed"),
+        ];
+        failures.extend(
+            words
+                .iter()
+                .filter(|(bit, _)| log.critical_warning & bit != 0)
+                .map(|(_, words)| (*words).to_owned()),
+        );
+        if log.percentage_used >= 100 {
+            warnings.push("past its rated life".to_owned());
+        }
+        if log.media_errors > 0 {
+            warnings.push(format!("{} media errors", log.media_errors));
+        }
+    }
+    if temperature.is_some_and(|(now, warning)| warning > 0 && now >= warning) {
+        warnings.push("past its warning temperature".to_owned());
+    }
+    let status = if !failures.is_empty() {
+        HealthStatus::Failing
+    } else if !warnings.is_empty() {
+        HealthStatus::Warning
+    } else if failing.is_some() || nvme.is_some() {
+        HealthStatus::Ok
+    } else {
+        HealthStatus::Unknown
+    };
+    let problems: Vec<String> = failures.into_iter().chain(warnings).collect();
+    DiskHealth {
+        disk: name.to_owned(),
+        status,
+        temperature: nvme
+            .as_ref()
+            .and_then(|log| log.celsius())
+            .or(temperature.map(|(now, _)| f64::from(now))),
+        power_on_hours: nvme.as_ref().map(|log| log.power_on_hours),
+        wear: nvme.as_ref().map(|log| u32::from(log.percentage_used)),
+        detail: (!problems.is_empty()).then(|| problems.join(", ")),
+    }
+}
+
+/// What an NVMe disk's SMART / Health Information log says (log page 2).
+#[derive(Debug, Clone, Copy)]
+struct NvmeHealth {
+    critical_warning: u8,
+    /// Kelvin, as the log keeps it; 0 when it doesn't say.
+    composite_temperature: u16,
+    /// Of its rated life; it can pass 100.
+    percentage_used: u8,
+    power_on_hours: u64,
+    media_errors: u64,
+}
+
+impl NvmeHealth {
+    /// From the log's 512 bytes, as the NVMe specification lays them out.
+    fn parse(log: &[u8]) -> Option<Self> {
+        let low_64 = |at: usize| -> Option<u64> {
+            Some(u64::from_le_bytes(log.get(at..at + 8)?.try_into().ok()?))
+        };
+        Some(Self {
+            critical_warning: *log.first()?,
+            composite_temperature: u16::from_le_bytes(log.get(1..3)?.try_into().ok()?),
+            percentage_used: *log.get(5)?,
+            power_on_hours: low_64(128)?,
+            media_errors: low_64(160)?,
+        })
+    }
+
+    fn celsius(&self) -> Option<f64> {
+        (self.composite_temperature > 0).then(|| f64::from(self.composite_temperature) - 273.15)
+    }
 }
 
 fn volumes() -> Vec<Volume> {
@@ -242,13 +313,24 @@ fn disk_of(root: &str) -> Option<String> {
 struct Device(HANDLE);
 
 impl Device {
+    /// Opened for queries alone, as any account may.
     fn open(path: &str) -> Option<Self> {
+        Self::open_with(path, 0)
+    }
+
+    /// Opened to read and write, which an NVMe disk's health log needs and
+    /// only an administrator gets; nothing is written.
+    fn open_reading(path: &str) -> Option<Self> {
+        Self::open_with(path, GENERIC_READ | GENERIC_WRITE)
+    }
+
+    fn open_with(path: &str, access: u32) -> Option<Self> {
         let path = wide(path);
-        // SAFETY: a NUL-terminated path; no access to the data is asked for.
+        // SAFETY: a NUL-terminated path.
         let handle = unsafe {
             CreateFileW(
                 path.as_ptr(),
-                0,
+                access,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 null(),
                 OPEN_EXISTING,
@@ -257,6 +339,66 @@ impl Device {
             )
         };
         (handle != INVALID_HANDLE_VALUE && !handle.is_null()).then_some(Self(handle))
+    }
+
+    /// An NVMe disk's health log, through a protocol query, as Microsoft's
+    /// "Working with NVMe drives" shows.
+    fn nvme_health(&self) -> Option<NvmeHealth> {
+        // The query and the data share the buffer: the query's header, then
+        // the protocol's request where its parameters go, then the log.
+        const HEADER: usize = 8;
+        const REQUEST: usize = size_of::<STORAGE_PROTOCOL_SPECIFIC_DATA>();
+        const LOG: usize = 512;
+        let mut buffer = [0u32; (HEADER + REQUEST + LOG) / 4];
+        let bytes = size_of_val(&buffer);
+        let request = STORAGE_PROTOCOL_SPECIFIC_DATA {
+            ProtocolType: ProtocolTypeNvme,
+            DataType: u32::try_from(NVMeDataTypeLogPage).ok()?,
+            ProtocolDataRequestValue: u32::try_from(NVME_LOG_PAGE_HEALTH_INFO).ok()?,
+            ProtocolDataRequestSubValue: 0,
+            ProtocolDataOffset: u32::try_from(REQUEST).ok()?,
+            ProtocolDataLength: u32::try_from(LOG).ok()?,
+            FixedProtocolReturnData: 0,
+            ProtocolDataRequestSubValue2: 0,
+            ProtocolDataRequestSubValue3: 0,
+            ProtocolDataRequestSubValue4: 0,
+        };
+        // SAFETY: the buffer holds the query's two ids, then the request.
+        unsafe {
+            let base = buffer.as_mut_ptr();
+            base.cast::<STORAGE_PROPERTY_ID>()
+                .write(StorageDeviceProtocolSpecificProperty);
+            base.add(1).cast::<i32>().write(PropertyStandardQuery);
+            base.add(2)
+                .cast::<STORAGE_PROTOCOL_SPECIFIC_DATA>()
+                .write(request);
+        }
+        let returned = self.control(
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            buffer.as_ptr().cast(),
+            bytes,
+            buffer.as_mut_ptr().cast(),
+            bytes,
+        )?;
+        // SAFETY: the call wrote a protocol data descriptor at the start.
+        let answer = unsafe {
+            buffer
+                .as_ptr()
+                .cast::<STORAGE_PROTOCOL_DATA_DESCRIPTOR>()
+                .read()
+        };
+        let data = answer.ProtocolSpecificData;
+        let offset = HEADER + usize::try_from(data.ProtocolDataOffset).ok()?;
+        let length = usize::try_from(data.ProtocolDataLength).ok()?;
+        if data.ProtocolDataOffset < u32::try_from(REQUEST).ok()?
+            || length < LOG
+            || returned < offset + LOG
+        {
+            return None;
+        }
+        // SAFETY: `returned` bytes, the log among them, were written.
+        let all = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes) };
+        NvmeHealth::parse(all.get(offset..offset + LOG)?)
     }
 
     /// One DeviceIoControl call; the bytes it returned.
@@ -409,6 +551,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reads_an_nvme_health_log() {
+        let mut log = [0u8; 512];
+        // Reliability degraded, at 310 K, 7% of its life used.
+        log[0] = 0x04;
+        log[1..3].copy_from_slice(&310u16.to_le_bytes());
+        log[5] = 7;
+        log[128..136].copy_from_slice(&1234u64.to_le_bytes());
+        log[160..168].copy_from_slice(&2u64.to_le_bytes());
+        let health = NvmeHealth::parse(&log).expect("a log");
+        assert_eq!(health.critical_warning, 0x04);
+        assert_eq!(health.percentage_used, 7);
+        assert_eq!(health.power_on_hours, 1234);
+        assert_eq!(health.media_errors, 2);
+        let celsius = health.celsius().expect("a temperature");
+        assert!((celsius - 36.85).abs() < 0.01, "{celsius}");
+        assert!(NvmeHealth::parse(&log[..100]).is_none());
+    }
+
+    #[test]
     fn reads_this_machines_storage() {
         let storage = WinStorage;
         let volumes = storage.volumes();
@@ -428,5 +589,8 @@ mod tests {
                 .is_some_and(|name| disks.iter().any(|disk| &disk.name == name)),
             "{system:?} {disks:?}"
         );
+        let names: Vec<String> = disks.iter().map(|disk| disk.name.clone()).collect();
+        let health = health(&names);
+        assert_eq!(health.disks.len(), names.len());
     }
 }

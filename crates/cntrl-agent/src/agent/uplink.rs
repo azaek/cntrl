@@ -1289,8 +1289,9 @@ async fn listeners(_privd: &Path, _limit: Duration) -> Result<Listeners, CallErr
 
 /// What each physical disk says of its health, leaving out a hypervisor's,
 /// which have none of their own (angle 13). On Linux smartctl reads the raw
-/// device, so privd runs it.
-#[cfg(target_os = "linux")]
+/// device, so privd runs it; on Windows privd reads an NVMe disk's health
+/// log, which takes an administrator (D58).
+#[cfg(any(target_os = "linux", windows))]
 async fn disk_health(privd: &Path, limit: Duration) -> Result<DisksHealth, CallError> {
     let disks = physical_disks().await?;
     if disks.is_empty() {
@@ -1308,18 +1309,6 @@ async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, Cal
         return Ok(only_virtual());
     }
     tokio::task::spawn_blocking(move || cntrl_host::storage::mac::health(&disks))
-        .await
-        .map_err(|e| CallError::internal(e.to_string()))
-}
-
-/// On Windows the disks answer storage queries from any account (D58).
-#[cfg(windows)]
-async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, CallError> {
-    let disks = physical_disks().await?;
-    if disks.is_empty() {
-        return Ok(only_virtual());
-    }
-    tokio::task::spawn_blocking(move || cntrl_host::windows::storage::health(&disks))
         .await
         .map_err(|e| CallError::internal(e.to_string()))
 }

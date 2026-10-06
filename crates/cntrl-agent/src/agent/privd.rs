@@ -378,7 +378,19 @@ async fn disk_health(disks: Vec<String>) -> Result<Value, CallError> {
     serde_json::to_value(health).map_err(|e| CallError::internal(e.to_string()))
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Each disk's health, an NVMe disk's health log among it, which takes an
+/// administrator to read (D58).
+#[cfg(windows)]
+async fn disk_health(disks: Vec<String>) -> Result<Value, CallError> {
+    blocking(move || {
+        serde_json::to_value(cntrl_host::windows::storage::health(&disks))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(CallError::internal)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 async fn disk_health(_disks: Vec<String>) -> Result<Value, CallError> {
     let reason = "on this OS the agent asks diskutil itself";
     Err(CallError::new(ErrorCode::BadRequest, reason))

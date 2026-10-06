@@ -57,6 +57,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Nvme",
     "Win32_System_EventLog",
     "Win32_System_IO",
     "Win32_System_Ioctl",
