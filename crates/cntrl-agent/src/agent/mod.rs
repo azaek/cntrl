@@ -6,7 +6,9 @@ mod audit;
 mod cli;
 mod client;
 mod config;
+mod containers;
 mod digest;
+mod docker;
 mod enroll;
 mod health;
 mod history;
@@ -124,6 +126,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let latest_processes = Arc::new(processes::Latest::new(None));
         let latest_network = Arc::new(network::Latest::new(None));
         let latest_storage = Arc::new(storage::Latest::new(None));
+        let latest_containers = Arc::new(containers::Latest::new(None));
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
         let alert_rules = Arc::new(alerts::Alerts::open(&state_dir).await);
@@ -137,6 +140,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             processes: Arc::clone(&latest_processes),
             network: Arc::clone(&latest_network),
             storage: Arc::clone(&latest_storage),
+            containers: Arc::clone(&latest_containers),
             outbox: Arc::clone(&outbox),
             alerts: Arc::clone(&alert_rules),
             history: Arc::clone(&history),
@@ -167,6 +171,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
                 Arc::clone(&alert_rules),
                 Arc::clone(&latest_stats),
                 Arc::clone(&outbox),
+                privd_socket.clone(),
                 token.clone(),
             ),
         );
@@ -187,6 +192,10 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
                 cntrl_host::storage::backend(),
                 token.clone(),
             ),
+        );
+        supervisor.spawn(
+            "containers",
+            containers::run(latest_containers, privd_socket.clone(), token.clone()),
         );
         supervisor.spawn("uplink", uplink::run(uplink_config, uplink, token));
 

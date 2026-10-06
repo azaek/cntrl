@@ -1,0 +1,1 @@
+{"t":"evt","sub":"01JC0000000000000000000SBN","seq":1,"data":{"ts":1791000006000,"containers":[],"note":"No Docker or Podman here: there's no /var/run/docker.sock or /run/podman/podman.sock."}}

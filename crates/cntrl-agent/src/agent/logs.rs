@@ -230,18 +230,23 @@ impl Sampler {
 }
 
 /// A ticker for [`FLUSH`] that doesn't catch up on ticks it missed.
-fn flush_timer() -> tokio::time::Interval {
+pub(super) fn flush_timer() -> tokio::time::Interval {
     let mut flush = tokio::time::interval(FLUSH);
     flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     flush
 }
 
 #[cfg(target_os = "linux")]
-async fn read(id: &str, params: &LogsParams, _privd: &Path, out: &Batches) -> String {
+async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
     use cntrl_host::journal;
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::uplink::now_ms;
+
+    // The Docker socket is root's, so privd reads a container's log (D54).
+    if params.container.is_some() {
+        return through_privd(id, params, privd, out).await;
+    }
 
     let started = now_ms();
     let mut child = match journal::command(params).spawn() {
@@ -299,11 +304,15 @@ async fn read(id: &str, params: &LogsParams, _privd: &Path, out: &Batches) -> St
     }
 }
 
-/// On a Mac, privd reads the log as root and answers the one request with
-/// batches until the agent hangs up, which is how the subscription closing
-/// stops it.
+/// On a Mac every log, and on Linux a container's (D54), comes through privd.
 #[cfg(target_os = "macos")]
 async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
+    through_privd(id, params, privd, out).await
+}
+
+/// privd reads the log as root and answers the one request with batches until
+/// the agent hangs up, which is how the subscription closing stops it.
+async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
     use super::ipc::{self, Call, Request, Response};
 
     let stream = match tokio::net::UnixStream::connect(privd).await {

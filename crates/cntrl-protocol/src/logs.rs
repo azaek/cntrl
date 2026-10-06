@@ -18,6 +18,10 @@ pub struct LogsParams {
     /// the system's service when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// A container's log instead, by its ID or name (D54); it needs
+    /// `containers.read` as well.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
     /// The least important to show, as a syslog priority: 0 (emergency) to
     /// 7 (debug); everything when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]

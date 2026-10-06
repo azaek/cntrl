@@ -7,6 +7,7 @@ pub mod app;
 pub mod auth;
 pub mod capability;
 pub mod codes;
+pub mod containers;
 pub mod enroll;
 pub mod frame;
 pub mod history;

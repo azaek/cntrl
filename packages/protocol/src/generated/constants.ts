@@ -37,6 +37,8 @@ export const CAPABILITIES = [
     "logs.read",
     "network.read",
     "history.manage",
+    "containers.read",
+    "containers.manage",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -49,4 +51,5 @@ export const MONITOR_ONLY: readonly Capability[] = [
     "services.read",
     "logs.read",
     "network.read",
+    "containers.read",
 ];

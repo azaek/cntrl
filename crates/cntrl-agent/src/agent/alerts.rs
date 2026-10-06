@@ -1,8 +1,8 @@
 //! Alert rules this device decides itself (D43; plans/alerts.md phase 2). The
 //! hub sends the rules that cover it in an `alerts` frame. Once a minute the
 //! agent judges each metric rule by the minute's average of its reading, so a
-//! spike never counts; every 15 seconds it checks the services its rules
-//! name. A rule fires once its condition has held for its `minutes`, as
+//! spike never counts; every 15 seconds it checks the services and containers
+//! (D54) its rules name. A rule fires once its condition has held for its `minutes`, as
 //! Prometheus's `for` does: a metric's for that many minutes in a row, a
 //! service's at every check across them. It resolves after a short run back,
 //! as Grafana's "keep firing for" does. Firing and resolving go out as `alert`
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cntrl_protocol::alerts::{AlertMetric, AlertOp, AlertRule, AlertRuleKind};
+use cntrl_protocol::containers::{Container, ContainerState};
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::records::{AlertRecord, AlertState};
 use cntrl_protocol::service::{ServiceState, ServiceStatus};
@@ -27,6 +28,8 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use super::docker::Listing;
+use super::ipc::{self, Call};
 use super::outbox::Outbox;
 use super::stats::Latest;
 use super::uplink::now_ms;
@@ -109,6 +112,7 @@ pub async fn run(
     alerts: Arc<Alerts>,
     latest: Arc<Latest>,
     outbox: Arc<Outbox>,
+    privd: PathBuf,
     token: CancellationToken,
 ) -> Result<(), String> {
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + CHECK, CHECK);
@@ -137,12 +141,20 @@ pub async fn run(
                 } else {
                     None
                 };
+                let containers = if known.iter().any(|rule| rule.kind == AlertRuleKind::Container) {
+                    list_containers(&privd).await
+                } else {
+                    None
+                };
                 let now = now_ms();
                 let records = {
                     let mut saved = alerts.saved.lock().await;
                     let mut records = Vec::new();
                     if let Some(services) = &services {
                         records.extend(check_services(&known, &mut judges, &mut saved.firing, services, now));
+                    }
+                    if let Some(containers) = &containers {
+                        records.extend(check_containers(&known, &mut judges, &mut saved.firing, containers, now));
                     }
                     if minute_ends {
                         records.extend(judge_minute(&known, &mut judges, &mut saved.firing, &minute, minute_start, now));
@@ -321,6 +333,60 @@ fn check_services(
     records
 }
 
+/// Checks every container rule against the containers as they are now, and
+/// says what fired or resolved (D54).
+fn check_containers(
+    rules: &[AlertRule],
+    judges: &mut HashMap<String, Judge>,
+    firing: &mut BTreeMap<String, Firing>,
+    containers: &[Container],
+    now: u64,
+) -> Vec<AlertRecord> {
+    let mut records = Vec::new();
+    for rule in rules
+        .iter()
+        .filter(|rule| rule.kind == AlertRuleKind::Container)
+    {
+        let Some(target) = rule.target.as_deref() else {
+            continue;
+        };
+        let past = !container_running(containers, target);
+        let judge = judge_of(judges, rule);
+        if let Some(record) = step(rule, judge, firing, Some(past), None, now, now) {
+            records.push(record);
+        }
+    }
+    records
+}
+
+/// The containers, as privd lists them; none when there's no engine to ask or
+/// it didn't answer, which judges nothing.
+async fn list_containers(privd: &Path) -> Option<Vec<Container>> {
+    let value = ipc::call_within(privd, Call::Containers { counters: false }, LIST_LIMIT)
+        .await
+        .ok()?;
+    let listing: Listing = serde_json::from_value(value).ok()?;
+    if listing.engine.is_none() || listing.note.is_some() {
+        return None;
+    }
+    Some(
+        listing
+            .containers
+            .into_iter()
+            .map(|listed| listed.container)
+            .collect(),
+    )
+}
+
+/// Whether a container runs: one named so, or any of a Compose service's
+/// replicas. One gone counts as down.
+fn container_running(containers: &[Container], target: &str) -> bool {
+    containers.iter().any(|container| {
+        (container.name == target || container.service.as_deref() == Some(target))
+            && container.state == ContainerState::Running
+    })
+}
+
 fn judge_of<'a>(judges: &'a mut HashMap<String, Judge>, rule: &AlertRule) -> &'a mut Judge {
     judges.entry(rule.id.clone()).or_insert_with(|| Judge {
         rev: rule.rev,
@@ -333,7 +399,7 @@ fn judge_of<'a>(judges: &'a mut HashMap<String, Judge>, rule: &AlertRule) -> &'a
 /// spans a minute only from its first to its fifth.
 fn needs(rule: &AlertRule) -> (u32, u32) {
     match rule.kind {
-        AlertRuleKind::Service => (
+        AlertRuleKind::Service | AlertRuleKind::Container => (
             rule.minutes
                 .max(1)
                 .saturating_mul(CHECKS_PER_MINUTE)
@@ -774,6 +840,77 @@ mod tests {
             assert_eq!(check(&up, second), None);
         }
         assert_eq!(check(&up, 270), Some((AlertState::Resolved, 75_000)));
+    }
+
+    fn replica(name: &str, service: Option<&str>, state: ContainerState) -> Container {
+        Container {
+            id: name.to_owned(),
+            name: name.to_owned(),
+            image: "nginx".to_owned(),
+            project: service.map(|_| "app".to_owned()),
+            service: service.map(str::to_owned),
+            state,
+            health: None,
+            status: String::new(),
+            created: 0,
+            ports: Vec::new(),
+            cpu: None,
+            memory: None,
+            memory_limit: None,
+            network: None,
+        }
+    }
+
+    #[test]
+    fn a_container_rule_goes_by_name_or_compose_service_and_fires_like_a_service() {
+        let running = [
+            replica("app-web-1", Some("web"), ContainerState::Running),
+            replica("app-web-2", Some("web"), ContainerState::Exited),
+            replica("cache", None, ContainerState::Running),
+        ];
+        assert!(container_running(&running, "web"));
+        assert!(container_running(&running, "cache"));
+        assert!(container_running(&running, "app-web-1"));
+        assert!(!container_running(&running, "app-web-2"));
+        // Gone counts as down.
+        assert!(!container_running(&running, "db"));
+
+        let rule = AlertRule {
+            id: "alr_web".to_owned(),
+            rev: 1,
+            kind: AlertRuleKind::Container,
+            minutes: 1,
+            metric: None,
+            target: Some("web".to_owned()),
+            op: None,
+            threshold: None,
+        };
+        let down = [replica(
+            "app-web-1",
+            Some("web"),
+            ContainerState::Restarting,
+        )];
+        let mut judges = HashMap::new();
+        let mut firing = BTreeMap::new();
+        let mut check = |containers: &[Container], second: u64| {
+            check_containers(
+                std::slice::from_ref(&rule),
+                &mut judges,
+                &mut firing,
+                containers,
+                second * 1000,
+            )
+            .pop()
+            .map(|record| (record.state, record.since))
+        };
+        for second in [0, 15, 30, 45] {
+            assert_eq!(check(&down, second), None);
+        }
+        assert_eq!(check(&down, 60), Some((AlertState::Firing, 0)));
+        for second in [75, 90, 105, 120] {
+            assert_eq!(check(&running, second), None);
+        }
+        assert_eq!(check(&running, 135), Some((AlertState::Resolved, 0)));
     }
 
     #[test]

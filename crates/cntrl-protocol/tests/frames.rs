@@ -6,6 +6,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+use cntrl_protocol::containers::{
+    ContainerHealth, ContainerJob, ContainerState, ContainersSample, EngineKind,
+};
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams, HistoryStore};
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
@@ -275,4 +278,32 @@ fn history_frames_decode() {
     let cleared: HistoryStore =
         serde_json::from_value(data_of("res-history-clear.json")).expect("a store");
     assert_eq!(cleared.oldest, None);
+}
+
+#[test]
+fn container_frames_decode() {
+    let sample: ContainersSample =
+        serde_json::from_value(data_of("evt-containers.json")).expect("a containers sample");
+    assert_eq!(
+        sample.engine.as_ref().map(|engine| engine.kind),
+        Some(EngineKind::Docker)
+    );
+    assert_eq!(sample.containers[0].health, Some(ContainerHealth::Healthy));
+    assert_eq!(sample.containers[0].service.as_deref(), Some("web"));
+    assert_eq!(sample.containers[1].state, ContainerState::Exited);
+    assert_eq!(sample.containers[1].cpu, None);
+    let none: ContainersSample =
+        serde_json::from_value(data_of("evt-containers-none.json")).expect("a sample");
+    assert!(none.engine.is_none() && none.note.is_some());
+    let job: ContainerJob =
+        serde_json::from_value(data_of("res-container-restart.json")).expect("a job");
+    assert_eq!(job.state, ContainerState::Running);
+    let Call::ContainerRestart(target) =
+        Call::decode("container.restart", json!({"id": "app-web-1"})).expect("decodes")
+    else {
+        panic!("container.restart isn't ContainerRestart");
+    };
+    assert_eq!(target.id, "app-web-1");
+    let newer: ContainerState = serde_json::from_value(json!("hibernating")).expect("parses");
+    assert_eq!(newer, ContainerState::Unknown);
 }

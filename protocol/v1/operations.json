@@ -201,6 +201,39 @@
       }
     },
     {
+      "name": "container.start",
+      "capability": "containers.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ContainerRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ContainerJob"
+      }
+    },
+    {
+      "name": "container.stop",
+      "capability": "containers.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ContainerRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ContainerJob"
+      }
+    },
+    {
+      "name": "container.restart",
+      "capability": "containers.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ContainerRef"
+      },
+      "result": {
+        "$ref": "#/$defs/ContainerJob"
+      }
+    },
+    {
       "name": "history.clear",
       "capability": "history.manage",
       "since": 1,
@@ -266,6 +299,17 @@
       },
       "event": {
         "$ref": "#/$defs/StorageSample"
+      }
+    },
+    {
+      "name": "containers",
+      "capability": "containers.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/ContainersParams"
+      },
+      "event": {
+        "$ref": "#/$defs/ContainersSample"
       }
     }
   ]

@@ -114,6 +114,23 @@ pub enum Call {
     DiskHealth {
         disks: Vec<String>,
     },
+    /// The Docker or Podman containers, with each running one's counters when
+    /// asked (D54): the engine's socket is root's. privd checks the policy
+    /// itself.
+    Containers {
+        #[serde(default)]
+        counters: bool,
+    },
+    /// Starts, stops or restarts a container for a request from Console.
+    /// privd checks the policy and audits it, as with services. Not `id`: the
+    /// call is flattened into an envelope that has one.
+    ContainerAct {
+        request_id: String,
+        container: String,
+        action: super::docker::Action,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+    },
 }
 
 /// Why privd refused or failed a call, with the protocol code to answer with.
@@ -304,6 +321,13 @@ mod tests {
             Call::Power {
                 request_id: "req_5".to_owned(),
                 action: PowerAction::Reboot,
+                actor: None,
+            },
+            Call::Containers { counters: true },
+            Call::ContainerAct {
+                request_id: "req_6".to_owned(),
+                container: "app-web-1".to_owned(),
+                action: super::super::docker::Action::Restart,
                 actor: None,
             },
         ];

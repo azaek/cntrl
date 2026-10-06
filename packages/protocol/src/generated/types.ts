@@ -78,6 +78,7 @@ export interface AlertRule {
      * What the reading is of: a mount point for a disk, a sensor kind (`cpu`,
      * `gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.
      * For a `service` rule, the service's name, as `service.restart` takes it.
+     * For a `container` rule, the container's Compose service or its name.
      */
     target?: string | null;
     op?: AlertOp | null;
@@ -89,7 +90,7 @@ export interface AlertRule {
     threshold?: number | null;
 }
 
-export type AlertRuleKind = "metric" | "service" | "unknown";
+export type AlertRuleKind = "metric" | "service" | "container" | "unknown";
 
 /** Every rule this device decides, replacing any before. */
 export interface AlertRules {
@@ -157,6 +158,97 @@ export interface Challenge {
     /** Session ID, also covered by the signature. */
     sid: string;
     nonce: string;
+}
+
+/**
+ * A container, and for a running one what it used since the previous
+ * reading.
+ */
+export interface Container {
+    /** The first 12 characters of its ID, as `docker ps` shows them. */
+    id: string;
+    name: string;
+    image: string;
+    /** Its Compose project, for a container Compose made. */
+    project?: string | null;
+    /** Its service in that project. */
+    service?: string | null;
+    state: ContainerState;
+    /** What its health check says, for one that has a check. */
+    health?: ContainerHealth | null;
+    /** The engine's own words, such as `Up 3 hours (healthy)`. */
+    status: string;
+    /** When it was made, in Unix milliseconds. */
+    created: number;
+    ports: ContainerPort[];
+    /** Its share of the whole machine's CPU, from 0 to 1. */
+    cpu?: number | null;
+    /** Memory in use, without the file cache, in bytes. */
+    memory?: number | null;
+    /** What it may use, in bytes: its limit, or the machine's memory. */
+    memory_limit?: number | null;
+    /** Bytes per second in and out, over all its networks. */
+    network?: ContainerNetwork | null;
+}
+
+export type ContainerHealth = ("starting" | "healthy" | "unhealthy") | "unknown";
+
+/** How an action on a container went. */
+export interface ContainerJob {
+    id: string;
+    /** Its state once the engine was done. */
+    state: ContainerState;
+}
+
+/** Bytes per second. */
+export interface ContainerNetwork {
+    received: number;
+    sent: number;
+}
+
+/** A port a container exposes, and where the machine publishes it. */
+export interface ContainerPort {
+    /** The machine's address it's published on; absent for every address. */
+    ip?: string | null;
+    /** The port inside the container. */
+    private: number;
+    /** The machine's port, when it's published. */
+    public?: number | null;
+    /** `tcp`, `udp` or `sctp`. */
+    protocol: string;
+}
+
+/**
+ * The container `container.start`, `container.stop` and `container.restart`
+ * act on.
+ */
+export interface ContainerRef {
+    /** Its ID, or the first 12 characters of it, or its name. */
+    id: string;
+}
+
+export type ContainerState =
+    | ("created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead")
+    | "unknown";
+
+/** What a `containers` subscription asks for. */
+export interface ContainersParams {
+    /** How often to send, in milliseconds: 3000 when absent, 2000 at least. */
+    interval_ms?: number | null;
+}
+
+/** One `containers` event. */
+export interface ContainersSample {
+    /** When it was read, in Unix milliseconds. */
+    ts: number;
+    /** The engine that answered; none when there's none to ask. */
+    engine?: Engine | null;
+    containers: Container[];
+    /**
+     * Why there's no list, in a few words: no engine found, or it didn't
+     * answer.
+     */
+    note?: string | null;
 }
 
 /** The CPU. */
@@ -256,6 +348,15 @@ export interface DisksHealth {
      */
     note?: string | null;
 }
+
+/** A container engine. */
+export interface Engine {
+    kind: EngineKind;
+    /** As the engine gives it, such as `29.8.2`. */
+    version: string;
+}
+
+export type EngineKind = ("docker" | "podman") | "unknown";
 
 /** Why an enrollment failed. */
 export interface EnrollError {
@@ -671,6 +772,11 @@ export interface LogsParams {
      * the system's service when absent.
      */
     user?: string | null;
+    /**
+     * A container's log instead, by its ID or name (D54); it needs
+     * `containers.read` as well.
+     */
+    container?: string | null;
     /**
      * The least important to show, as a syslog priority: 0 (emergency) to
      * 7 (debug); everything when absent.

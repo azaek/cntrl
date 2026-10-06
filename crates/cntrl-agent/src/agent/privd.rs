@@ -16,6 +16,7 @@ use cntrl_host::HostError;
 use cntrl_host::services::service_name;
 use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::codes::ErrorCode;
+use cntrl_protocol::containers::ContainerJob;
 use cntrl_protocol::frame::Actor;
 use cntrl_protocol::logs::LogsParams;
 use cntrl_protocol::power::{PowerAction, PowerStarted};
@@ -27,6 +28,7 @@ use tracing::{error, info, warn};
 
 use super::audit::AuditLog;
 use super::config::Config;
+use super::docker;
 use super::ipc::{self, Call, CallError, Request, Response};
 use super::keys::SigningKey;
 use super::{local_api, logging, policy};
@@ -277,7 +279,75 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             }
             disk_health(disks).await
         }
+        Call::Containers { counters } => {
+            if !policy::load(&state.policy_path, state.owner).allows("containers.read") {
+                let reason = "the device policy doesn't allow containers.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            serde_json::to_value(docker::list(counters).await)
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        Call::ContainerAct {
+            request_id,
+            container,
+            action,
+            actor,
+        } => act_on_container(state, request_id, container, action, actor).await,
     }
+}
+
+/// Starts, stops or restarts a container (D54): checks the policy, audits the
+/// request, acts through the engine and audits how it went.
+async fn act_on_container(
+    state: Arc<State>,
+    id: String,
+    container: String,
+    action: docker::Action,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    let container = docker::container_name(&container)
+        .map_err(|e| CallError::new(ErrorCode::BadRequest, e))?
+        .to_owned();
+    let request = json!({
+        "id": id,
+        "op": action.op(),
+        "container": container,
+        "actor": actor,
+    });
+    if !policy::load(&state.policy_path, state.owner).allows("containers.manage") {
+        let reason = "the device policy doesn't allow containers.manage";
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    let (record, answer) = match docker::act(&container, action).await {
+        Ok(after) => (
+            json!({ "id": id, "state": after }),
+            serde_json::to_value(ContainerJob {
+                id: container,
+                state: after,
+            })
+            .map_err(|e| CallError::internal(e.to_string())),
+        ),
+        Err(e) => {
+            let code = if e.starts_with("No such container") {
+                ErrorCode::NotFound
+            } else {
+                ErrorCode::Internal
+            };
+            (
+                json!({ "id": id, "error": e }),
+                Err(CallError::new(code, e)),
+            )
+        }
+    };
+    audit(&state, "request.completed", record).await?;
+    answer
 }
 
 /// Every port listened on, from lsof as root (angle 13).
@@ -686,11 +756,10 @@ async fn blocking(
         .map_err(|e| e.to_string())?
 }
 
-/// Answers a `log_stream` call on a Mac (angle 11 part 3): checks the policy,
+/// Answers a `log_stream` call (angle 11 part 3, D54): checks the policy,
 /// finds where the log comes from, then sends batches as answers to the one
 /// request until the log stops, which the last says why, or the agent hangs
-/// up, which ends `log` and `tail`.
-#[cfg(target_os = "macos")]
+/// up, which ends what reads it.
 async fn stream_logs(state: &Arc<State>, id: u64, params: LogsParams, channel: ipc::Channel) {
     use cntrl_protocol::logs::LogsBatch;
     use futures_util::{SinkExt, StreamExt};
@@ -700,24 +769,28 @@ async fn stream_logs(state: &Arc<State>, id: u64, params: LogsParams, channel: i
         let frame = serde_json::to_vec(&Response::from_result(id, result)).unwrap_or_default();
         sink.send(bytes::Bytes::from(frame)).await.is_ok()
     };
-    if !policy::load(&state.policy_path, state.owner).allows("logs.read") {
+    let policy = policy::load(&state.policy_path, state.owner);
+    let needs: &[&str] = if params.container.is_some() {
+        &["logs.read", "containers.read"]
+    } else {
+        &["logs.read"]
+    };
+    if let Some(missing) = needs.iter().find(|capability| !policy.allows(capability)) {
         let refused = CallError::new(
             ErrorCode::PolicyDenied,
-            "the device policy doesn't allow logs.read",
+            format!("the device policy doesn't allow {missing}"),
         );
         answer(Err(refused)).await;
         return;
     }
-    let source = match log_source(&params).await {
-        Ok(source) => source,
+    let (out, mut batches) = tokio::sync::mpsc::channel(16);
+    let mut reader = match log_reader(params, out).await {
+        Ok(reader) => reader,
         Err(e) => {
             answer(Err(e)).await;
             return;
         }
     };
-    let (out, mut batches) = tokio::sync::mpsc::channel(16);
-    let mut reader =
-        tokio::spawn(async move { super::logs::mac::read(&params, &source, &out).await });
     let reason = loop {
         tokio::select! {
             batch = batches.recv() => match batch {
@@ -743,6 +816,34 @@ async fn stream_logs(state: &Arc<State>, id: u64, params: LogsParams, channel: i
         ..LogsBatch::default()
     };
     answer(Ok(serde_json::to_value(&last).unwrap_or_default())).await;
+}
+
+/// What reads a subscription's log: a container's through its engine, on any
+/// OS (D54); on a Mac, the unified log or a launchd job's.
+async fn log_reader(
+    params: LogsParams,
+    out: tokio::sync::mpsc::Sender<cntrl_protocol::logs::LogsBatch>,
+) -> Result<tokio::task::JoinHandle<String>, CallError> {
+    if params.container.is_some() {
+        return Ok(tokio::spawn(async move {
+            docker::read_logs(&params, &out).await
+        }));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let source = log_source(&params).await?;
+        Ok(tokio::spawn(async move {
+            super::logs::mac::read(&params, &source, &out).await
+        }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        drop(out);
+        Err(CallError::new(
+            ErrorCode::BadRequest,
+            "the agent reads the journal itself on this OS",
+        ))
+    }
 }
 
 /// Where a subscription's log comes from: the whole system's unified log, or
@@ -777,17 +878,6 @@ async fn log_source(params: &LogsParams) -> Result<super::logs::mac::Source, Cal
     .await
     .map_err(|e| CallError::internal(e.to_string()))?
     .map_err(CallError::from)
-}
-
-/// Only privd on a Mac streams logs; on Linux the agent reads the journal
-/// itself.
-#[cfg(not(target_os = "macos"))]
-async fn stream_logs(_state: &Arc<State>, id: u64, _params: LogsParams, mut channel: ipc::Channel) {
-    let refused = CallError::new(
-        ErrorCode::BadRequest,
-        "the agent reads logs itself on this OS",
-    );
-    let _ = ipc::send(&mut channel, &Response::from_result(id, Err(refused))).await;
 }
 
 /// The user this process runs as.

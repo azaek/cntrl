@@ -141,6 +141,28 @@ define_ops! {
         capability: "history.manage",
         since: 1,
     },
+    /// Starts a container, through the engine's API (D54).
+    ContainerStart = "container.start" {
+        params: crate::containers::ContainerRef,
+        result: crate::containers::ContainerJob,
+        capability: "containers.manage",
+        since: 1,
+    },
+    /// Stops a container, giving it the engine's grace period before it's
+    /// killed (D54).
+    ContainerStop = "container.stop" {
+        params: crate::containers::ContainerRef,
+        result: crate::containers::ContainerJob,
+        capability: "containers.manage",
+        since: 1,
+    },
+    /// Restarts a container (D54).
+    ContainerRestart = "container.restart" {
+        params: crate::containers::ContainerRef,
+        result: crate::containers::ContainerJob,
+        capability: "containers.manage",
+        since: 1,
+    },
     /// Deletes all the history the device keeps; it starts again with the
     /// next minute (D52).
     HistoryClear = "history.clear" {
@@ -189,6 +211,14 @@ define_topics! {
         params: crate::storage::StorageParams,
         event: crate::storage::StorageSample,
         capability: "system.read",
+        since: 1,
+    },
+    /// The Docker or Podman containers, with what each running one uses,
+    /// read every 3 s only while someone is subscribed (D54).
+    Containers = "containers" {
+        params: crate::containers::ContainersParams,
+        event: crate::containers::ContainersSample,
+        capability: "containers.read",
         since: 1,
     },
 }

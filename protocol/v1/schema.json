@@ -917,7 +917,7 @@
             "string",
             "null"
           ],
-          "description": "What the reading is of: a mount point for a disk, a sensor kind (`cpu`,\n`gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.\nFor a `service` rule, the service's name, as `service.restart` takes it."
+          "description": "What the reading is of: a mount point for a disk, a sensor kind (`cpu`,\n`gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.\nFor a `service` rule, the service's name, as `service.restart` takes it.\nFor a `container` rule, the container's Compose service or its name."
         },
         "op": {
           "anyOf": [
@@ -957,6 +957,11 @@
           "type": "string",
           "const": "service",
           "description": "A service that isn't running."
+        },
+        {
+          "type": "string",
+          "const": "container",
+          "description": "A container that isn't running (D54)."
         },
         {
           "type": "string",
@@ -2044,6 +2049,57 @@
       ],
       "description": "What `history.keep` asks for."
     },
+    "ContainerRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Its ID, or the first 12 characters of it, or its name."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "The container `container.start`, `container.stop` and `container.restart`\nact on."
+    },
+    "ContainerJob": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ContainerState",
+          "description": "Its state once the engine was done."
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "description": "How an action on a container went."
+    },
+    "ContainerState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "created",
+            "running",
+            "paused",
+            "restarting",
+            "removing",
+            "exited",
+            "dead"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A state from a newer engine or agent."
+        }
+      ]
+    },
     "StatsParams": {
       "type": "object",
       "properties": {
@@ -2553,6 +2609,13 @@
             "null"
           ],
           "description": "The user whose session runs `unit`, for a user's LaunchAgent on a Mac;\nthe system's service when absent."
+        },
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A container's log instead, by its ID or name (D54); it needs\n`containers.read` as well."
         },
         "priority": {
           "type": [
@@ -3147,6 +3210,275 @@
         "network"
       ],
       "description": "A mounted filesystem."
+    },
+    "ContainersParams": {
+      "type": "object",
+      "properties": {
+        "interval_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How often to send, in milliseconds: 3000 when absent, 2000 at least."
+        }
+      },
+      "description": "What a `containers` subscription asks for."
+    },
+    "ContainersSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was read, in Unix milliseconds."
+        },
+        "engine": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Engine"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The engine that answered; none when there's none to ask."
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Container"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why there's no list, in a few words: no engine found, or it didn't\nanswer."
+        }
+      },
+      "required": [
+        "ts",
+        "containers"
+      ],
+      "description": "One `containers` event."
+    },
+    "Engine": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EngineKind"
+        },
+        "version": {
+          "type": "string",
+          "description": "As the engine gives it, such as `29.8.2`."
+        }
+      },
+      "required": [
+        "kind",
+        "version"
+      ],
+      "description": "A container engine."
+    },
+    "EngineKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "docker",
+            "podman"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "An engine from a newer agent."
+        }
+      ]
+    },
+    "Container": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The first 12 characters of its ID, as `docker ps` shows them."
+        },
+        "name": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Its Compose project, for a container Compose made."
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Its service in that project."
+        },
+        "state": {
+          "$ref": "#/$defs/ContainerState"
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContainerHealth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What its health check says, for one that has a check."
+        },
+        "status": {
+          "type": "string",
+          "description": "The engine's own words, such as `Up 3 hours (healthy)`."
+        },
+        "created": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was made, in Unix milliseconds."
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContainerPort"
+          }
+        },
+        "cpu": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "Its share of the whole machine's CPU, from 0 to 1."
+        },
+        "memory": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Memory in use, without the file cache, in bytes."
+        },
+        "memory_limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "What it may use, in bytes: its limit, or the machine's memory."
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContainerNetwork"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bytes per second in and out, over all its networks."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "image",
+        "state",
+        "status",
+        "created",
+        "ports"
+      ],
+      "description": "A container, and for a running one what it used since the previous\nreading."
+    },
+    "ContainerHealth": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "starting",
+            "healthy",
+            "unhealthy"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A health from a newer engine or agent."
+        }
+      ]
+    },
+    "ContainerPort": {
+      "type": "object",
+      "properties": {
+        "ip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The machine's address it's published on; absent for every address."
+        },
+        "private": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "The port inside the container."
+        },
+        "public": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "The machine's port, when it's published."
+        },
+        "protocol": {
+          "type": "string",
+          "description": "`tcp`, `udp` or `sctp`."
+        }
+      },
+      "required": [
+        "private",
+        "protocol"
+      ],
+      "description": "A port a container exposes, and where the machine publishes it."
+    },
+    "ContainerNetwork": {
+      "type": "object",
+      "properties": {
+        "received": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sent": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "received",
+        "sent"
+      ],
+      "description": "Bytes per second."
     },
     "EnrollRequest": {
       "type": "object",

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cntrl_host::HostError;
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::codes::{ErrorCode, close};
+use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
 use cntrl_protocol::frame::{
     AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Pause, Records, Request, Response, SigAlg,
     Subscribe, Welcome,
@@ -43,6 +44,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::alerts::Alerts;
+use super::containers;
+use super::docker;
 use super::history::History;
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
@@ -227,6 +230,8 @@ pub struct UplinkConfig {
     pub network: Arc<network::Latest>,
     /// The latest disks and volumes, for the `storage` topic.
     pub storage: Arc<storage::Latest>,
+    /// The latest containers, for the `containers` topic (D54).
+    pub containers: Arc<containers::Latest>,
     /// Records for Console, sent and acknowledged over the link.
     pub outbox: Arc<Outbox>,
     /// The alert rules this device decides itself, which the hub sends (D43).
@@ -535,6 +540,7 @@ async fn online(
             processes: &session.config.processes,
             network: &session.config.network,
             storage: &session.config.storage,
+            containers: &session.config.containers,
         };
         if let Err(end) = session
             .subs
@@ -618,6 +624,12 @@ async fn online(
             Some(sample) = next_value(&mut session.subs.storage), if session.subs.storage.is_some() => {
                 let storage = |topic: &Watching| matches!(topic, Watching::Storage);
                 if let Err(end) = session.subs.publish_to(ws, storage, sample.ts, &*sample).await {
+                    return end;
+                }
+            }
+            Some(sample) = next_value(&mut session.subs.containers), if session.subs.containers.is_some() => {
+                let containers = |topic: &Watching| matches!(topic, Watching::Containers);
+                if let Err(end) = session.subs.publish_to(ws, containers, sample.ts, &*sample).await {
                     return end;
                 }
             }
@@ -775,6 +787,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
                 processes: &session.config.processes,
                 network: &session.config.network,
                 storage: &session.config.storage,
+                containers: &session.config.containers,
             };
             return session
                 .subs
@@ -885,6 +898,24 @@ impl Drop for Requests {
             task.abort();
         }
     }
+}
+
+/// Starts, stops or restarts a container through privd, which checks the
+/// policy and audits it (D54).
+async fn act_on_container(
+    request: &Request,
+    target: ContainerRef,
+    action: docker::Action,
+    privd: &Path,
+    limit: Duration,
+) -> Result<serde_json::Value, CallError> {
+    let call = Call::ContainerAct {
+        request_id: request.id.clone(),
+        container: target.id,
+        action,
+        actor: request.actor.clone(),
+    };
+    ipc::call_within(privd, call, limit.max(docker::ACTION_LIMIT)).await
 }
 
 /// Runs one request within its deadline.
@@ -1044,6 +1075,16 @@ async fn execute(
                 actor: request.actor.clone(),
             };
             ipc::call_within(privd, call, limit).await
+        }
+        // privd checks the policy again and audits its own decision (D54).
+        ops::Call::ContainerStart(target) => {
+            act_on_container(request, target, docker::Action::Start, privd, limit).await
+        }
+        ops::Call::ContainerStop(target) => {
+            act_on_container(request, target, docker::Action::Stop, privd, limit).await
+        }
+        ops::Call::ContainerRestart(target) => {
+            act_on_container(request, target, docker::Action::Restart, privd, limit).await
         }
         ops::Call::ProcessSignal(signal) => {
             let call = Call::ProcessSignal {
@@ -1316,6 +1357,7 @@ struct Subscriptions {
     processes: Option<watch::Receiver<Option<Arc<Table>>>>,
     network: Option<watch::Receiver<Option<Arc<NetworkSample>>>>,
     storage: Option<watch::Receiver<Option<Arc<StorageSample>>>>,
+    containers: Option<watch::Receiver<Option<Arc<ContainersSample>>>>,
     open: HashMap<String, Subscription>,
     log_out: logs::Batches,
     log_batches: mpsc::Receiver<(String, LogsBatch)>,
@@ -1331,6 +1373,7 @@ impl Subscriptions {
             processes: None,
             network: None,
             storage: None,
+            containers: None,
             open: HashMap::new(),
             log_out,
             log_batches,
@@ -1375,6 +1418,7 @@ enum Watching {
     Logs(logs::Reader),
     Network,
     Storage,
+    Containers,
 }
 
 /// The samplers a subscription reads from.
@@ -1383,6 +1427,7 @@ struct Samplers<'a> {
     processes: &'a processes::Latest,
     network: &'a network::Latest,
     storage: &'a storage::Latest,
+    containers: &'a containers::Latest,
 }
 
 /// A process table this recent goes to a new subscription at once.
@@ -1528,6 +1573,34 @@ impl Subscriptions {
                 debug!(id = %subscribe.id, every_ms, "storage subscription opened");
                 self.open.insert(subscribe.id, sub);
             }
+            Topic::Containers(params) => {
+                let every_ms = params.interval_ms.unwrap_or(3_000).max(2_000);
+                let receiver = self
+                    .containers
+                    .get_or_insert_with(|| samplers.containers.subscribe());
+                let latest = receiver.borrow().clone();
+                let accepted = encode(&ContainersParams {
+                    interval_ms: Some(every_ms),
+                })?;
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(subscribe.id.clone(), accepted)),
+                )
+                .await?;
+                let mut sub = Subscription {
+                    topic: Watching::Containers,
+                    every_ms: u64::from(every_ms),
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(sample) =
+                    latest.filter(|sample| now_ms().saturating_sub(sample.ts) < FRESH_TABLE_MS)
+                {
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
+                }
+                debug!(id = %subscribe.id, every_ms, "containers subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
             Topic::Logs(params) => {
                 if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
                     let msg = "this agent can't read logs on this OS yet".to_owned();
@@ -1578,9 +1651,19 @@ impl Subscriptions {
                 {
                     return send(ws, &refuse(ErrorCode::BadRequest, problem)).await;
                 }
+                let container = match params.container.as_deref().map(docker::container_name) {
+                    Some(Err(e)) => return send(ws, &refuse(ErrorCode::BadRequest, e)).await,
+                    Some(Ok(_)) if unit.is_some() => {
+                        let msg = "a log is a service's or a container's, not both".to_owned();
+                        return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                    }
+                    Some(Ok(name)) => Some(name.to_owned()),
+                    None => None,
+                };
                 let params = LogsParams {
                     unit,
                     user,
+                    container,
                     priority: params.priority.map(|p| p.min(7)),
                     lines: Some(
                         params
@@ -1687,6 +1770,13 @@ impl Subscriptions {
             .any(|sub| matches!(sub.topic, Watching::Storage))
         {
             self.storage = None;
+        }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::Containers))
+        {
+            self.containers = None;
         }
     }
 

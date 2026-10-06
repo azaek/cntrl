@@ -31,6 +31,7 @@ pub struct AlertRule {
     /// What the reading is of: a mount point for a disk, a sensor kind (`cpu`,
     /// `gpu`, `disk`) for a temperature, a GPU's name; absent for any of them.
     /// For a `service` rule, the service's name, as `service.restart` takes it.
+    /// For a `container` rule, the container's Compose service or its name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,6 +51,8 @@ pub enum AlertRuleKind {
     Metric,
     /// A service that isn't running.
     Service,
+    /// A container that isn't running (D54).
+    Container,
     /// A kind from a newer hub; the agent skips the rule.
     #[serde(other)]
     Unknown,
