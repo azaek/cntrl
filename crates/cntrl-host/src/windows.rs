@@ -373,3 +373,47 @@ fn registry_dword(key: &str, value: &str) -> Option<u32> {
     };
     (status == ERROR_SUCCESS).then_some(number)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_this_machine() {
+        let stats = WinStats::default();
+        let first = stats.read().expect("a reading");
+        assert!(first.memory.total > 0);
+        assert!(first.memory.available <= first.memory.total);
+        assert!(first.cpu.busy + first.cpu.idle > 0);
+        std::thread::sleep(Duration::from_millis(200));
+        let second = stats.read().expect("another reading");
+        assert!(second.cpu.idle >= first.cpu.idle);
+
+        let info = WinSystem.info("0.0.0").expect("system info");
+        assert_eq!(info.os.id, "windows");
+        assert!(info.os.name.starts_with("Windows"), "{}", info.os.name);
+        assert!(!info.kernel.is_empty());
+        assert!(info.boot_time > 0);
+        let cpu = info.cpu.expect("a CPU");
+        assert!(cpu.threads >= cpu.cores && cpu.cores > 0);
+        assert!(info.chassis.is_some());
+
+        assert!(hostname().is_some());
+        assert_eq!(machine_id().map(|id| id.len()), Some(36));
+        assert!(boot_id().is_some(), "Windows' boot count");
+    }
+
+    #[test]
+    fn power_lists_restart_and_shutdown() {
+        let actions = power_actions();
+        assert!(actions.contains(&cntrl_protocol::power::PowerAction::Reboot));
+        assert!(actions.contains(&cntrl_protocol::power::PowerAction::Poweroff));
+    }
+
+    fn power_actions() -> Vec<cntrl_protocol::power::PowerAction> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(power::info()).expect("power info").actions
+    }
+}
