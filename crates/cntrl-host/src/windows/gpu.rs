@@ -35,7 +35,7 @@ use windows_sys::Win32::Devices::Display::GUID_DISPLAY_DEVICE_ARRIVAL;
 use windows_sys::Win32::Devices::Properties::{
     DEVPKEY_Device_DeviceDesc, DEVPKEY_Device_InstanceId, DEVPKEY_Device_PowerData,
 };
-use windows_sys::Win32::Foundation::LUID;
+use windows_sys::Win32::Foundation::{LUID, NTSTATUS};
 use windows_sys::Win32::System::Power::{CM_POWER_DATA, DEVICE_POWER_STATE, PowerDeviceD0};
 
 use crate::gpu::{busiest, decicelsius, device_name};
@@ -115,7 +115,7 @@ impl Adapter {
         }
         let mut kind = D3DKMT_ADAPTERTYPE::default();
         // SAFETY: an adapter's type answers into D3DKMT_ADAPTERTYPE.
-        if !unsafe { self.query(KMTQAITYPE_ADAPTERTYPE, &mut kind) } {
+        if unsafe { self.query(KMTQAITYPE_ADAPTERTYPE, &mut kind) }.is_err() {
             return false;
         }
         // SAFETY: the bitfield and the value are the same 32 bits.
@@ -153,7 +153,8 @@ impl Adapter {
         let mut sizes = D3DKMT_SEGMENTSIZEINFO::default();
         // SAFETY: segment sizes answer into D3DKMT_SEGMENTSIZEINFO.
         let total = unsafe { self.query(KMTQAITYPE_GETSEGMENTSIZE, &mut sizes) }
-            .then_some(sizes.DedicatedVideoMemorySize)
+            .ok()
+            .map(|()| sizes.DedicatedVideoMemorySize)
             .filter(|&total| total > 0);
         if total.is_none() {
             return (None, None);
@@ -161,7 +162,7 @@ impl Adapter {
         let used = (0..self.segments)
             .map(|id| segment(self.luid, id))
             .try_fold(0u64, |used, segment| {
-                let (resident, aperture) = segment?;
+                let (resident, aperture) = segment.ok()?;
                 Some(if aperture { used } else { used + resident })
             });
         (used, total)
@@ -177,8 +178,8 @@ impl Adapter {
         let mut data = D3DKMT_ADAPTER_PERFDATA::default();
         // SAFETY: performance data answers into D3DKMT_ADAPTER_PERFDATA.
         unsafe { self.query(KMTQAITYPE_ADAPTERPERFDATA, &mut data) }
-            .then_some(data.Temperature)
-            .and_then(decicelsius)
+            .ok()
+            .and_then(|()| decicelsius(data.Temperature))
     }
 
     /// Asks the adapter's `kind` of information into `value`.
@@ -186,7 +187,11 @@ impl Adapter {
     /// # Safety
     ///
     /// `T` must be the structure `kind` answers into.
-    unsafe fn query<T>(&self, kind: KMTQUERYADAPTERINFOTYPE, value: &mut T) -> bool {
+    unsafe fn query<T>(
+        &self,
+        kind: KMTQUERYADAPTERINFOTYPE,
+        value: &mut T,
+    ) -> Result<(), NTSTATUS> {
         let mut query = D3DKMT_QUERYADAPTERINFO {
             hAdapter: self.handle,
             Type: kind,
@@ -195,7 +200,7 @@ impl Adapter {
         };
         // SAFETY: the query points at a `T` of the size it states, which
         // the caller has matched to `kind`.
-        unsafe { D3DKMTQueryAdapterInfo(&mut query) >= 0 }
+        succeeded(unsafe { D3DKMTQueryAdapterInfo(&mut query) })
     }
 }
 
@@ -223,9 +228,7 @@ fn adapters() -> Vec<Adapter> {
                 node: device_node(interface),
             };
             let mut query = statistics(D3DKMT_QUERYSTATISTICS_ADAPTER, adapter.luid);
-            if !ask(&mut query) {
-                return None;
-            }
+            ask(&mut query).ok()?;
             // SAFETY: an adapter query answers with adapter information.
             let counts = unsafe { query.QueryResult.AdapterInformation };
             (adapter.engines, adapter.segments) = (counts.NodeCount, counts.NbSegments);
@@ -274,7 +277,7 @@ fn engine_times(adapters: &[Adapter]) -> Times {
     let mut running = HashMap::new();
     for adapter in adapters {
         for engine in 0..adapter.engines {
-            if let Some(time) = running_time(adapter.luid, engine) {
+            if let Ok(time) = running_time(adapter.luid, engine) {
                 running.insert((key(adapter.luid), engine), time);
             }
         }
@@ -286,12 +289,10 @@ fn engine_times(adapters: &[Adapter]) -> Times {
 }
 
 /// How long the engine has run since the adapter started, in 100 ns units.
-fn running_time(luid: LUID, engine: u32) -> Option<u64> {
+fn running_time(luid: LUID, engine: u32) -> Result<u64, NTSTATUS> {
     let mut query = statistics(D3DKMT_QUERYSTATISTICS_NODE, luid);
     query.Anonymous.QueryNode = D3DKMT_QUERYSTATISTICS_QUERY_NODE { NodeId: engine };
-    if !ask(&mut query) {
-        return None;
-    }
+    ask(&mut query)?;
     // SAFETY: a node query answers with node information.
     let time = unsafe {
         query
@@ -300,20 +301,18 @@ fn running_time(luid: LUID, engine: u32) -> Option<u64> {
             .GlobalInformation
             .RunningTime
     };
-    u64::try_from(time).ok()
+    Ok(u64::try_from(time).unwrap_or(0))
 }
 
 /// A memory segment's resident bytes, and whether it's an aperture onto
 /// system memory.
-fn segment(luid: LUID, id: u32) -> Option<(u64, bool)> {
+fn segment(luid: LUID, id: u32) -> Result<(u64, bool), NTSTATUS> {
     let mut query = statistics(D3DKMT_QUERYSTATISTICS_SEGMENT, luid);
     query.Anonymous.QuerySegment = D3DKMT_QUERYSTATISTICS_QUERY_SEGMENT { SegmentId: id };
-    if !ask(&mut query) {
-        return None;
-    }
+    ask(&mut query)?;
     // SAFETY: a segment query answers with segment information.
     let segment = unsafe { query.QueryResult.SegmentInformation };
-    Some((segment.BytesResident, segment.Aperture != 0))
+    Ok((segment.BytesResident, segment.Aperture != 0))
 }
 
 fn statistics(kind: D3DKMT_QUERYSTATISTICS_TYPE, luid: LUID) -> D3DKMT_QUERYSTATISTICS {
@@ -325,10 +324,15 @@ fn statistics(kind: D3DKMT_QUERYSTATISTICS_TYPE, luid: LUID) -> D3DKMT_QUERYSTAT
 }
 
 /// Asks the graphics kernel for the statistics `query` names, into it.
-fn ask(query: &mut D3DKMT_QUERYSTATISTICS) -> bool {
+fn ask(query: &mut D3DKMT_QUERYSTATISTICS) -> Result<(), NTSTATUS> {
     // SAFETY: a query with room for its answer, which the call writes
     // though its declaration says const.
-    unsafe { D3DKMTQueryStatistics((query as *mut D3DKMT_QUERYSTATISTICS).cast_const()) >= 0 }
+    succeeded(unsafe { D3DKMTQueryStatistics((query as *mut D3DKMT_QUERYSTATISTICS).cast_const()) })
+}
+
+/// An NTSTATUS as a result: success and information are non-negative.
+fn succeeded(status: NTSTATUS) -> Result<(), NTSTATUS> {
+    if status >= 0 { Ok(()) } else { Err(status) }
 }
 
 /// The device node behind a device interface.
@@ -412,37 +416,90 @@ fn lock(times: &EngineTimes) -> MutexGuard<'_, Option<Times>> {
 mod tests {
     use super::*;
 
-    /// What the agent reads of a GPU, it reads of every adapter Windows
-    /// lists, software ones too: CI's machines have only those. CI also
-    /// runs this as a virtual account, as the agent's service runs.
+    /// Each display adapter Windows lists, software ones too, as a line of
+    /// what reads of it. CI's machines have no GPU, but what the agent
+    /// can't read of their adapters it couldn't read of one: CI runs this
+    /// as an administrator and as a virtual account set up as the agent's
+    /// service is, and compares the lines (D59).
     #[test]
-    fn reads_every_display_adapter() {
+    fn surveys_every_display_adapter() {
         let listed = interfaces().len();
         assert!(listed > 0, "Windows lists display adapters");
         let adapters = adapters();
         assert_eq!(adapters.len(), listed, "each opens, with its counts");
         for adapter in &adapters {
-            let node = adapter.node.expect("a device node");
-            assert!(description(node).is_some_and(|d| !d.is_empty()));
-            assert!(power_state(node).is_some(), "a power state");
-            for engine in 0..adapter.engines {
-                assert!(running_time(adapter.luid, engine).is_some());
-            }
-            for id in 0..adapter.segments {
-                assert!(segment(adapter.luid, id).is_some());
-            }
-            let mut kind = D3DKMT_ADAPTERTYPE::default();
-            // SAFETY: as in `is_gpu`.
-            assert!(unsafe { adapter.query(KMTQAITYPE_ADAPTERTYPE, &mut kind) });
+            let (line, complete) = survey(adapter);
+            println!("adapter: {line}");
+            assert!(complete || !adapter.is_gpu(), "a GPU reads in full: {line}");
         }
 
         let times = EngineTimes::default();
-        let first = gpus(&times);
-        let second = gpus(&times);
-        assert_eq!(first.len(), second.len());
-        for gpu in first.iter().chain(&second) {
+        let gpus = [gpus(&times), gpus(&times)];
+        println!("gpus: {}", gpus[1].len());
+        for gpu in gpus.iter().flatten() {
             assert!(!gpu.name.is_empty());
-            assert!(gpu.busy.is_some_and(|busy| (0.0..=1.0).contains(&busy)));
+            assert!(
+                gpu.busy.is_some_and(|busy| (0.0..=1.0).contains(&busy)),
+                "{gpu:?}"
+            );
         }
+    }
+
+    /// What reads of the adapter, with the first failure's status for each
+    /// kind of read, and whether everything did.
+    fn survey(adapter: &Adapter) -> (String, bool) {
+        let node = adapter.node.expect("a device node");
+        let name = description(node).expect("a description");
+        let mut kind = D3DKMT_ADAPTERTYPE::default();
+        // SAFETY: as in `is_gpu`.
+        let typed = unsafe { adapter.query(KMTQAITYPE_ADAPTERTYPE, &mut kind) };
+        // SAFETY: as in `is_gpu`.
+        let bits = unsafe { kind.Anonymous.Value };
+        let engines: Vec<_> = (0..adapter.engines)
+            .map(|engine| running_time(adapter.luid, engine).map(drop))
+            .collect();
+        let segments: Vec<_> = (0..adapter.segments)
+            .map(|id| segment(adapter.luid, id).map(drop))
+            .collect();
+        let mut sizes = D3DKMT_SEGMENTSIZEINFO::default();
+        // SAFETY: as in `memory`.
+        let sized = unsafe { adapter.query(KMTQAITYPE_GETSEGMENTSIZE, &mut sizes) };
+        let power = power_state(node);
+        // As in `temperature`, only while it's powered on.
+        let performance = (power == Some(PowerDeviceD0)).then(|| {
+            let mut data = D3DKMT_ADAPTER_PERFDATA::default();
+            // SAFETY: as in `temperature`.
+            unsafe { adapter.query(KMTQAITYPE_ADAPTERPERFDATA, &mut data) }
+        });
+        let complete = typed.is_ok()
+            && sized.is_ok()
+            && power.is_some()
+            && engines.iter().chain(&segments).all(Result::is_ok);
+        let line = format!(
+            "{name}, type {} {bits:#x}; engines {}; segments {}; sizes {}; power {}; performance data {}",
+            status(typed),
+            reads(&engines),
+            reads(&segments),
+            status(sized),
+            power.map_or_else(|| "unread".to_owned(), |state| format!("D{}", state - 1)),
+            performance.map_or_else(|| "not asked".to_owned(), status),
+        );
+        (line, complete)
+    }
+
+    fn reads(results: &[Result<(), NTSTATUS>]) -> String {
+        let read = results.iter().filter(|result| result.is_ok()).count();
+        match results.iter().find_map(|result| result.err()) {
+            Some(failure) => format!("{read} of {} read, {}", results.len(), hex(failure)),
+            None => format!("{read} of {} read", results.len()),
+        }
+    }
+
+    fn status(result: Result<(), NTSTATUS>) -> String {
+        result.map_or_else(hex, |()| "read".to_owned())
+    }
+
+    fn hex(status: NTSTATUS) -> String {
+        format!("{:#010x}", status.cast_unsigned())
     }
 }

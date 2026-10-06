@@ -95,11 +95,13 @@ jobs:
             - name: Test
               run: cargo test --workspace --target ${{ matrix.target }}
 
-            - name: Test GPUs as a virtual account
+            - name: GPUs read the same as a virtual account
               # The agent reads GPUs as its service's virtual account, with
-              # no administrator rights (D59): run that test as one, set up
-              # as the agent's service is. cmd.exe isn't a service, so the
-              # start fails once the script is done, which is expected.
+              # no administrator rights (D59). The survey test prints what
+              # reads of each display adapter: run it as an administrator and
+              # as a virtual account set up as the agent's service is, and
+              # compare. cmd.exe isn't a service, so its start fails once the
+              # script is done, which is expected.
               shell: pwsh
               run: |
                   $test = cargo test -p cntrl-host --target ${{ matrix.target }} --no-run --message-format=json |
@@ -110,9 +112,12 @@ jobs:
                   New-Item -ItemType Directory -Force -Path $dir | Out-Null
                   icacls $dir /grant '*S-1-5-6:(OI)(CI)M' | Out-Null
                   Copy-Item $test "$dir\test.exe"
+                  $survey = 'windows::gpu::tests::surveys_every_display_adapter'
+                  & "$dir\test.exe" $survey --exact --nocapture > "$dir\admin.txt" 2>&1
+                  if ($LASTEXITCODE -ne 0) { Get-Content "$dir\admin.txt"; Write-Error 'the survey failed as an administrator'; exit 1 }
                   Set-Content -Path "$dir\run.cmd" -Encoding ascii -Value @(
                       '@echo off',
-                      "`"$dir\test.exe`" windows::gpu > `"$dir\out.txt`" 2>&1",
+                      "`"$dir\test.exe`" $survey --exact --nocapture > `"$dir\service.txt`" 2>&1",
                       "> `"$dir\code.txt`" echo %ERRORLEVEL%"
                   )
                   sc.exe create cntrl-gpu-test binPath= "$env:ComSpec /d /c $dir\run.cmd" obj= 'NT SERVICE\cntrl-gpu-test' | Out-Null
@@ -122,10 +127,15 @@ jobs:
                   $deadline = (Get-Date).AddMinutes(2)
                   while (-not (Test-Path "$dir\code.txt") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
                   sc.exe delete cntrl-gpu-test | Out-Null
-                  Get-Content "$dir\out.txt" -ErrorAction SilentlyContinue
-                  if (-not (Test-Path "$dir\code.txt")) { Write-Error 'the test never finished'; exit 1 }
+                  $lines = { param($file) Get-Content $file -ErrorAction SilentlyContinue | Select-String '(adapter|gpus): .*' | ForEach-Object { $_.Matches[0].Value } }
+                  $admin = (& $lines "$dir\admin.txt") -join "`n"
+                  $service = (& $lines "$dir\service.txt") -join "`n"
+                  'As an administrator:'; $admin
+                  'As a virtual account:'; Get-Content "$dir\service.txt" -ErrorAction SilentlyContinue
+                  if (-not (Test-Path "$dir\code.txt")) { Write-Error 'the survey never finished'; exit 1 }
                   $code = (Get-Content "$dir\code.txt").Trim()
-                  if ($code -ne '0') { Write-Error "the test failed ($code)"; exit 1 }
+                  if ($code -ne '0') { Write-Error "the survey failed as a virtual account ($code)"; exit 1 }
+                  if (-not $admin -or $admin -ne $service) { Write-Error 'a virtual account reads differently from an administrator'; exit 1 }
                   exit 0
 
     protocol-types:
