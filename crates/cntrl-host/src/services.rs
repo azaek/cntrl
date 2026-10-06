@@ -1,5 +1,7 @@
 //! Services behind the `service.*` operations: systemd units on Linux, through
-//! [`crate::systemd`], and launchd jobs on macOS, through `crate::launchd`.
+//! [`crate::systemd`], launchd jobs on macOS, through `crate::launchd`, and the
+//! Service Control Manager's services on Windows, through
+//! `crate::windows::services`.
 
 use crate::HostError;
 
@@ -19,16 +21,39 @@ const OTHER_TYPES: &[&str] = &[
 ];
 
 /// Checks a service's name as this OS names services: a systemd unit on Linux
-/// ([`service_unit`]), a launchd label on macOS ([`launchd_label`]).
+/// ([`service_unit`]), a launchd label on macOS ([`launchd_label`]), a
+/// service's name on Windows ([`windows_service`]).
 pub fn service_name(name: &str) -> Result<String, HostError> {
     #[cfg(target_os = "macos")]
     {
         launchd_label(name)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        windows_service(name)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         service_unit(name)
     }
+}
+
+/// Checks a Windows service's name, such as `Spooler` or `MSSQL$SQLEXPRESS`:
+/// up to 256 characters, without slashes, which Windows refuses in a name.
+/// Windows compares names without regard to case.
+pub fn windows_service(name: &str) -> Result<String, HostError> {
+    let invalid =
+        |why: &str| HostError::Invalid(format!("`{name}` isn't a Windows service's name: {why}"));
+    if name.is_empty() || name.chars().count() > 256 {
+        return Err(invalid("the name must have 1 to 256 characters"));
+    }
+    if name
+        .chars()
+        .any(|c| c == '/' || c == '\\' || c.is_control())
+    {
+        return Err(invalid("slashes aren't allowed"));
+    }
+    Ok(name.to_owned())
 }
 
 /// Checks a launchd job's label, such as `com.openssh.sshd`: letters, digits
@@ -129,6 +154,22 @@ mod tests {
                 "{name} should be refused"
             );
         }
+    }
+
+    #[test]
+    fn checks_windows_service_names() {
+        assert_eq!(
+            windows_service("MSSQL$SQLEXPRESS").expect("valid"),
+            "MSSQL$SQLEXPRESS"
+        );
+        assert_eq!(
+            windows_service("cntrl-agent").expect("valid"),
+            "cntrl-agent"
+        );
+        assert!(windows_service("").is_err());
+        assert!(windows_service("a\\b").is_err());
+        assert!(windows_service("a/b").is_err());
+        assert!(windows_service(&"x".repeat(257)).is_err());
     }
 
     #[test]

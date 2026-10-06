@@ -18,14 +18,17 @@ use cntrl_protocol::ops::{OPS, TOPICS};
 use serde::{Deserialize, Serialize};
 
 /// Services protected unless the policy file lists its own: losing SSH can lock
-/// the owner out.
-#[cfg(not(target_os = "macos"))]
+/// the owner out, and on Windows so can Remote Desktop's and remote
+/// PowerShell's.
+#[cfg(not(any(target_os = "macos", windows)))]
 const DEFAULT_PROTECTED: &[&str] = &["ssh.service", "sshd.service"];
 #[cfg(target_os = "macos")]
 const DEFAULT_PROTECTED: &[&str] = &["com.openssh.sshd"];
+#[cfg(windows)]
+const DEFAULT_PROTECTED: &[&str] = &["sshd", "TermService", "WinRM"];
 /// The agent's own services, always protected: a restart through the agent
 /// would end the request that asked for it.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 const ALWAYS_PROTECTED: &[&str] = &[
     "cntrl-agent.service",
     "cntrl-privd.service",
@@ -33,6 +36,8 @@ const ALWAYS_PROTECTED: &[&str] = &[
 ];
 #[cfg(target_os = "macos")]
 const ALWAYS_PROTECTED: &[&str] = &["pw.cntrl.agent", "pw.cntrl.privd"];
+#[cfg(windows)]
+const ALWAYS_PROTECTED: &[&str] = &["cntrl-agent", "cntrl-privd"];
 
 /// Whether `unit` is a per-connection copy of `entry`, as launchd names them on
 /// macOS: `com.openssh.sshd.<UUID>` for each SSH session. Restarting one would
@@ -92,14 +97,21 @@ impl PolicyState {
     }
 
     /// Whether service actions must leave `unit` alone. An invalid policy
-    /// protects everything.
+    /// protects everything. Windows' names match without regard to case.
     pub fn protects(&self, unit: &str) -> bool {
         let Self::Valid { policy } = self else {
             return true;
         };
         let unit = service_name(unit).unwrap_or_else(|_| unit.to_owned());
+        let same = |a: &str, b: &str| {
+            if cfg!(windows) {
+                a.eq_ignore_ascii_case(b)
+            } else {
+                a == b
+            }
+        };
         policy.protect.iter().any(|entry| {
-            service_name(entry).is_ok_and(|entry| entry == unit || instance_of(&unit, &entry))
+            service_name(entry).is_ok_and(|entry| same(&entry, &unit) || instance_of(&unit, &entry))
         })
     }
 

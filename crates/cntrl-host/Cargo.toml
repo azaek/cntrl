@@ -51,11 +51,18 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "u
 tokio = { version = "1", default-features = false, features = ["rt"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
     "Win32_System_Power",
     "Win32_System_Registry",
     "Win32_System_RemoteDesktop",
+    "Win32_System_Services",
     "Win32_System_Shutdown",
     "Win32_System_Threading",
 ] }

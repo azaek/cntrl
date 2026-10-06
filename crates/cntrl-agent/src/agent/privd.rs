@@ -654,7 +654,26 @@ async fn act(
     .map_err(|e| HostError::Failed(e.to_string()))?
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// On Windows, through the Service Control Manager, as SYSTEM (D58).
+#[cfg(windows)]
+async fn act(
+    name: &str,
+    scope: ServiceScope,
+    _user: Option<String>,
+    action: ServiceAction,
+) -> Result<JobResult, HostError> {
+    if !scope.is_system() {
+        return Err(HostError::Invalid(
+            "services in a user's session aren't supported on Windows".to_owned(),
+        ));
+    }
+    let name = name.to_owned();
+    tokio::task::spawn_blocking(move || cntrl_host::windows::services::act(&name, action))
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn act(
     _unit: &str,
     _scope: ServiceScope,

@@ -25,7 +25,10 @@ use crate::HostError;
 use crate::stats::{Background, CpuTicks, DiskCounters, NetworkCounters, Stats, StatsReading};
 use crate::system::System;
 
+pub mod network;
 pub(crate) mod power;
+pub mod services;
+pub mod storage;
 
 /// How often filesystems are looked at while someone watches.
 const FILESYSTEMS_EVERY: Duration = Duration::from_secs(10);

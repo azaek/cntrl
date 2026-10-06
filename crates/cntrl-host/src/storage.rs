@@ -4,7 +4,8 @@
 //! (kernel `admin-guide/iostats`), and health from smartctl, which privd runs
 //! since it needs the raw device. On a Mac they come from `diskutil -plist`
 //! and ioreg's block storage statistics, with health from diskutil, none of
-//! which needs root.
+//! which needs root. On Windows, storage queries that any account may make
+//! (`crate::windows::storage`).
 
 use std::time::Duration;
 
@@ -118,7 +119,11 @@ pub fn backend() -> std::sync::Arc<dyn Storage> {
     {
         std::sync::Arc::new(mac::MacStorage::default())
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        std::sync::Arc::new(crate::windows::storage::WinStorage)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         std::sync::Arc::new(crate::Unsupported)
     }
@@ -135,7 +140,7 @@ impl Storage for crate::Unsupported {
 }
 
 /// How a hypervisor's disks name their maker or model.
-const VIRTUAL_MAKERS: &[&str] = &[
+pub(crate) const VIRTUAL_MAKERS: &[&str] = &[
     "QEMU",
     "VMware",
     "VBOX",

@@ -4,7 +4,8 @@
 //! sysfs adds each one's kind, state and speed on Linux, and networksetup the
 //! ports' names on a Mac. Which process owns a socket takes root on both, so
 //! privd answers that: on Linux it maps socket inodes to PIDs, since the
-//! agent reads the socket tables itself, and on a Mac it runs lsof.
+//! agent reads the socket tables itself, and on a Mac it runs lsof. Windows
+//! lets any account read all of it (`crate::windows::network`).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -175,7 +176,11 @@ impl NetworkReader {
                 dns,
             }
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        {
+            crate::windows::network::read()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             NetworkReading::default()
         }

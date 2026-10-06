@@ -1273,7 +1273,16 @@ async fn listeners(privd: &Path, limit: Duration) -> Result<Listeners, CallError
     Ok(found)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// On Windows any account reads the socket tables with their owners, so the
+/// agent does it all (D58).
+#[cfg(windows)]
+async fn listeners(_privd: &Path, _limit: Duration) -> Result<Listeners, CallError> {
+    tokio::task::spawn_blocking(cntrl_host::windows::network::listeners)
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn listeners(_privd: &Path, _limit: Duration) -> Result<Listeners, CallError> {
     Err(HostError::Unsupported.into())
 }
@@ -1303,14 +1312,26 @@ async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, Cal
         .map_err(|e| CallError::internal(e.to_string()))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// On Windows the disks answer storage queries from any account (D58).
+#[cfg(windows)]
+async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, CallError> {
+    let disks = physical_disks().await?;
+    if disks.is_empty() {
+        return Ok(only_virtual());
+    }
+    tokio::task::spawn_blocking(move || cntrl_host::windows::storage::health(&disks))
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn disk_health(_privd: &Path, _limit: Duration) -> Result<DisksHealth, CallError> {
     Err(HostError::Unsupported.into())
 }
 
 /// A machine whose disks a hypervisor provides can't see their health; the
 /// host it runs on can.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn only_virtual() -> DisksHealth {
     DisksHealth {
         disks: Vec::new(),
@@ -1321,7 +1342,7 @@ fn only_virtual() -> DisksHealth {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn physical_disks() -> Result<Vec<String>, CallError> {
     tokio::task::spawn_blocking(|| {
         cntrl_host::storage::backend()
@@ -1359,7 +1380,15 @@ pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
         .map_err(|e| HostError::Failed(e.to_string()))?
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// The Service Control Manager lists services to any account (D58).
+#[cfg(windows)]
+pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
+    tokio::task::spawn_blocking(cntrl_host::windows::services::list)
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub(super) async fn list_services() -> Result<Vec<ServiceStatus>, HostError> {
     Err(HostError::Unsupported)
 }
