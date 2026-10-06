@@ -1693,7 +1693,7 @@ impl Subscriptions {
                 self.open.insert(subscribe.id, sub);
             }
             Topic::Logs(params) => {
-                if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
+                if cfg!(not(any(target_os = "linux", target_os = "macos", windows))) {
                     let msg = "this agent can't read logs on this OS yet".to_owned();
                     return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
                 }
