@@ -28,6 +28,7 @@ for archive in "$@"; do
     file=$(basename "$archive")
     target=${file#"cntrl-agent-$version-"}
     target=${target%.tar.gz}
+    target=${target%.zip}
     size=$(wc -c <"$archive" | tr -d ' ')
     printf '%s\n    "%s": { "url": "%s/%s", "size": %s, "sha256": "%s" }' \
         "$sep" "$target" "$base" "$file" "$size" "$(sha256 "$archive")"
