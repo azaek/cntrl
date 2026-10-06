@@ -188,31 +188,53 @@ fn send_enroll(
 /// Asks on the terminal, which works under `curl | sudo sh` too, since only
 /// stdin is the pipe. `None` when there's no terminal to ask on.
 fn confirm_move(from: &str, to: &str) -> Option<bool> {
-    let mut tty = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .ok()?;
+    let (input, mut output) = terminal()?;
     write!(
-        tty,
+        output,
         "This machine is in {from}. Move it to {to}?\n{from} loses it, and its history stays there. [y/N] "
     )
     .ok()?;
     let mut answer = String::new();
-    BufReader::new(tty).read_line(&mut answer).ok()?;
+    BufReader::new(input).read_line(&mut answer).ok()?;
     Some(matches!(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
 }
 
+/// The terminal to read and write: `/dev/tty`, or on Windows the console's
+/// own input and output.
+fn terminal() -> Option<(fs::File, fs::File)> {
+    #[cfg(unix)]
+    {
+        let tty = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .ok()?;
+        Some((tty.try_clone().ok()?, tty))
+    }
+    #[cfg(windows)]
+    {
+        let input = fs::OpenOptions::new().read(true).open("CONIN$").ok()?;
+        let output = fs::OpenOptions::new().write(true).open("CONOUT$").ok()?;
+        Some((input, output))
+    }
+}
+
 /// How to confirm a move where nobody can be asked. The installer sets
-/// CNTRL_INSTALLER, since its flag goes after `sh -s --`.
-fn move_hint() -> &'static str {
-    if std::env::var_os("CNTRL_INSTALLER").is_some() {
-        "run Add device's command again, ending it with `sudo sh -s -- --move`"
+/// CNTRL_INSTALLER, since its flag goes after `sh -s --`; on Windows, where
+/// `irm | iex` passes no flags, CNTRL_MOVE says it.
+fn move_hint() -> String {
+    if std::env::var_os("CNTRL_INSTALLER").is_none() {
+        format!(
+            "run {} with the same token",
+            os::elevated("cntrl enroll --move")
+        )
+    } else if cfg!(windows) {
+        "set `$env:CNTRL_MOVE = 1`, then run Add device's command again".to_owned()
     } else {
-        "run `sudo cntrl enroll --move` with the same token"
+        "run Add device's command again, ending it with `sudo sh -s -- --move`".to_owned()
     }
 }
 
