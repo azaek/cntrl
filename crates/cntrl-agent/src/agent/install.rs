@@ -310,10 +310,7 @@ fn stop(manager: &ServiceManager, name: &str) -> Result<(), String> {
     if wait_for(&service, name, ServiceState::Stopped).is_ok() {
         return Ok(());
     }
-    let pid = service
-        .query_status()
-        .ok()
-        .and_then(|status| status.process_id)
+    let pid = setup::service_process(&service)
         .ok_or_else(|| format!("{name} didn't stop, and its process can't be found"))?;
     say!("{name} didn't stop within {SERVICE_WAIT:?}, so its process is ended.");
     setup::end_process(pid)?;

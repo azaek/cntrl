@@ -26,6 +26,9 @@ use super::super::supervisor::EXIT_SOFTWARE;
 const NOT_A_SERVICE: i32 = 1063;
 /// How long stopping may take: the supervisor's grace, and a margin.
 const STOP_WAIT: Duration = Duration::from_secs(15);
+/// How long after a stop request the process ends, stopped cleanly or not,
+/// so a stuck stop can't keep the service from stopping.
+const STOP_DEADLINE: Duration = Duration::from_secs(20);
 /// How stale the health check may get before the agent counts as hung:
 /// systemd's `WatchdogSec=` on Linux.
 const HUNG_AFTER: Duration = Duration::from_secs(30);
@@ -106,9 +109,33 @@ extern "system" fn service_main(_count: u32, _parameters: *mut *mut u16) {
         let code = body(stop);
         let _ = tell.send(Event::Exited(code));
     });
-    for event in events {
+    let mut stopping = false;
+    loop {
+        let event = if stopping {
+            match events.recv_timeout(STOP_DEADLINE) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // It was asked to stop, so it stays stopped: no error, which
+                    // would have the recovery actions start it again.
+                    tracing::error!(
+                        "still stopping {STOP_DEADLINE:?} after the stop request; ending the process"
+                    );
+                    report(status, ServiceState::Stopped, ServiceExitCode::NO_ERROR);
+                    std::process::exit(0);
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        } else {
+            match events.recv() {
+                Ok(event) => event,
+                Err(_) => return,
+            }
+        };
         match event {
-            Event::Stopping => report(status, ServiceState::StopPending, ServiceExitCode::NO_ERROR),
+            Event::Stopping => {
+                stopping = true;
+                report(status, ServiceState::StopPending, ServiceExitCode::NO_ERROR);
+            }
             Event::Exited(code) => {
                 // Any failure counts, so the recovery actions restart it.
                 let exit = if code == ExitCode::SUCCESS {

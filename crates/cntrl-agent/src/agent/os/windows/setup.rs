@@ -17,8 +17,9 @@ use windows_sys::Win32::System::Registry::{
     RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegCloseKey, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows_sys::Win32::System::Services::{
-    ChangeServiceConfig2W, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
-    SERVICE_REQUIRED_PRIVILEGES_INFOW,
+    ChangeServiceConfig2W, QueryServiceStatusEx, SC_STATUS_PROCESS_INFO,
+    SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, SERVICE_REQUIRED_PRIVILEGES_INFOW,
+    SERVICE_STATUS_PROCESS,
 };
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -99,6 +100,26 @@ pub fn require_privileges(service: &Service, privileges: &[&str]) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+/// A service's process, whatever its state: windows-service gives it only
+/// while the service runs.
+pub fn service_process(service: &Service) -> Option<u32> {
+    let mut status = SERVICE_STATUS_PROCESS::default();
+    let mut needed = 0u32;
+    let size = u32::try_from(size_of::<SERVICE_STATUS_PROCESS>()).ok()?;
+    // SAFETY: an open handle with SERVICE_QUERY_STATUS, and a struct of
+    // `size` bytes to fill.
+    let read = unsafe {
+        QueryServiceStatusEx(
+            service.raw_handle(),
+            SC_STATUS_PROCESS_INFO,
+            (&raw mut status).cast(),
+            size,
+            &mut needed,
+        )
+    };
+    (read != 0 && status.dwProcessId != 0).then_some(status.dwProcessId)
 }
 
 /// Ends a process at once, as a service that doesn't stop when asked is.
