@@ -10,6 +10,7 @@
 //! Informer and LibreHardwareMonitor read GPUs through it (angle 14).
 
 use std::collections::HashMap;
+use std::mem::offset_of;
 use std::ptr::null;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -50,10 +51,14 @@ const STALE: Duration = Duration::from_secs(30);
 /// With nothing recent to compare with, how long a read measures.
 const FIRST_WINDOW: Duration = Duration::from_millis(250);
 
-// The statistics' layout is the system's: an older Windows reads the
-// engine or segment asked for at the same offset (System Informer checks
-// this size too).
-const _: () = assert!(size_of::<D3DKMT_QUERYSTATISTICS>() == 0x328);
+// The statistics' layout is the WDK's, which Windows reads: the result at
+// 24 and the engine or segment asked for at 800, 0x328 bytes in all
+// (System Informer checks that size too).
+const _: () = assert!(
+    size_of::<D3DKMT_QUERYSTATISTICS>() == 0x328
+        && offset_of!(D3DKMT_QUERYSTATISTICS, QueryResult) == 24
+        && offset_of!(D3DKMT_QUERYSTATISTICS, Anonymous) == 800
+);
 
 /// Each engine's running time at the last read, kept to measure use.
 #[derive(Debug, Default)]
