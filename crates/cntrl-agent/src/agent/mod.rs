@@ -3,6 +3,7 @@
 
 mod alerts;
 mod audit;
+mod checks;
 mod cli;
 mod client;
 mod config;

@@ -39,6 +39,11 @@ pub enum Frame {
     Paused(Paused),
     /// The alert rules this device decides itself (D43), the whole set.
     Alerts(crate::alerts::AlertRules),
+    /// The checks this device runs (D56), the whole set. Agents before 0.1.14
+    /// ignore it.
+    Checks(crate::checks::CheckSet),
+    /// Results of the checks the device ran, or why it runs none.
+    CheckResults(crate::checks::CheckResults),
     /// A frame type from a newer protocol revision. Receivers ignore it.
     #[serde(other)]
     #[cfg_attr(feature = "schema", schemars(skip))]

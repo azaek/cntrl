@@ -1,0 +1,1 @@
+{"t":"checks","checks":[{"id":"chk_01m4web0000000000000000000","rev":1791280000000,"kind":"http","target":"https://10.0.0.5:8443/health","interval_s":60,"ignore_tls":true},{"id":"chk_01m4db00000000000000000000","rev":1791280000000,"kind":"tcp","target":"db.internal:5432","interval_s":30}]}

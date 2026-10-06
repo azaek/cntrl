@@ -39,6 +39,7 @@ export const CAPABILITIES = [
     "history.manage",
     "containers.read",
     "containers.manage",
+    "checks.run",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

@@ -216,6 +216,34 @@
             "t"
           ],
           "description": "The alert rules this device decides itself (D43), the whole set."
+        },
+        {
+          "$ref": "#/$defs/CheckSet",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "checks"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The checks this device runs (D56), the whole set. Agents before 0.1.14\nignore it."
+        },
+        {
+          "$ref": "#/$defs/CheckResults",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "check_results"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "Results of the checks the device ran, or why it runs none."
         }
       ],
       "description": "Any frame of protocol v1."
@@ -1016,6 +1044,195 @@
         "rules"
       ],
       "description": "Every rule this device decides, replacing any before."
+    },
+    "DeviceCheck": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the check last changed, in Unix milliseconds; results carry it,\nso the hub drops a result of a check changed since."
+        },
+        "kind": {
+          "$ref": "#/$defs/CheckKind"
+        },
+        "target": {
+          "type": "string",
+          "description": "An http(s) URL, or `host:port` (`[v6]:port`)."
+        },
+        "interval_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Seconds between runs, at least [`INTERVAL_MIN_S`]."
+        },
+        "ignore_tls": {
+          "type": "boolean",
+          "description": "For an https URL: accept a certificate that doesn't verify, such as a\nself-signed one. Its expiry is still read."
+        }
+      },
+      "required": [
+        "id",
+        "rev",
+        "kind",
+        "target",
+        "interval_s"
+      ],
+      "description": "One check."
+    },
+    "CheckKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "http",
+          "description": "Up when the final answer, after up to [`REDIRECTS`] redirects, is 2xx or\n3xx within [`TIMEOUT_MS`]."
+        },
+        {
+          "type": "string",
+          "const": "tcp",
+          "description": "Up when the port takes a connection within [`TIMEOUT_MS`]."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A kind from a newer hub; the agent skips the check."
+        }
+      ]
+    },
+    "CheckSet": {
+      "type": "object",
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeviceCheck"
+          }
+        }
+      },
+      "required": [
+        "checks"
+      ],
+      "description": "Every check this device runs, replacing any before."
+    },
+    "CheckResult": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "The check's `rev` when it ran."
+        },
+        "at_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the run started, in Unix milliseconds by the device's clock."
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How long it took to answer, in milliseconds."
+        },
+        "code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "An HTTP check's final status."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What failed, in words."
+        },
+        "cert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CertInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For an https URL that answered, the server's certificate."
+        }
+      },
+      "required": [
+        "id",
+        "rev",
+        "at_ms",
+        "ok"
+      ],
+      "description": "What one run found."
+    },
+    "CertInfo": {
+      "type": "object",
+      "properties": {
+        "not_after_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it expires, in Unix milliseconds."
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Its subject's common name."
+        },
+        "issuer": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Its issuer's organization, or common name without one."
+        }
+      },
+      "required": [
+        "not_after_ms"
+      ],
+      "description": "The leaf certificate a server presented."
+    },
+    "CheckResults": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "default": []
+        },
+        "refused": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the device runs none of the set, such as a policy that doesn't\nallow `checks.run`."
+        }
+      },
+      "description": "Results of checks this device ran, or why it runs none."
     },
     "NoParams": {
       "type": "object",

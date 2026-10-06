@@ -12,6 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cntrl_host::HostError;
 use cntrl_protocol::auth::{gateway_host, hello_signing_string};
+use cntrl_protocol::checks::{CheckResults, DeviceCheck};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
 use cntrl_protocol::frame::{
@@ -44,6 +45,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::alerts::Alerts;
+use super::checks;
 use super::containers;
 use super::docker;
 use super::history::History;
@@ -517,10 +519,12 @@ async fn online(
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_pong = Instant::now();
     let (answers, mut answered) = mpsc::channel(ANSWER_QUEUE);
+    let (check_results, mut checked) = mpsc::channel(CHECK_QUEUE);
     let outbox = Arc::clone(&config.outbox);
     let mut session = Session {
         requests: Requests::new(answers, welcome.limits.max_inflight as usize),
         subs: Subscriptions::new(config.privd_socket.clone()),
+        checks: checks::Runner::new(check_results),
         policy,
         config,
         in_flight: None,
@@ -650,6 +654,20 @@ async fn online(
                     return end;
                 }
             }
+            Some(result) = checked.recv() => {
+                // Results that came together go together.
+                let mut results = vec![result];
+                while results.len() < CHECK_QUEUE {
+                    match checked.try_recv() {
+                        Ok(more) => results.push(more),
+                        Err(_) => break,
+                    }
+                }
+                let frame = Frame::CheckResults(CheckResults { results, refused: None });
+                if let Err(end) = send(ws, &frame).await {
+                    return end;
+                }
+            }
             () = uplink.enrolled.notified() => {
                 close_link(ws, close::DISCONNECTED_BY_DEVICE, "enrolled again").await;
                 return End::Reconnect;
@@ -704,6 +722,8 @@ async fn recorded(ws: &mut Ws) -> bool {
 struct Session<'a> {
     requests: Requests,
     subs: Subscriptions,
+    /// The checks the hub handed this device, running while the link is up (D56).
+    checks: checks::Runner,
     /// The policy the hello reported; a change reconnects.
     policy: Arc<PolicyState>,
     config: &'a UplinkConfig,
@@ -745,6 +765,43 @@ impl Session<'_> {
             sent: Instant::now(),
         });
         Ok(())
+    }
+
+    /// Runs the checks the hub sent, if the policy allows them, and audits a
+    /// changed set once, with its targets: the runs themselves aren't
+    /// requests, so they aren't audited. A refused set is answered with why.
+    async fn set_checks(&mut self, ws: &mut Ws, checks: Vec<DeviceCheck>) -> Result<(), End> {
+        let privd = &self.config.privd_socket;
+        if !self.policy.allows(CHECKS_CAPABILITY) {
+            let stopped = self.checks.set(Vec::new()).unwrap_or(false);
+            if checks.is_empty() && !stopped {
+                return Ok(());
+            }
+            let reason = format!("the device policy doesn't allow {CHECKS_CAPABILITY}");
+            let record = serde_json::json!({ "checks": checks.len(), "reason": reason });
+            audit(privd, "checks.denied", record).await;
+            let frame = Frame::CheckResults(CheckResults {
+                results: Vec::new(),
+                refused: Some(reason),
+            });
+            return send(ws, &frame).await;
+        }
+        match self.checks.set(checks) {
+            Ok(true) => {
+                let record = serde_json::json!({ "checks": self.checks.summary() });
+                audit(privd, "checks.set", record).await;
+                Ok(())
+            }
+            Ok(false) => Ok(()),
+            Err(reason) => {
+                warn!("can't run checks: {reason}");
+                let frame = Frame::CheckResults(CheckResults {
+                    results: Vec::new(),
+                    refused: Some(reason),
+                });
+                send(ws, &frame).await
+            }
+        }
     }
 
     /// Console has every record up to `upto`: drop them, and send what's next.
@@ -804,6 +861,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             session.config.alerts.set(rules.rules).await;
             return None;
         }
+        Frame::Checks(set) => return session.set_checks(ws, set.checks).await.err(),
         other => {
             debug!(?other, "ignoring a frame");
             return None;
@@ -814,6 +872,10 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
 
 /// How many finished requests may wait for the session to send their answers.
 const ANSWER_QUEUE: usize = 64;
+/// How many check results may wait to go, and the most in one frame.
+const CHECK_QUEUE: usize = 64;
+/// What a device's policy allows for it to run checks (D56).
+const CHECKS_CAPABILITY: &str = "checks.run";
 /// Bounds for a request's `deadline_ms`.
 const DEADLINE_MIN: Duration = Duration::from_secs(1);
 const DEADLINE_MAX: Duration = Duration::from_secs(600);

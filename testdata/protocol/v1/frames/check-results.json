@@ -1,0 +1,1 @@
+{"t":"check_results","results":[{"id":"chk_01m4web0000000000000000000","rev":1791280000000,"at_ms":1791281234567,"ok":true,"ms":42,"code":200,"cert":{"not_after_ms":1796400000000,"subject":"pve.internal","issuer":"Proxmox Virtual Environment"}},{"id":"chk_01m4db00000000000000000000","rev":1791280000000,"at_ms":1791281234570,"ok":false,"error":"connection refused"}]}

@@ -18,6 +18,9 @@ pub const CAPABILITIES: &[&str] = &[
     "history.manage",
     "containers.read",
     "containers.manage",
+    // Runs the checks Console sets up from this device's network (D56); not
+    // in monitor-only, since checking addresses can map a network.
+    "checks.run",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.

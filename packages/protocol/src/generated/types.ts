@@ -153,11 +153,56 @@ export interface Caps {
     features?: string[];
 }
 
+/** The leaf certificate a server presented. */
+export interface CertInfo {
+    /** When it expires, in Unix milliseconds. */
+    not_after_ms: number;
+    /** Its subject's common name. */
+    subject?: string | null;
+    /** Its issuer's organization, or common name without one. */
+    issuer?: string | null;
+}
+
 /** The gateway's first frame. The agent signs `nonce` in its {@link Hello}. */
 export interface Challenge {
     /** Session ID, also covered by the signature. */
     sid: string;
     nonce: string;
+}
+
+export type CheckKind = "http" | "tcp" | "unknown";
+
+/** What one run found. */
+export interface CheckResult {
+    id: string;
+    /** The check's `rev` when it ran. */
+    rev: number;
+    /** When the run started, in Unix milliseconds by the device's clock. */
+    at_ms: number;
+    ok: boolean;
+    /** How long it took to answer, in milliseconds. */
+    ms?: number | null;
+    /** An HTTP check's final status. */
+    code?: number | null;
+    /** What failed, in words. */
+    error?: string | null;
+    /** For an https URL that answered, the server's certificate. */
+    cert?: CertInfo | null;
+}
+
+/** Results of checks this device ran, or why it runs none. */
+export interface CheckResults {
+    results?: CheckResult[];
+    /**
+     * Why the device runs none of the set, such as a policy that doesn't
+     * allow `checks.run`.
+     */
+    refused?: string | null;
+}
+
+/** Every check this device runs, replacing any before. */
+export interface CheckSet {
+    checks: DeviceCheck[];
 }
 
 /**
@@ -281,6 +326,26 @@ export interface CpuStats {
     /** Busy time across all cores. */
     busy: number;
     load: LoadAverage;
+}
+
+/** One check. */
+export interface DeviceCheck {
+    id: string;
+    /**
+     * When the check last changed, in Unix milliseconds; results carry it,
+     * so the hub drops a result of a check changed since.
+     */
+    rev: number;
+    kind: CheckKind;
+    /** An http(s) URL, or `host:port` (`[v6]:port`). */
+    target: string;
+    /** Seconds between runs, at least {@link INTERVAL_MIN_S}. */
+    interval_s: number;
+    /**
+     * For an https URL: accept a certificate that doesn't verify, such as a
+     * self-signed one. Its expiry is still read.
+     */
+    ignore_tls?: boolean;
 }
 
 /** A physical disk, with its traffic since the previous reading. */
@@ -477,7 +542,9 @@ export type Frame =
     | (GoAway & { t: "goaway" })
     | (Pause & { t: "pause" })
     | (Paused & { t: "paused" })
-    | (AlertRules & { t: "alerts" });
+    | (AlertRules & { t: "alerts" })
+    | (CheckSet & { t: "checks" })
+    | (CheckResults & { t: "check_results" });
 
 /**
  * Asks the agent to disconnect and come back within a window, for example

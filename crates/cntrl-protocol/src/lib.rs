@@ -6,6 +6,7 @@ pub mod alerts;
 pub mod app;
 pub mod auth;
 pub mod capability;
+pub mod checks;
 pub mod codes;
 pub mod containers;
 pub mod enroll;

@@ -24,7 +24,8 @@ hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 listenfd = "1"
 rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# A device check trusts the system's roots besides Mozilla's (D56).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
 ring = "0.17"
 sd-notify = "0.4"
 serde.workspace = true
@@ -39,6 +40,8 @@ toml = "0.9"
 tracing = "0.1"
 tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# Reads a checked server's certificate: its expiry, subject and issuer (D56).
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 cntrl-host = { workspace = true, features = ["test-util"] }

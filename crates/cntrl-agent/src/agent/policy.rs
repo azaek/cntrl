@@ -112,10 +112,17 @@ impl PolicyState {
                 .map(|info| (info.name.to_owned(), info.since))
                 .collect()
         };
+        // Running checks isn't an operation or a topic: the hub sends them in
+        // a frame, so the hello says the device takes them (D56).
+        let features = if self.allows("checks.run") {
+            vec![cntrl_protocol::checks::FEATURE.to_owned()]
+        } else {
+            Vec::new()
+        };
         Caps {
             ops: allowed(OPS),
             topics: allowed(TOPICS),
-            features: Vec::new(),
+            features,
         }
     }
 
@@ -608,7 +615,17 @@ mod tests {
         assert_eq!(caps.ops.get("system.info"), Some(&1));
         assert!(!caps.ops.contains_key("service.restart"));
         assert_eq!(caps.topics.get("stats"), Some(&1));
+        assert!(caps.features.is_empty());
         assert!(state.summary().error.is_none());
+
+        // Checks come in a frame, so the hello names them as a feature (D56).
+        let path = write_policy(
+            dir.path(),
+            "version = 1\nallow = [\"system.read\", \"checks.run\"]\n",
+            0o644,
+        );
+        let checks = load(&path, own_uid(&path)).caps();
+        assert_eq!(checks.features, vec!["checks".to_owned()]);
 
         let denied = PolicyState::Invalid {
             reason: "broken".to_owned(),
