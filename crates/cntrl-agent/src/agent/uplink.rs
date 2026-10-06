@@ -1336,12 +1336,12 @@ async fn physical_disks() -> Result<Vec<String>, CallError> {
 }
 
 /// What the machine can do about power. Reading it needs no root (angle 10).
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn power_info() -> Result<PowerInfo, HostError> {
     cntrl_host::power::info().await
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn power_info() -> Result<PowerInfo, HostError> {
     Err(HostError::Unsupported)
 }

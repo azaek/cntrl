@@ -719,22 +719,22 @@ async fn power(
     serde_json::to_value(PowerStarted { action }).map_err(|e| CallError::internal(e.to_string()))
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn power_check(action: PowerAction) -> Result<(), HostError> {
     cntrl_host::power::check(action).await
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn power_act(action: PowerAction) -> Result<(), HostError> {
     cntrl_host::power::act(action).await
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn power_check(_action: PowerAction) -> Result<(), HostError> {
     Err(HostError::Unsupported)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn power_act(_action: PowerAction) -> Result<(), HostError> {
     Err(HostError::Unsupported)
 }

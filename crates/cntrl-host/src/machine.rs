@@ -12,14 +12,19 @@ pub fn hostname() -> Option<String> {
     {
         crate::macos::hostname()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        crate::windows::hostname()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         None
     }
 }
 
 /// An ID that stays with the machine: systemd's machine ID on Linux, the
-/// hardware UUID on macOS. Callers hash it before it leaves the machine.
+/// hardware UUID on macOS, the installation's MachineGuid on Windows. Callers
+/// hash it before it leaves the machine.
 pub fn machine_id() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
@@ -29,7 +34,11 @@ pub fn machine_id() -> Option<String> {
     {
         crate::macos::machine_id()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        crate::windows::machine_id()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         None
     }
@@ -45,7 +54,11 @@ pub fn boot_id() -> Option<String> {
     {
         crate::macos::boot_id()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        crate::windows::boot_id()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         None
     }

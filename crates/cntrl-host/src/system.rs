@@ -23,7 +23,11 @@ pub fn backend() -> Arc<dyn System> {
     {
         Arc::new(crate::macos::MacSystem)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        Arc::new(crate::windows::WinSystem)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         Arc::new(crate::Unsupported)
     }

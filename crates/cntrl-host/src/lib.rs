@@ -24,6 +24,8 @@ pub mod storage;
 pub mod system;
 #[cfg(target_os = "linux")]
 pub mod systemd;
+#[cfg(windows)]
+pub mod windows;
 
 /// Why a host capability couldn't answer.
 #[derive(Debug, Clone, PartialEq, Eq)]

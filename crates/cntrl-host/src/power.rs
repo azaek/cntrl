@@ -2,22 +2,23 @@
 //! and whether it comes back, for `power.info`, which needs no root; and the
 //! actions themselves, which only privd takes, as root. Linux goes through
 //! logind, falling back to `systemctl` where logind isn't running, as in a
-//! container; macOS through `shutdown` and `pmset`. The parsers are plain
-//! Rust, so they build and their tests run on any OS.
+//! container; macOS through `shutdown` and `pmset`; Windows through
+//! InitiateShutdownW and SetSuspendState (`windows::power`). The parsers are
+//! plain Rust, so they build and their tests run on any OS.
 
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use std::fs;
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use std::path::Path;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 use cntrl_protocol::power::PowerAction;
 #[cfg(any(target_os = "macos", test))]
 use cntrl_protocol::power::Session;
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use cntrl_protocol::power::WakeOnLan;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 use crate::HostError;
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use crate::hwmon::{entries, read};
@@ -163,8 +164,8 @@ pub(crate) fn can(answer: &str) -> (bool, bool) {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn unavailable(action: PowerAction) -> HostError {
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn unavailable(action: PowerAction) -> HostError {
     let what = match action {
         PowerAction::Reboot => "restart",
         PowerAction::Poweroff => "shut down",
@@ -179,6 +180,9 @@ pub use linux::{act, check, info};
 
 #[cfg(target_os = "macos")]
 pub use macos::{act, check, info};
+
+#[cfg(windows)]
+pub use crate::windows::power::{act, check, info};
 
 #[cfg(target_os = "linux")]
 mod linux {
