@@ -24,6 +24,7 @@ use super::local_api::{
     HistoryClearCommand, HistoryKeepCommand, PauseCommand, PauseOutcome, ResumeOutcome, Status,
 };
 use super::policy::{self, Policy, PolicyState, Source};
+use super::say::{say, say_err};
 use super::uplink::{UplinkStatus, now_ms};
 
 pub fn print_status(config: &Config, json: bool) -> ExitCode {
@@ -34,22 +35,22 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
     if json {
         return match serde_json::to_string_pretty(&status) {
             Ok(text) => {
-                println!("{text}");
+                say!("{text}");
                 ExitCode::SUCCESS
             }
             Err(e) => fail(&e.to_string()),
         };
     }
-    println!(
+    say!(
         "cntrl-agent {}, up {} (pid {})",
         status.version,
         uptime(status.uptime_s),
         status.pid
     );
     match &status.uplink {
-        UplinkStatus::NotEnrolled => println!("uplink: not enrolled"),
+        UplinkStatus::NotEnrolled => say!("uplink: not enrolled"),
         UplinkStatus::Connecting { gateway, attempt } => {
-            println!("uplink: connecting to {gateway} (attempt {})", attempt + 1);
+            say!("uplink: connecting to {gateway} (attempt {})", attempt + 1);
         }
         UplinkStatus::Online {
             gateway,
@@ -57,7 +58,7 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
             since_ms,
         } => {
             let up = now_ms().saturating_sub(*since_ms) / 1000;
-            println!(
+            say!(
                 "uplink: online at {gateway} for {} (session {session})",
                 uptime(up)
             );
@@ -67,9 +68,9 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
             retry_at_ms,
         } => {
             let wait = retry_at_ms.saturating_sub(now_ms()).div_ceil(1000);
-            println!("uplink: retrying in {wait}s; {reason}");
+            say!("uplink: retrying in {wait}s; {reason}");
         }
-        UplinkStatus::Stopped { reason } => println!("uplink: stopped; {reason}"),
+        UplinkStatus::Stopped { reason } => say!("uplink: stopped; {reason}"),
         UplinkStatus::Paused {
             by,
             reason,
@@ -80,24 +81,24 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
                 .as_deref()
                 .map(|r| format!(": {r}"))
                 .unwrap_or_default();
-            println!(
+            say!(
                 "uplink: paused by {by} {} ago{why}; `sudo cntrl resume` reconnects",
                 uptime(ago)
             );
         }
     }
     if let Some(device) = &status.device_id {
-        println!("device: {device}");
+        say!("device: {device}");
     }
     match (&status.privd.policy, &status.privd.error) {
         (Some(policy), _) => {
-            println!("privd: reachable");
+            say!("privd: reachable");
             print_policy_state(policy);
         }
-        (None, Some(e)) => println!("privd: unreachable ({e})"),
-        (None, None) => println!("privd: reachable, but its policy reply was unreadable"),
+        (None, Some(e)) => say!("privd: unreachable ({e})"),
+        (None, None) => say!("privd: reachable, but its policy reply was unreadable"),
     }
-    println!("config: {}", status.config);
+    say!("config: {}", status.config);
     ExitCode::SUCCESS
 }
 
@@ -118,11 +119,11 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, replace: bool) -> 
         let refused = match send_enroll(config, &token, force) {
             Ok(Ok(outcome)) => {
                 match &outcome.replaced {
-                    Some(old) => println!("Enrolled as {}, replacing {old}.", outcome.device_id),
-                    None => println!("Enrolled as {}.", outcome.device_id),
+                    Some(old) => say!("Enrolled as {}, replacing {old}.", outcome.device_id),
+                    None => say!("Enrolled as {}.", outcome.device_id),
                 }
-                println!("Device key fingerprint: {}", outcome.fingerprint);
-                println!("Check that Console shows the same fingerprint.");
+                say!("Device key fingerprint: {}", outcome.fingerprint);
+                say!("Check that Console shows the same fingerprint.");
                 return ExitCode::SUCCESS;
             }
             Ok(Err(refused)) => refused,
@@ -131,7 +132,7 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, replace: bool) -> 
         let to = refused.to.as_deref().unwrap_or("the token's account");
         match refused.code {
             EnrollErrorCode::AlreadyEnrolled => {
-                println!("This machine is already in {to}; nothing changed.");
+                say!("This machine is already in {to}; nothing changed.");
                 return ExitCode::SUCCESS;
             }
             EnrollErrorCode::ConfirmMove if !force => {
@@ -238,10 +239,10 @@ pub fn change_capabilities(config: &Config, allow: &[String], deny: &[String]) -
         Err(e) => return fail(&e),
     };
     for name in allow.iter().filter(|name| !changed.allowed.contains(name)) {
-        println!("{name} is already allowed.");
+        say!("{name} is already allowed.");
     }
     for name in deny.iter().filter(|name| !changed.denied.contains(name)) {
-        println!("{name} isn't allowed.");
+        say!("{name} isn't allowed.");
     }
     if changed.is_empty() {
         return ExitCode::SUCCESS;
@@ -254,7 +255,7 @@ pub fn change_capabilities(config: &Config, allow: &[String], deny: &[String]) -
         let verb = if done.is_empty() { "Denied" } else { "denied" };
         done.push(format!("{verb} {}", listed(&changed.denied)));
     }
-    println!("{} in {}.", done.join("; "), path.display());
+    say!("{} in {}.", done.join("; "), path.display());
     let reload = request(
         &config.paths.agent_socket,
         Method::POST,
@@ -263,13 +264,13 @@ pub fn change_capabilities(config: &Config, allow: &[String], deny: &[String]) -
     );
     match block_on(reload) {
         Ok((status, _)) if status.is_success() => {
-            println!("The agent is reconnecting with the new policy.");
+            say!("The agent is reconnecting with the new policy.");
         }
-        Ok((_, bytes)) => eprintln!(
+        Ok((_, bytes)) => say_err!(
             "The agent didn't reload: {}",
             String::from_utf8_lossy(&bytes).trim()
         ),
-        Err(_) => println!("The agent isn't running; it reads the policy when it starts."),
+        Err(_) => say!("The agent isn't running; it reads the policy when it starts."),
     }
     ExitCode::SUCCESS
 }
@@ -306,11 +307,11 @@ pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
             let told =
                 serde_json::from_slice::<PauseOutcome>(&bytes).is_ok_and(|outcome| outcome.told);
             if told {
-                println!(
+                say!(
                     "Paused. Console shows this machine as paused, and nothing reaches it until `sudo cntrl resume`."
                 );
             } else {
-                println!(
+                say!(
                     "Paused, but Console couldn't be told, since the link was down: it shows this machine as offline. `sudo cntrl resume` reconnects."
                 );
             }
@@ -335,7 +336,7 @@ pub fn resume(config: &Config) -> ExitCode {
         Ok((status, bytes)) if status.is_success() => {
             let was = serde_json::from_slice::<ResumeOutcome>(&bytes)
                 .is_ok_and(|outcome| outcome.was_paused);
-            println!(
+            say!(
                 "{}",
                 if was {
                     "Resumed; the agent is reconnecting to Console."
@@ -364,18 +365,18 @@ pub fn print_history(config: &Config) -> ExitCode {
             let Ok(store) = serde_json::from_slice::<HistoryStore>(&bytes) else {
                 return fail("the agent's answer didn't read");
             };
-            println!(
+            say!(
                 "Keeps {} of 15-minute points, and 48 hours of 1-minute points, for Console's charts.",
                 days(store.keep_days)
             );
             match store.oldest {
-                Some(oldest) => println!(
+                Some(oldest) => say!(
                     "Since {}: {} in {}.",
                     history::utc(oldest),
                     size(store.bytes),
                     config.paths.state_dir.join(HISTORY_DIR).display()
                 ),
-                None => println!("Nothing recorded yet; the first point comes within a minute."),
+                None => say!("Nothing recorded yet; the first point comes within a minute."),
             }
             ExitCode::SUCCESS
         }
@@ -407,7 +408,7 @@ pub fn keep_history(config: &Config, keep: u32) -> ExitCode {
             let used = serde_json::from_slice::<HistoryStore>(&bytes)
                 .map(|store| size(store.bytes))
                 .unwrap_or_else(|_| "?".to_owned());
-            println!("Keeping {} of history; it takes {used} now.", days(keep));
+            say!("Keeping {} of history; it takes {used} now.", days(keep));
             ExitCode::SUCCESS
         }
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
@@ -427,7 +428,7 @@ pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
         if io::stdin().read_line(&mut answer).is_err()
             || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
         {
-            println!("Kept it.");
+            say!("Kept it.");
             return ExitCode::SUCCESS;
         }
     }
@@ -443,7 +444,7 @@ pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
     ));
     match reply {
         Ok((status, _)) if status.is_success() => {
-            println!("Cleared. The history starts again with the next minute.");
+            say!("Cleared. The history starts again with the next minute.");
             ExitCode::SUCCESS
         }
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
@@ -501,7 +502,7 @@ pub fn print_policy(config: &Config, check_only: bool) -> ExitCode {
     let state = policy::load(&config.paths.policy, 0);
     let valid = matches!(state, PolicyState::Valid { .. });
     if check_only && valid {
-        println!("{}: OK", config.paths.policy.display());
+        say!("{}: OK", config.paths.policy.display());
     } else {
         print_policy_state(&state);
     }
@@ -518,7 +519,7 @@ pub fn print_audit_verify(config: &Config) -> ExitCode {
     match audit::verify(&path) {
         Ok((records, head)) => {
             let head = head.get(..12).unwrap_or(&head);
-            println!(
+            say!(
                 "{}: {records} records, chain intact, head {head}",
                 path.display()
             );
@@ -532,8 +533,8 @@ fn print_policy_state(state: &PolicyState) {
     match state {
         PolicyState::Valid { policy } => print_valid_policy(policy),
         PolicyState::Invalid { reason } => {
-            println!("policy: INVALID, so every remote action is denied");
-            println!("  {reason}");
+            say!("policy: INVALID, so every remote action is denied");
+            say!("  {reason}");
         }
     }
 }
@@ -544,12 +545,12 @@ fn print_valid_policy(policy: &Policy) {
         Source::Default => "built-in monitor-only (no policy file)",
     };
     let hash = policy.hash.get(..12).unwrap_or(&policy.hash);
-    println!("policy: {source}, hash {hash}");
+    say!("policy: {source}, hash {hash}");
     let allow: Vec<&str> = policy.allow.iter().map(String::as_str).collect();
-    println!("  allow: {}", allow.join(", "));
+    say!("  allow: {}", allow.join(", "));
     if !policy.protect.is_empty() {
         let protect: Vec<&str> = policy.protect.iter().map(String::as_str).collect();
-        println!("  protected units: {}", protect.join(", "));
+        say!("  protected units: {}", protect.join(", "));
     }
 }
 
@@ -609,7 +610,7 @@ pub(super) fn block_on<T>(future: impl Future<Output = Result<T, String>>) -> Re
 }
 
 fn fail(message: &str) -> ExitCode {
-    eprintln!("{message}");
+    say_err!("{message}");
     ExitCode::FAILURE
 }
 

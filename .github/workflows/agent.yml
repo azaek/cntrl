@@ -35,10 +35,11 @@ env:
 
 jobs:
     rust:
-        runs-on: ubuntu-latest
+        # Pinned: ubuntu-latest becomes 26.04 on 2026-10-19; move on purpose.
+        runs-on: ubuntu-24.04
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Install Rust
               uses: dtolnay/rust-toolchain@stable
@@ -64,16 +65,16 @@ jobs:
               run: cargo metadata --manifest-path apps/bridge/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
 
     protocol-types:
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Install pnpm
-              uses: pnpm/action-setup@v4
+              uses: pnpm/action-setup@v6
 
             - name: Install Node
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v7
               with:
                   node-version: 22
                   cache: pnpm

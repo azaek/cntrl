@@ -25,6 +25,7 @@ mod paused;
 mod policy;
 mod privd;
 mod processes;
+mod say;
 mod stats;
 mod storage;
 mod supervisor;
@@ -44,6 +45,7 @@ use config::Config;
 use health::Health;
 use local_api::AgentState;
 use outbox::Outbox;
+use say::{say, say_err};
 use supervisor::Supervisor;
 use uplink::{Uplink, UplinkConfig};
 
@@ -56,7 +58,7 @@ pub fn main() -> ExitCode {
     let config = match Config::load(&cli.config) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("{e}");
+            say_err!("{e}");
             return ExitCode::from(EXIT_CONFIG);
         }
     };
@@ -72,7 +74,7 @@ pub fn main() -> ExitCode {
         Command::Pause { reason } => client::pause(&config, reason),
         Command::Resume => client::resume(&config),
         Command::Config(ConfigCommand::Check) => {
-            println!("{}: OK", cli.config.display());
+            say!("{}: OK", cli.config.display());
             ExitCode::SUCCESS
         }
         Command::Policy(PolicyCommand::Show) => client::print_policy(&config, false),

@@ -39,7 +39,7 @@ jobs:
             attestations: write
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Version
               id: version
@@ -72,12 +72,12 @@ jobs:
               run: packaging/archive.sh "${{ steps.version.outputs.version }}" "${{ matrix.target }}" "target/${{ matrix.target }}/release/cntrl-agent" dist
 
             - name: Attest
-              uses: actions/attest-build-provenance@v2
+              uses: actions/attest-build-provenance@v4
               with:
                   subject-path: dist/*.tar.gz
 
             - name: Upload
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: ${{ matrix.target }}
                   path: dist/*.tar.gz
@@ -90,10 +90,10 @@ jobs:
             contents: write
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Download
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                   path: dist
                   merge-multiple: true

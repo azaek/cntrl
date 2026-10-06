@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 use super::client::block_on;
 use super::config::Config;
+use super::say::{say, say_err};
 
 /// The public half of the release key (D21), which signs every release's
 /// manifest.
@@ -56,7 +57,7 @@ struct Artifact {
 pub fn run(config: &Config, check: bool, force: bool) -> ExitCode {
     let current = env!("CARGO_PKG_VERSION");
     if !check && !rustix::process::geteuid().is_root() {
-        eprintln!(
+        say_err!(
             "cntrl update: updating replaces the agent's files; run it as root, with `sudo cntrl update`"
         );
         return ExitCode::FAILURE;
@@ -64,7 +65,7 @@ pub fn run(config: &Config, check: bool, force: bool) -> ExitCode {
     match block_on(update(config, current, check, force)) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("cntrl update: {e}");
+            say_err!("cntrl update: {e}");
             ExitCode::FAILURE
         }
     }
@@ -86,14 +87,14 @@ async fn update(
     let reinstall = force && latest == current;
     if !newer(&latest, current) && !reinstall {
         if newer(current, &latest) {
-            println!("cntrl agent {current} is newer than the latest release, {latest}.");
+            say!("cntrl agent {current} is newer than the latest release, {latest}.");
         } else {
-            println!("cntrl agent {current} is the latest release.");
+            say!("cntrl agent {current} is the latest release.");
         }
         return Ok(ExitCode::SUCCESS);
     }
     if check {
-        println!(
+        say!(
             "cntrl agent {latest} is out; this one is {current}. Update with `sudo cntrl update`."
         );
         return Ok(ExitCode::SUCCESS);
@@ -101,9 +102,9 @@ async fn update(
 
     // Say what's happening before each wait on the network, never after.
     if reinstall {
-        println!("Installing cntrl agent {latest} again. Checking the release's signature…");
+        say!("Installing cntrl agent {latest} again. Checking the release's signature…");
     } else {
-        println!(
+        say!(
             "cntrl agent {latest} is out; this one is {current}. Checking the release's signature…"
         );
     }
@@ -124,7 +125,7 @@ async fn update(
         .artifacts
         .get(&target)
         .ok_or_else(|| format!("release {latest} has no build for {target}"))?;
-    println!(
+    say!(
         "The signature checks. Downloading the build for {target} ({:.1} MB)…",
         megabytes(artifact.size)
     );
@@ -336,7 +337,7 @@ impl Drop for Progress {
     /// its own.
     fn drop(&mut self) {
         if self.drawn.is_some() {
-            eprintln!();
+            say_err!();
         }
     }
 }
