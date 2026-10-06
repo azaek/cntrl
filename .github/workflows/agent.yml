@@ -64,6 +64,37 @@ jobs:
             - name: Bridge stays its own workspace
               run: cargo metadata --manifest-path apps/bridge/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
 
+    windows:
+        # The Windows port (D58): clippy and the tests on x64 and on ARM64,
+        # each on its own hardware, with the MSVC toolchain.
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: windows-2025
+                      target: x86_64-pc-windows-msvc
+                    - runner: windows-11-arm
+                      target: aarch64-pc-windows-msvc
+        runs-on: ${{ matrix.runner }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
+                  components: clippy
+
+            - name: Cache
+              uses: swatinem/rust-cache@v2
+
+            - name: Clippy
+              run: cargo clippy --workspace --all-targets --target ${{ matrix.target }} -- -D warnings
+
+            - name: Test
+              run: cargo test --workspace --target ${{ matrix.target }}
+
     protocol-types:
         runs-on: ubuntu-24.04
         steps:
