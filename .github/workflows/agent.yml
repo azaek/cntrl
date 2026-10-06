@@ -97,11 +97,12 @@ jobs:
 
             - name: GPUs read the same as a virtual account
               # The agent reads GPUs as its service's virtual account, with
-              # no administrator rights (D59). The survey test prints what
-              # reads of each display adapter: run it as an administrator and
-              # as a virtual account set up as the agent's service is, and
-              # compare. cmd.exe isn't a service, so its start fails once the
-              # script is done, which is expected.
+              # no administrator rights (D59). The survey test lists what
+              # reads of each display adapter: run it as an administrator,
+              # then as the process of a service set up as the agent's is,
+              # and compare. The test isn't a service, so the start fails
+              # once it's done, which is expected; a service has no output,
+              # so it writes the file the service's environment names.
               shell: pwsh
               run: |
                   $test = cargo test -p cntrl-host --target ${{ matrix.target }} --no-run --message-format=json |
@@ -113,33 +114,24 @@ jobs:
                   icacls $dir /grant '*S-1-5-6:(OI)(CI)M' | Out-Null
                   Copy-Item $test "$dir\test.exe"
                   $survey = 'windows::gpu::tests::surveys_every_display_adapter'
-                  & "$dir\test.exe" $survey --exact --nocapture > "$dir\admin.txt" 2>&1
-                  if ($LASTEXITCODE -ne 0) { Get-Content "$dir\admin.txt"; Write-Error 'the survey failed as an administrator'; exit 1 }
-                  Set-Content -Path "$dir\run.cmd" -Encoding ascii -Value @(
-                      '@echo off',
-                      'cd /d "%~dp0"',
-                      'whoami /user /groups > whoami.txt 2>&1',
-                      "test.exe $survey --exact --nocapture > service.txt 2>&1 || > failed.txt echo the survey or its output failed",
-                      '> code.txt echo %ERRORLEVEL%'
-                  )
-                  sc.exe create cntrl-gpu-test binPath= "$env:ComSpec /d /c $dir\run.cmd" obj= 'NT SERVICE\cntrl-gpu-test'
+                  $env:CNTRL_GPU_SURVEY = "$dir\admin.txt"
+                  & "$dir\test.exe" $survey --exact
+                  if ($LASTEXITCODE -ne 0) { Write-Error 'the survey failed as an administrator'; exit 1 }
+                  Remove-Item Env:CNTRL_GPU_SURVEY
+                  sc.exe create cntrl-gpu-test binPath= "$dir\test.exe $survey --exact" obj= 'NT SERVICE\cntrl-gpu-test'
                   sc.exe sidtype cntrl-gpu-test unrestricted
                   sc.exe privs cntrl-gpu-test SeChangeNotifyPrivilege
+                  New-ItemProperty -Path HKLM:\SYSTEM\CurrentControlSet\Services\cntrl-gpu-test -Name Environment -PropertyType MultiString -Value "CNTRL_GPU_SURVEY=$dir\service.txt" | Out-Null
                   sc.exe start cntrl-gpu-test
                   $deadline = (Get-Date).AddMinutes(2)
-                  while (-not (Test-Path "$dir\code.txt") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+                  while (-not (Select-String -Path "$dir\service.txt" -Pattern '^survey: end' -Quiet -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
                   sc.exe delete cntrl-gpu-test
-                  Get-ChildItem $dir | Format-Table Name, Length -AutoSize | Out-String
-                  'The account:'; Get-Content "$dir\whoami.txt" -ErrorAction SilentlyContinue
-                  Get-Content "$dir\failed.txt" -ErrorAction SilentlyContinue
-                  $lines = { param($file) Get-Content $file -ErrorAction SilentlyContinue | Select-String '(adapter|gpus): .*' | ForEach-Object { $_.Matches[0].Value } }
+                  $lines = { param($file) Get-Content $file -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(adapter|gpus): ' } }
                   $admin = (& $lines "$dir\admin.txt") -join "`n"
                   $service = (& $lines "$dir\service.txt") -join "`n"
-                  'As an administrator:'; $admin
                   'As a virtual account:'; Get-Content "$dir\service.txt" -ErrorAction SilentlyContinue
-                  if (-not (Test-Path "$dir\code.txt")) { Write-Error 'the survey never finished'; exit 1 }
-                  $code = (Get-Content "$dir\code.txt").Trim()
-                  if ($code -ne '0' -or (Test-Path "$dir\failed.txt")) { Write-Error "the survey failed as a virtual account ($code)"; exit 1 }
+                  if (-not (Select-String -Path "$dir\service.txt" -Pattern '^survey: end' -Quiet -ErrorAction SilentlyContinue)) { Write-Error 'the survey never finished as a virtual account'; exit 1 }
+                  if (Select-String -Path "$dir\service.txt" -Pattern '^problem: ' -Quiet) { Write-Error 'the survey found problems as a virtual account'; exit 1 }
                   if (-not $admin -or $admin -ne $service) { Write-Error 'a virtual account reads differently from an administrator'; exit 1 }
                   exit 0
 

@@ -421,42 +421,62 @@ mod tests {
     use super::*;
 
     /// Each display adapter Windows lists, software ones too, as a line of
-    /// what reads of it. CI's machines have no GPU, but what the agent
-    /// can't read of their adapters it couldn't read of one: CI runs this
-    /// as an administrator and as a virtual account set up as the agent's
-    /// service is, and compares the lines (D59).
+    /// what reads of it, then the GPUs read and any problem. CI's machines
+    /// have no GPU, but what the agent can't read of their adapters it
+    /// couldn't read of one: CI runs this as an administrator and as a
+    /// virtual account set up as the agent's service is, and compares the
+    /// lines (D59). A service has no output, so CI names a file for them in
+    /// `CNTRL_GPU_SURVEY`, and problems are lines rather than panics.
     #[test]
     fn surveys_every_display_adapter() {
+        let mut lines = Vec::new();
+        let mut problems = Vec::new();
         let listed = interfaces().len();
-        assert!(listed > 0, "Windows lists display adapters");
+        if listed == 0 {
+            problems.push("Windows lists no display adapter".to_owned());
+        }
         let adapters = adapters();
-        assert_eq!(adapters.len(), listed, "each opens, with its counts");
+        if adapters.len() != listed {
+            problems.push(format!("{} of {listed} adapters opened", adapters.len()));
+        }
         for adapter in &adapters {
             let (line, complete) = survey(adapter);
-            println!("adapter: {line}");
-            assert!(complete || !adapter.is_gpu(), "a GPU reads in full: {line}");
+            if !complete && adapter.is_gpu() {
+                problems.push(format!("a GPU didn't read in full: {line}"));
+            }
+            lines.push(format!("adapter: {line}"));
         }
-
         let times = EngineTimes::default();
         let gpus = [gpus(&times), gpus(&times)];
-        println!("gpus: {}", gpus[1].len());
-        for gpu in gpus.iter().flatten() {
-            assert!(!gpu.name.is_empty());
-            // None with a driver older than WDDM 2.0, which keeps no
-            // engine statistics.
-            assert!(
-                gpu.busy.is_none_or(|busy| (0.0..=1.0).contains(&busy)),
-                "{gpu:?}"
-            );
+        lines.push(format!("gpus: {}", gpus[1].len()));
+        // A GPU's use is None with a driver that keeps no engine statistics.
+        problems.extend(
+            gpus.iter()
+                .flatten()
+                .filter(|gpu| {
+                    gpu.name.is_empty() || gpu.busy.is_some_and(|busy| !(0.0..=1.0).contains(&busy))
+                })
+                .map(|gpu| format!("a GPU read wrong: {gpu:?}")),
+        );
+        lines.extend(problems.iter().map(|problem| format!("problem: {problem}")));
+        lines.push("survey: end".to_owned());
+        let text = lines.join("\n");
+        println!("{text}");
+        if let Some(path) = std::env::var_os("CNTRL_GPU_SURVEY") {
+            std::fs::write(path, &text).expect("the survey written");
         }
+        assert!(problems.is_empty(), "{problems:#?}");
     }
 
     /// What reads of the adapter, with the first failure's status for each
-    /// kind of read, and whether everything its driver keeps did: engine
-    /// statistics need WDDM 2.0, as Task Manager's GPU data does.
+    /// kind of read, and whether everything a GPU's driver keeps did. A
+    /// driver from WDDM 2.0 on keeps engine statistics for Task Manager;
+    /// software and display-only adapters, as on CI's machines, don't.
     fn survey(adapter: &Adapter) -> (String, bool) {
-        let node = adapter.node.expect("a device node");
-        let name = description(node).expect("a description");
+        let node = adapter.node;
+        let name = node
+            .and_then(description)
+            .unwrap_or_else(|| "(no description)".to_owned());
         let mut version: D3DKMT_DRIVERVERSION = 0;
         // SAFETY: the driver's version answers into D3DKMT_DRIVERVERSION.
         let versioned = unsafe { adapter.query(KMTQAITYPE_DRIVERVERSION, &mut version) };
@@ -474,7 +494,7 @@ mod tests {
         let mut sizes = D3DKMT_SEGMENTSIZEINFO::default();
         // SAFETY: as in `memory`.
         let sized = unsafe { adapter.query(KMTQAITYPE_GETSEGMENTSIZE, &mut sizes) };
-        let power = power_state(node);
+        let power = node.and_then(power_state);
         // As in `temperature`, only while it's powered on.
         let performance = (power == Some(PowerDeviceD0)).then(|| {
             let mut data = D3DKMT_ADAPTER_PERFDATA::default();
