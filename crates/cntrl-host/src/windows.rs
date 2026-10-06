@@ -1,17 +1,17 @@
 //! The Windows backend (D58): host stats and system info through sysinfo, as
-//! on macOS, with CPU time from `GetSystemTimes`, and what identifies the
-//! machine from the registry. Windows keeps no load average, and its
-//! temperatures and GPUs aren't read yet (angle 14).
+//! on macOS, with CPU time from `GetSystemTimes`, GPUs from the graphics
+//! kernel (D59), and what identifies the machine from the registry. Windows
+//! keeps no load average, and its temperatures aren't read yet (angle 14).
 //!
 //! Windows' calls are C, so this module may use `unsafe`; each block says why
 //! it's sound.
 #![allow(unsafe_code)]
 
 use std::ptr::null_mut;
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use cntrl_protocol::stats::{Filesystem, LoadAverage, MemoryStats, SwapStats};
+use cntrl_protocol::stats::{Filesystem, GpuStats, LoadAverage, MemoryStats, SwapStats};
 use cntrl_protocol::system::{CpuInfo, OsInfo, SystemInfo};
 use sysinfo::{DiskRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind};
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, FILETIME};
@@ -26,13 +26,15 @@ use crate::stats::{Background, CpuTicks, DiskCounters, NetworkCounters, Stats, S
 use crate::system::System;
 
 pub mod eventlog;
+mod gpu;
 pub mod network;
 pub(crate) mod power;
 pub mod services;
 pub mod storage;
 
-/// How often filesystems are looked at while someone watches.
+/// How often filesystems and GPUs are looked at while someone watches.
 const FILESYSTEMS_EVERY: Duration = Duration::from_secs(10);
+const GPUS_EVERY: Duration = Duration::from_secs(2);
 const CURRENT_VERSION: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 const BIOS: &str = r"HARDWARE\DESCRIPTION\System\BIOS";
 
@@ -40,6 +42,8 @@ const BIOS: &str = r"HARDWARE\DESCRIPTION\System\BIOS";
 pub struct WinStats {
     state: Mutex<State>,
     filesystems: Background<Vec<Filesystem>>,
+    gpus: Background<Vec<GpuStats>>,
+    engine_times: Arc<gpu::EngineTimes>,
 }
 
 struct State {
@@ -59,6 +63,8 @@ impl Default for WinStats {
                 networks: Networks::new_with_refreshed_list(),
             }),
             filesystems: Background::new(FILESYSTEMS_EVERY),
+            gpus: Background::new(GPUS_EVERY),
+            engine_times: Arc::default(),
         }
     }
 }
@@ -93,7 +99,10 @@ impl Stats for WinStats {
             network: network_counters(networks),
             filesystems: self.filesystems.get(filesystems),
             temperatures: Vec::new(),
-            gpus: Vec::new(),
+            gpus: self.gpus.get({
+                let times = Arc::clone(&self.engine_times);
+                move || gpu::gpus(&times)
+            }),
         })
     }
 }

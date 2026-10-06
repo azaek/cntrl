@@ -1,8 +1,9 @@
 //! GPUs (angle 09 §5). AMD through amdgpu's sysfs files; NVIDIA through
 //! `nvidia-smi` in loop mode, since a static musl binary can't load NVML
 //! (angle 06 §1.5); Macs through IOKit's `IOAccelerator` statistics, as
-//! `ioreg` prints them. Parsing is plain Rust, so it builds and its tests run on
-//! any OS.
+//! `ioreg` prints them; Windows through its graphics kernel (D59, in
+//! `windows::gpu`), whose arithmetic is here. Parsing is plain Rust, so it
+//! builds and its tests run on any OS.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
@@ -216,6 +217,45 @@ pub(crate) fn mac(listing: &str) -> Vec<GpuStats> {
         .collect()
 }
 
+/// A Windows GPU's use as Task Manager shows it (D59): its busiest engine's
+/// share of the time between two reads, from each engine's running time at
+/// both, in 100 ns units. A time that went backwards, as after the driver
+/// restarts, counts as idle. `None` with nothing to compare.
+#[cfg(any(windows, test))]
+pub(crate) fn busiest(
+    engines: impl IntoIterator<Item = (u64, u64)>,
+    elapsed: Duration,
+) -> Option<f64> {
+    let ticks = elapsed.as_nanos() as f64 / 100.0;
+    if ticks <= 0.0 {
+        return None;
+    }
+    engines
+        .into_iter()
+        .map(|(earlier, now)| now.saturating_sub(earlier) as f64 / ticks)
+        .reduce(f64::max)
+        .map(|share| round(share.min(1.0), 4))
+}
+
+/// A Windows driver's temperature, in tenths of a degree: 0 means it has no
+/// sensor, as integrated GPUs report.
+#[cfg(any(windows, test))]
+pub(crate) fn decicelsius(reading: u32) -> Option<f64> {
+    (reading > 0).then(|| round(f64::from(reading) / 10.0, 1))
+}
+
+/// A device's name as Device Manager shows it. A description can still be
+/// the INF's reference, `@oem12.inf,%nvidia_dev%;NVIDIA GeForce RTX 3070`,
+/// whose text after the last `;` is the name.
+#[cfg(any(windows, test))]
+pub(crate) fn device_name(description: &str) -> Option<String> {
+    let name = match description.strip_prefix('@') {
+        Some(reference) => reference.rsplit_once(';')?.1,
+        None => description,
+    };
+    Some(name.trim().to_owned()).filter(|name| !name.is_empty())
+}
+
 /// Whether the NVIDIA driver is loaded, under a procfs root.
 pub(crate) fn nvidia_driver(proc: &Path) -> bool {
     proc.join("driver/nvidia/version").exists()
@@ -296,6 +336,33 @@ mod tests {
         );
         assert_eq!((gpus[1].busy, gpus[1].memory_used), (Some(0.0), None));
         assert_eq!(amd(Path::new("/nonexistent")), Vec::new());
+    }
+
+    #[test]
+    fn measures_windows_engines() {
+        let second = Duration::from_secs(1);
+        // 3D busy 400 ms of the second, the copy engine 100 ms: the busiest.
+        let engines = [(1_000_000, 5_000_000), (7_000_000, 8_000_000)];
+        assert_eq!(busiest(engines, second), Some(0.4));
+        // A time that went backwards is idle; more than all of it is all.
+        assert_eq!(busiest([(9_000_000, 2_000_000)], second), Some(0.0));
+        assert_eq!(busiest([(0, 30_000_000)], second), Some(1.0));
+        assert_eq!(busiest([], second), None);
+        assert_eq!(busiest([(0, 1)], Duration::ZERO), None);
+
+        assert_eq!(decicelsius(452), Some(45.2));
+        assert_eq!(decicelsius(0), None);
+
+        assert_eq!(
+            device_name("NVIDIA GeForce RTX 3070").as_deref(),
+            Some("NVIDIA GeForce RTX 3070")
+        );
+        assert_eq!(
+            device_name("@oem12.inf,%nvidia_dev.2484%;NVIDIA GeForce RTX 3070").as_deref(),
+            Some("NVIDIA GeForce RTX 3070")
+        );
+        assert_eq!(device_name("@oem12.inf,%nvidia_dev.2484%"), None);
+        assert_eq!(device_name(" "), None);
     }
 
     #[test]

@@ -45,11 +45,15 @@ zbus_systemd = { version = "0.26200", default-features = false, features = ["sys
 
 # Host stats, system info and the process table on Windows, and what sysinfo
 # can't do there: naming service accounts, stopping a process without
-# running taskkill, CPU time and the registry (D58).
+# running taskkill, CPU time, GPUs (D59) and the registry (D58).
 [target.'cfg(windows)'.dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user", "disk", "network"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 windows-sys = { version = "0.61", features = [
+    "Wdk_Graphics_Direct3D",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Display",
+    "Win32_Devices_Properties",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
