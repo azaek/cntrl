@@ -3,6 +3,9 @@
 //! its own calls: the containers with their counters, one container's log,
 //! and start, stop and restart. Paths carry no version prefix, so the engine
 //! answers in its own, and Podman's compatibility layer understands them.
+//! The system's engine is tried first, then a user's: on a Mac, Docker
+//! Desktop and its likes keep their socket in the user's home, and on Linux a
+//! rootless engine keeps it under `/run/user`.
 
 use std::collections::HashMap;
 use std::os::unix::fs::FileTypeExt;
@@ -28,9 +31,22 @@ use tokio::sync::mpsc;
 use super::logs::{Batcher, flush_timer};
 use super::uplink::now_ms;
 
-/// Where engines listen, in the order they're tried: Docker's, then rootful
-/// Podman's.
-const SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/podman/podman.sock"];
+/// Where the system's engines listen, in the order they're tried: Docker's,
+/// then rootful Podman's. On a Mac the first is there only when Docker
+/// Desktop is set to make it.
+const SYSTEM_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/podman/podman.sock"];
+/// Where a Mac's engines keep their socket, in a user's home: Docker Desktop,
+/// OrbStack, Colima and Rancher Desktop.
+#[cfg(target_os = "macos")]
+const HOME_SOCKETS: &[&str] = &[
+    ".docker/run/docker.sock",
+    ".orbstack/run/docker.sock",
+    ".colima/default/docker.sock",
+    ".rd/docker.sock",
+];
+/// Where a rootless engine keeps its socket, in a user's runtime directory.
+#[cfg(target_os = "linux")]
+const RUNTIME_SOCKETS: &[&str] = &["docker.sock", "podman/podman.sock"];
 /// How long a call may take, but for an action, which waits for the
 /// container.
 const CALL_LIMIT: Duration = Duration::from_secs(10);
@@ -130,20 +146,64 @@ pub fn container_name(name: &str) -> Result<&str, String> {
     }
 }
 
-/// The first engine socket there is.
+/// The first engine socket there is: the system's, then a user's.
 async fn socket() -> Option<PathBuf> {
-    for path in SOCKETS {
-        if let Ok(meta) = tokio::fs::metadata(path).await
+    let candidates = tokio::task::spawn_blocking(candidates).await.ok()?;
+    for path in candidates {
+        if let Ok(meta) = tokio::fs::metadata(&path).await
             && meta.file_type().is_socket()
         {
-            return Some(PathBuf::from(path));
+            return Some(path);
         }
     }
     None
 }
 
-const NO_ENGINE: &str =
-    "No Docker or Podman here: there's no /var/run/docker.sock or /run/podman/podman.sock.";
+/// Every place an engine's socket may be, in the order they're tried.
+fn candidates() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let users = candidates_in(Path::new("/Users"), HOME_SOCKETS);
+    #[cfg(target_os = "linux")]
+    let users = candidates_in(Path::new("/run/user"), RUNTIME_SOCKETS);
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let users = Vec::new();
+    SYSTEM_SOCKETS
+        .iter()
+        .map(PathBuf::from)
+        .chain(users)
+        .collect()
+}
+
+/// Each user's sockets, as `sockets` names them under each of `parent`'s
+/// directories: a Mac's homes, or Linux's runtime directories.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn candidates_in(parent: &Path, sockets: &[&str]) -> Vec<PathBuf> {
+    subdirectories(parent)
+        .into_iter()
+        .flat_map(|user| sockets.iter().map(move |socket| user.join(socket)))
+        .collect()
+}
+
+/// A directory's subdirectories, by name, without hidden ones.
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
+fn subdirectories(parent: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .collect();
+    found.sort();
+    found
+}
+
+#[cfg(target_os = "macos")]
+const NO_ENGINE: &str = "No Docker or Podman found: no socket at /var/run/docker.sock, or in a user's Docker Desktop, OrbStack, Colima or Rancher Desktop folder.";
+#[cfg(not(target_os = "macos"))]
+const NO_ENGINE: &str = "No Docker or Podman found: no socket at /var/run/docker.sock or /run/podman/podman.sock, or a rootless one under /run/user.";
 
 /// Every container, and with `counters`, each running one's counters.
 pub async fn list(counters: bool) -> Listing {
@@ -165,6 +225,7 @@ pub async fn list(counters: bool) -> Listing {
         kind: if version
             .components
             .iter()
+            .flatten()
             .any(|component| component.name.to_lowercase().contains("podman"))
         {
             EngineKind::Podman
@@ -565,7 +626,8 @@ fn container(summary: Summary) -> Container {
     let labels = summary.labels.unwrap_or_default();
     let name = summary
         .names
-        .first()
+        .as_deref()
+        .and_then(<[String]>::first)
         .map(|name| name.trim_start_matches('/').to_owned())
         .unwrap_or_else(|| summary.id.chars().take(12).collect());
     let health = summary
@@ -586,6 +648,7 @@ fn container(summary: Summary) -> Container {
         });
     let mut ports: Vec<ContainerPort> = summary
         .ports
+        .unwrap_or_default()
         .into_iter()
         .map(|port| ContainerPort {
             ip: port
@@ -633,7 +696,7 @@ struct Version {
     #[serde(default)]
     version: String,
     #[serde(default)]
-    components: Vec<Component>,
+    components: Option<Vec<Component>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -643,13 +706,14 @@ struct Component {
     name: String,
 }
 
-/// An entry of `/containers/json`, as much of it as is used.
+/// An entry of `/containers/json`, as much of it as is used. Docker 29 sends
+/// `null` for a container's empty ports, so lists may be absent or null.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Summary {
     id: String,
     #[serde(default)]
-    names: Vec<String>,
+    names: Option<Vec<String>>,
     #[serde(default)]
     image: String,
     #[serde(default)]
@@ -659,7 +723,7 @@ struct Summary {
     #[serde(default)]
     status: String,
     #[serde(default)]
-    ports: Vec<Port>,
+    ports: Option<Vec<Port>>,
     #[serde(default)]
     labels: Option<HashMap<String, String>>,
     #[serde(default)]
@@ -870,6 +934,55 @@ mod tests {
     }
 
     #[test]
+    fn looks_in_each_users_folder_after_the_systems() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        for user in ["bob", "alice", ".hidden"] {
+            std::fs::create_dir(dir.path().join(user)).expect("a home");
+        }
+        std::fs::write(dir.path().join("notes.txt"), "").expect("a file");
+        let found = candidates_in(dir.path(), &[".docker/run/docker.sock", ".rd/docker.sock"]);
+        let names: Vec<String> = found
+            .iter()
+            .map(|path| {
+                path.strip_prefix(dir.path())
+                    .expect("under it")
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "alice/.docker/run/docker.sock",
+                "alice/.rd/docker.sock",
+                "bob/.docker/run/docker.sock",
+                "bob/.rd/docker.sock"
+            ]
+        );
+        assert_eq!(candidates()[0], PathBuf::from("/var/run/docker.sock"));
+    }
+
+    /// Asks this machine's engine, wherever it listens:
+    /// `cargo test -p cntrl-agent lists_this_machines_engine -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "needs a running Docker or Podman"]
+    async fn lists_this_machines_engine() {
+        let listing = list(true).await;
+        println!("socket: {:?}", socket().await);
+        println!("engine: {:?}, note: {:?}", listing.engine, listing.note);
+        for listed in &listing.containers {
+            println!(
+                "  {} {:?} {} counters: {}",
+                listed.container.name,
+                listed.container.state,
+                listed.container.image,
+                listed.counters.is_some()
+            );
+        }
+        assert!(listing.engine.is_some(), "{:?}", listing.note);
+    }
+
+    #[test]
     fn checks_names_before_they_go_in_a_path() {
         assert_eq!(container_name("web-1"), Ok("web-1"));
         assert_eq!(container_name("3f2a9c1b7d4e"), Ok("3f2a9c1b7d4e"));
@@ -907,6 +1020,26 @@ mod tests {
         assert_eq!(container.ports.len(), 2);
         assert_eq!(container.ports[0].public, Some(8080));
         assert_eq!(container.ports[0].ip, None);
+    }
+
+    #[test]
+    fn takes_null_lists_as_docker_29_sends_them() {
+        let summary: Summary = serde_json::from_value(serde_json::json!({
+            "Id": "d568690dea0731bf1fb0fd0fc91dc90014f7a361f90303083d1cac59cc99faec",
+            "Names": ["/cntrl-linux-dev"],
+            "Image": "cntrl-linux-box",
+            "Created": 1_791_022_215,
+            "Ports": null,
+            "Labels": null,
+            "State": "running",
+            "Status": "Up 2 days",
+            "Health": {"Status": "none", "FailingStreak": 0}
+        }))
+        .expect("a summary");
+        let container = container(summary);
+        assert!(container.ports.is_empty());
+        assert_eq!(container.health, None);
+        assert_eq!(container.name, "cntrl-linux-dev");
     }
 
     #[test]
