@@ -10,12 +10,14 @@ use std::fs;
 #[cfg(any(target_os = "linux", test))]
 use std::path::Path;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use cntrl_protocol::power::PowerAction;
 #[cfg(any(target_os = "macos", test))]
 use cntrl_protocol::power::Session;
 #[cfg(any(target_os = "linux", test))]
 use cntrl_protocol::power::WakeOnLan;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::HostError;
 #[cfg(any(target_os = "linux", test))]
 use crate::hwmon::{entries, read};
@@ -161,6 +163,7 @@ pub(crate) fn can(answer: &str) -> (bool, bool) {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn unavailable(action: PowerAction) -> HostError {
     let what = match action {
         PowerAction::Reboot => "restart",

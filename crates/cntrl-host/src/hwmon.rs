@@ -165,7 +165,10 @@ pub(crate) fn entries(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
+// The fixtures build a sysfs tree with symlinks, as Linux has. Two
+// attributes, so clippy still knows this module for tests.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 

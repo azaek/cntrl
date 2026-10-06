@@ -93,6 +93,8 @@ pub struct NetworkReader {
     mac: mac::Extras,
 }
 
+// Elsewhere the reader has no fields yet, so the impl reads as derivable.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(clippy::derivable_impls))]
 impl Default for NetworkReader {
     fn default() -> Self {
         Self {
