@@ -125,6 +125,30 @@ define_ops! {
         capability: "system.read",
         since: 1,
     },
+    /// A span of the history the device keeps, cut into columns: each
+    /// metric's lowest, highest and average reading in each (D52).
+    HistoryRead = "history.read" {
+        params: crate::history::HistoryParams,
+        result: crate::history::History,
+        capability: "system.read",
+        since: 1,
+    },
+    /// How many days of history the device keeps; fewer deletes the older
+    /// days at once (D52).
+    HistoryKeep = "history.keep" {
+        params: crate::history::HistoryKeep,
+        result: crate::history::HistoryStore,
+        capability: "history.manage",
+        since: 1,
+    },
+    /// Deletes all the history the device keeps; it starts again with the
+    /// next minute (D52).
+    HistoryClear = "history.clear" {
+        params: crate::system::NoParams,
+        result: crate::history::HistoryStore,
+        capability: "history.manage",
+        since: 1,
+    },
 }
 
 define_topics! {

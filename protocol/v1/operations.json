@@ -177,6 +177,39 @@
       "result": {
         "$ref": "#/$defs/DisksHealth"
       }
+    },
+    {
+      "name": "history.read",
+      "capability": "system.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/HistoryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/History"
+      }
+    },
+    {
+      "name": "history.keep",
+      "capability": "history.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/HistoryKeep"
+      },
+      "result": {
+        "$ref": "#/$defs/HistoryStore"
+      }
+    },
+    {
+      "name": "history.clear",
+      "capability": "history.manage",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/NoParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HistoryStore"
+      }
     }
   ],
   "topics": [

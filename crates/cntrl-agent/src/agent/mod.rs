@@ -9,6 +9,7 @@ mod config;
 mod digest;
 mod enroll;
 mod health;
+mod history;
 mod host;
 mod identity;
 mod ipc;
@@ -38,7 +39,7 @@ use std::sync::Arc;
 use clap::Parser;
 use tracing::{error, info, warn};
 
-use cli::{AuditCommand, Cli, Command, ConfigCommand, PolicyCommand};
+use cli::{AuditCommand, Cli, Command, ConfigCommand, HistoryCommand, PolicyCommand};
 use config::Config;
 use health::Health;
 use local_api::AgentState;
@@ -83,6 +84,9 @@ pub fn main() -> ExitCode {
             client::change_capability(&config, &capability, false)
         }
         Command::Audit(AuditCommand::Verify) => client::print_audit_verify(&config),
+        Command::History(HistoryCommand::Show) => client::print_history(&config),
+        Command::History(HistoryCommand::Keep { days }) => client::keep_history(&config, days),
+        Command::History(HistoryCommand::Clear { yes }) => client::clear_history(&config, yes),
     }
 }
 
@@ -118,6 +122,7 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
         let alert_rules = Arc::new(alerts::Alerts::open(&state_dir).await);
+        let history = Arc::new(history::History::open(&state_dir));
         let privd_socket = config.paths.privd_socket.clone();
         let uplink_config = UplinkConfig {
             state_dir: state_dir.clone(),
@@ -129,12 +134,14 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
             storage: Arc::clone(&latest_storage),
             outbox: Arc::clone(&outbox),
             alerts: Arc::clone(&alert_rules),
+            history: Arc::clone(&history),
         };
         let state = Arc::new(AgentState::new(
             config,
             config_path.to_owned(),
             Arc::clone(&health),
             Arc::clone(&uplink),
+            Arc::clone(&history),
         ));
 
         let mut supervisor = Supervisor::new();
@@ -157,6 +164,10 @@ fn run(config_path: &Path, config: Config) -> ExitCode {
                 Arc::clone(&outbox),
                 token.clone(),
             ),
+        );
+        supervisor.spawn(
+            "history",
+            history::run(history, Arc::clone(&host_stats), token.clone()),
         );
         supervisor.spawn("stats", stats::run(host_stats, latest_stats, token.clone()));
         supervisor.spawn(

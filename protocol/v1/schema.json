@@ -1826,6 +1826,224 @@
         }
       ]
     },
+    "HistoryParams": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Where the span starts, in Unix milliseconds."
+        },
+        "to": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Where it ends, in Unix milliseconds."
+        },
+        "columns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many columns to cut it into, from 1 to 500."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "columns"
+      ],
+      "description": "What `history.read` asks for: a span of time, cut into columns."
+    },
+    "History": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "to": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "columns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "series": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistorySeries"
+          },
+          "description": "Each metric the device recorded, with one entry per column."
+        },
+        "store": {
+          "$ref": "#/$defs/HistoryStore"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "columns",
+        "series",
+        "store"
+      ],
+      "description": "A span of the device's history, cut into columns."
+    },
+    "HistorySeries": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "$ref": "#/$defs/HistoryMetric"
+        },
+        "spans": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Span"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "Oldest first; null where nothing was recorded."
+        }
+      },
+      "required": [
+        "metric",
+        "spans"
+      ],
+      "description": "One metric across a span's columns."
+    },
+    "HistoryMetric": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "cpu",
+          "description": "CPU in use, from 0 to 1."
+        },
+        {
+          "type": "string",
+          "const": "memory",
+          "description": "Memory in use, from 0 to 1."
+        },
+        {
+          "type": "string",
+          "const": "swap",
+          "description": "Swap in use, from 0 to 1."
+        },
+        {
+          "type": "string",
+          "const": "load",
+          "description": "The 1-minute load average."
+        },
+        {
+          "type": "string",
+          "const": "network",
+          "description": "Bytes per second on the physical interfaces, in and out together."
+        },
+        {
+          "type": "string",
+          "const": "disk",
+          "description": "Bytes per second on the physical disks, read and written together."
+        },
+        {
+          "type": "string",
+          "const": "disk_used",
+          "description": "The fullest filesystem's used share, from 0 to 1."
+        },
+        {
+          "type": "string",
+          "const": "temperature",
+          "description": "The CPU's temperature, in degrees Celsius."
+        },
+        {
+          "type": "string",
+          "const": "gpu",
+          "description": "The busiest GPU, from 0 to 1."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A metric from a newer agent."
+        }
+      ],
+      "description": "What the device keeps a history of."
+    },
+    "Span": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "number",
+          "format": "double"
+        },
+        "max": {
+          "type": "number",
+          "format": "double"
+        },
+        "avg": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "min",
+        "max",
+        "avg"
+      ],
+      "description": "A metric over one column: its lowest and highest reading and their average."
+    },
+    "HistoryStore": {
+      "type": "object",
+      "properties": {
+        "keep_days": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many days of 15-minute points it keeps; 1-minute points are kept\nfor 48 hours."
+        },
+        "oldest": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "The oldest point kept, in Unix milliseconds."
+        },
+        "bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Bytes on disk."
+        }
+      },
+      "required": [
+        "keep_days",
+        "bytes"
+      ],
+      "description": "What the device keeps, and the room it takes."
+    },
+    "HistoryKeep": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many days of history to keep, from 1 to 365. Fewer than before\ndeletes the older days at once."
+        }
+      },
+      "required": [
+        "days"
+      ],
+      "description": "What `history.keep` asks for."
+    },
     "StatsParams": {
       "type": "object",
       "properties": {

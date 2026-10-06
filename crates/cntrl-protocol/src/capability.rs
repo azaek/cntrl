@@ -15,6 +15,7 @@ pub const CAPABILITIES: &[&str] = &[
     "services.manage",
     "logs.read",
     "network.read",
+    "history.manage",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.

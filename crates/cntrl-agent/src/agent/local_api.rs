@@ -1,6 +1,6 @@
 //! The local API: HTTP and JSON over a Unix socket, for the `cntrl` CLI. Reads are
-//! open to the socket's group; anything that changes who controls the machine
-//! needs a root peer. It also answers
+//! open to the socket's group; anything that changes who controls the machine,
+//! or deletes what it recorded, needs a root peer. It also answers
 //! `curl --unix-socket /run/cntrl-agent/agent.sock http://cntrl/v1/status`.
 
 use std::fs;
@@ -15,7 +15,9 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::serve::IncomingStream;
 use axum::{Json, Router};
+use cntrl_protocol::ErrorCode;
 use cntrl_protocol::enroll::EnrollErrorCode;
+use cntrl_protocol::history::HistoryStore;
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
@@ -23,10 +25,11 @@ use tokio_util::sync::CancellationToken;
 use super::config::Config;
 use super::enroll::{self, EnrollCommand, EnrollFailure, EnrollOutcome};
 use super::health::Health;
+use super::history::History;
 use super::identity;
 use super::ipc::{self, Call};
 use super::policy::PolicyState;
-use super::uplink::{Uplink, UplinkStatus};
+use super::uplink::{Uplink, UplinkStatus, now_ms};
 
 /// What the local API reads from the running agent.
 pub struct AgentState {
@@ -34,6 +37,7 @@ pub struct AgentState {
     config_path: PathBuf,
     health: Arc<Health>,
     uplink: Arc<Uplink>,
+    history: Arc<History>,
 }
 
 impl AgentState {
@@ -42,12 +46,14 @@ impl AgentState {
         config_path: PathBuf,
         health: Arc<Health>,
         uplink: Arc<Uplink>,
+        history: Arc<History>,
     ) -> Self {
         Self {
             config,
             config_path,
             health,
             uplink,
+            history,
         }
     }
 
@@ -173,6 +179,9 @@ pub async fn serve(
         .route("/v1/policy/reload", post(reload_policy))
         .route("/v1/pause", post(pause))
         .route("/v1/resume", post(resume))
+        .route("/v1/history", get(history))
+        .route("/v1/history/keep", post(keep_history))
+        .route("/v1/history/clear", post(clear_history))
         .with_state(state);
     axum::serve(listener, app.into_make_service_with_connect_info::<Peer>())
         .with_graceful_shutdown(async move { token.cancelled().await })
@@ -303,6 +312,105 @@ async fn resume(
     Ok(Json(ResumeOutcome { was_paused }))
 }
 
+/// What `cntrl history keep` sends: who ran it, and the days.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryKeepCommand {
+    pub by: String,
+    pub days: u32,
+}
+
+/// What `cntrl history clear` sends: who ran it.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryClearCommand {
+    pub by: String,
+}
+
+/// `cntrl history show`: how many days are kept, since when, and the room
+/// it takes (D52).
+async fn history(
+    State(state): State<Arc<AgentState>>,
+) -> Result<Json<HistoryStore>, (StatusCode, String)> {
+    let history = Arc::clone(&state.history);
+    tokio::task::spawn_blocking(move || history.store())
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+/// `cntrl history keep <days>`: fewer days deletes the older ones at once.
+async fn keep_history(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+    Json(command): Json<HistoryKeepCommand>,
+) -> Result<Json<HistoryStore>, (StatusCode, String)> {
+    if peer.uid != Some(0) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only root changes how much history is kept; run `sudo cntrl history keep`".to_owned(),
+        ));
+    }
+    let history = Arc::clone(&state.history);
+    let days = command.days;
+    let store = tokio::task::spawn_blocking(move || history.keep(days, now_ms()))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(refusal)?;
+    record(
+        &state,
+        "history.kept",
+        serde_json::json!({ "by": command.by, "days": days }),
+    )
+    .await;
+    Ok(Json(store))
+}
+
+/// `cntrl history clear`: deletes all of it.
+async fn clear_history(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+    Json(command): Json<HistoryClearCommand>,
+) -> Result<Json<HistoryStore>, (StatusCode, String)> {
+    if peer.uid != Some(0) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only root clears the history; run `sudo cntrl history clear`".to_owned(),
+        ));
+    }
+    let history = Arc::clone(&state.history);
+    let store = tokio::task::spawn_blocking(move || history.clear())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(refusal)?;
+    record(
+        &state,
+        "history.cleared",
+        serde_json::json!({ "by": command.by }),
+    )
+    .await;
+    Ok(Json(store))
+}
+
+fn refusal(error: ipc::CallError) -> (StatusCode, String) {
+    let status = if error.code == ErrorCode::BadRequest {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    (status, error.msg)
+}
+
+/// Records a change made on the machine in the audit log. privd may be
+/// missing in a run by hand, so a failure here is only a warning.
+async fn record(state: &AgentState, kind: &str, data: serde_json::Value) {
+    let call = Call::AuditAppend {
+        kind: kind.to_owned(),
+        data,
+    };
+    if let Err(e) = ipc::call_once(&state.config.paths.privd_socket, call).await {
+        tracing::warn!("couldn't record {kind} in the audit log: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyper::Method;
@@ -333,6 +441,7 @@ mod tests {
             "/etc/cntrl/agent.toml".into(),
             Arc::new(Health::new()),
             Arc::new(Uplink::new()),
+            Arc::new(History::open(dir)),
         ));
         let token = CancellationToken::new();
         let server = tokio::spawn(serve(listener, state, token.clone()));

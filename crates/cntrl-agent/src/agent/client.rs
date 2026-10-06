@@ -1,6 +1,6 @@
 //! The CLI commands that talk to the running agent or read its files:
-//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check|allow` and
-//! `cntrl audit verify`.
+//! `cntrl status`, `cntrl enroll`, `cntrl policy show|check|allow`,
+//! `cntrl audit verify` and `cntrl history show|keep|clear`.
 
 use std::fs;
 use std::future::Future;
@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use cntrl_protocol::enroll::{EnrollError, EnrollErrorCode, EnrollToken};
+use cntrl_protocol::history::HistoryStore;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::{Method, Request, StatusCode, header};
@@ -18,7 +19,10 @@ use tokio::net::UnixStream;
 use super::audit;
 use super::config::Config;
 use super::enroll::{EnrollCommand, EnrollOutcome};
-use super::local_api::{PauseCommand, PauseOutcome, ResumeOutcome, Status};
+use super::history::{self, HISTORY_DIR};
+use super::local_api::{
+    HistoryClearCommand, HistoryKeepCommand, PauseCommand, PauseOutcome, ResumeOutcome, Status,
+};
 use super::policy::{self, Policy, PolicyState, Source};
 use super::uplink::{UplinkStatus, now_ms};
 
@@ -258,12 +262,10 @@ pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
     if !rustix::process::geteuid().is_root() {
         return fail("pausing cuts Console off from this machine; run `sudo cntrl pause`");
     }
-    // Who ran sudo, as this machine names them.
-    let by = std::env::var("SUDO_USER")
-        .ok()
-        .filter(|user| !user.is_empty())
-        .unwrap_or_else(|| "root".to_owned());
-    let body = match serde_json::to_vec(&PauseCommand { by, reason }) {
+    let body = match serde_json::to_vec(&PauseCommand {
+        by: invoker(),
+        reason,
+    }) {
         Ok(body) => body,
         Err(e) => return fail(&e.to_string()),
     };
@@ -318,6 +320,133 @@ pub fn resume(config: &Config) -> ExitCode {
         }
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
         Err(_) => fail("the agent isn't running; start its service to bring it back"),
+    }
+}
+
+/// `cntrl history show`: how many days the machine keeps, since when, and the
+/// room it takes (D52).
+pub fn print_history(config: &Config) -> ExitCode {
+    let reply = block_on(request(
+        &config.paths.agent_socket,
+        Method::GET,
+        "/v1/history",
+        Vec::new(),
+    ));
+    match reply {
+        Ok((status, bytes)) if status.is_success() => {
+            let Ok(store) = serde_json::from_slice::<HistoryStore>(&bytes) else {
+                return fail("the agent's answer didn't read");
+            };
+            println!(
+                "Keeps {} of 15-minute points, and 48 hours of 1-minute points, for Console's charts.",
+                days(store.keep_days)
+            );
+            match store.oldest {
+                Some(oldest) => println!(
+                    "Since {}: {} in {}.",
+                    history::utc(oldest),
+                    size(store.bytes),
+                    config.paths.state_dir.join(HISTORY_DIR).display()
+                ),
+                None => println!("Nothing recorded yet; the first point comes within a minute."),
+            }
+            ExitCode::SUCCESS
+        }
+        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
+        Err(_) => fail("the agent isn't running, so it isn't recording a history"),
+    }
+}
+
+/// `cntrl history keep <days>`. Needs root.
+pub fn keep_history(config: &Config, keep: u32) -> ExitCode {
+    if !rustix::process::geteuid().is_root() {
+        return fail("only root changes how much history is kept; run `sudo cntrl history keep`");
+    }
+    let body = match serde_json::to_vec(&HistoryKeepCommand {
+        by: invoker(),
+        days: keep,
+    }) {
+        Ok(body) => body,
+        Err(e) => return fail(&e.to_string()),
+    };
+    let reply = block_on(request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/history/keep",
+        body,
+    ));
+    match reply {
+        Ok((status, bytes)) if status.is_success() => {
+            let used = serde_json::from_slice::<HistoryStore>(&bytes)
+                .map(|store| size(store.bytes))
+                .unwrap_or_else(|_| "?".to_owned());
+            println!("Keeping {} of history; it takes {used} now.", days(keep));
+            ExitCode::SUCCESS
+        }
+        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
+        Err(_) => fail("the agent isn't running; start its service first"),
+    }
+}
+
+/// `cntrl history clear`: asks first at a terminal, unless `--yes`. Needs
+/// root.
+pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
+    if !rustix::process::geteuid().is_root() {
+        return fail("only root clears the history; run `sudo cntrl history clear`");
+    }
+    if !yes && io::stdin().is_terminal() {
+        eprint!("Delete all of the history this machine keeps for Console's charts? [y/N] ");
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer).is_err()
+            || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+        {
+            println!("Kept it.");
+            return ExitCode::SUCCESS;
+        }
+    }
+    let body = match serde_json::to_vec(&HistoryClearCommand { by: invoker() }) {
+        Ok(body) => body,
+        Err(e) => return fail(&e.to_string()),
+    };
+    let reply = block_on(request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/history/clear",
+        body,
+    ));
+    match reply {
+        Ok((status, _)) if status.is_success() => {
+            println!("Cleared. The history starts again with the next minute.");
+            ExitCode::SUCCESS
+        }
+        Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
+        Err(_) => fail("the agent isn't running; start its service first"),
+    }
+}
+
+/// Who ran sudo, as this machine names them.
+fn invoker() -> String {
+    std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .unwrap_or_else(|| "root".to_owned())
+}
+
+fn days(count: u32) -> String {
+    if count == 1 {
+        "1 day".to_owned()
+    } else {
+        format!("{count} days")
+    }
+}
+
+/// Bytes in decimal units, as disks are sold.
+#[allow(clippy::cast_precision_loss)]
+fn size(bytes: u64) -> String {
+    match bytes {
+        0..1_000 => format!("{bytes} bytes"),
+        1_000..1_000_000 => format!("{:.0} KB", bytes as f64 / 1e3),
+        _ => format!("{:.1} MB", bytes as f64 / 1e6),
     }
 }
 

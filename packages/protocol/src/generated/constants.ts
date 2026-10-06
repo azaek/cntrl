@@ -36,6 +36,7 @@ export const CAPABILITIES = [
     "services.manage",
     "logs.read",
     "network.read",
+    "history.manage",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

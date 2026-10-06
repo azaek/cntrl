@@ -440,6 +440,68 @@ export interface HelloAuth {
     sig: string;
 }
 
+/** A span of the device's history, cut into columns. */
+export interface History {
+    from: number;
+    to: number;
+    columns: number;
+    /** Each metric the device recorded, with one entry per column. */
+    series: HistorySeries[];
+    store: HistoryStore;
+}
+
+/** What `history.keep` asks for. */
+export interface HistoryKeep {
+    /**
+     * How many days of history to keep, from 1 to 365. Fewer than before
+     * deletes the older days at once.
+     */
+    days: number;
+}
+
+/** What the device keeps a history of. */
+export type HistoryMetric =
+    | "cpu"
+    | "memory"
+    | "swap"
+    | "load"
+    | "network"
+    | "disk"
+    | "disk_used"
+    | "temperature"
+    | "gpu"
+    | "unknown";
+
+/** What `history.read` asks for: a span of time, cut into columns. */
+export interface HistoryParams {
+    /** Where the span starts, in Unix milliseconds. */
+    from: number;
+    /** Where it ends, in Unix milliseconds. */
+    to: number;
+    /** How many columns to cut it into, from 1 to 500. */
+    columns: number;
+}
+
+/** One metric across a span's columns. */
+export interface HistorySeries {
+    metric: HistoryMetric;
+    /** Oldest first; null where nothing was recorded. */
+    spans: (Span | null)[];
+}
+
+/** What the device keeps, and the room it takes. */
+export interface HistoryStore {
+    /**
+     * How many days of 15-minute points it keeps; 1-minute points are kept
+     * for 48 hours.
+     */
+    keep_days: number;
+    /** The oldest point kept, in Unix milliseconds. */
+    oldest?: number | null;
+    /** Bytes on disk. */
+    bytes: number;
+}
+
 /** The machine being enrolled. */
 export interface HostInfo {
     hostname: string;
@@ -987,6 +1049,13 @@ export interface Session {
 export type SigAlg = "Unknown" | "ES256";
 
 export type SocketProtocol = "tcp" | "udp";
+
+/** A metric over one column: its lowest and highest reading and their average. */
+export interface Span {
+    min: number;
+    max: number;
+    avg: number;
+}
 
 /** Parameters of the `stats` topic. */
 export interface StatsParams {

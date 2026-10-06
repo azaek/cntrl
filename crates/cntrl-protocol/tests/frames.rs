@@ -7,6 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use cntrl_protocol::frame::RecordKind;
+use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams, HistoryStore};
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
 use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
@@ -242,4 +243,36 @@ fn storage_frames_decode() {
         serde_json::from_value(data_of("res-storage-health.json")).expect("health");
     assert_eq!(health.disks[1].status, HealthStatus::Warning);
     assert_eq!(health.disks[0].wear, Some(2));
+}
+
+#[test]
+fn history_frames_decode() {
+    let Call::HistoryRead(params) = Call::decode(
+        "history.read",
+        json!({"from": 1_759_744_800_000_u64, "to": 1_759_748_400_000_u64, "columns": 3}),
+    )
+    .expect("history.read decodes") else {
+        panic!("history.read isn't HistoryRead");
+    };
+    assert_eq!(
+        params,
+        HistoryParams {
+            from: 1_759_744_800_000,
+            to: 1_759_748_400_000,
+            columns: 3
+        }
+    );
+    let history: History =
+        serde_json::from_value(data_of("res-history-read.json")).expect("a history");
+    assert_eq!(history.series[1].metric, HistoryMetric::Network);
+    assert_eq!(history.series[0].spans[1], None);
+    assert_eq!(history.store.keep_days, 90);
+    let newer: HistoryMetric = serde_json::from_value(json!("fan_speed")).expect("parses");
+    assert_eq!(newer, HistoryMetric::Unknown);
+    let keep: HistoryKeep =
+        serde_json::from_value(json!({"days": 30})).expect("history.keep's params");
+    assert_eq!(keep.days, 30);
+    let cleared: HistoryStore =
+        serde_json::from_value(data_of("res-history-clear.json")).expect("a store");
+    assert_eq!(cleared.oldest, None);
 }

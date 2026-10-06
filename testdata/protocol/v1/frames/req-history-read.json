@@ -1,0 +1,1 @@
+{"t":"req","id":"01JC0000000000000000000RQI","op":"history.read","ver":1,"deadline_ms":15000,"data":{"from":1759744800000,"to":1759748400000,"columns":3},"actor":{"kind":"user","id":"usr_01JC000000000000000000USR","via":"dashboard"}}

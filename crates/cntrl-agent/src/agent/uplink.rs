@@ -43,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::alerts::Alerts;
+use super::history::History;
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
 use super::ipc::{self, Call, CallError};
@@ -230,6 +231,8 @@ pub struct UplinkConfig {
     pub outbox: Arc<Outbox>,
     /// The alert rules this device decides itself, which the hub sends (D43).
     pub alerts: Arc<Alerts>,
+    /// The history this device keeps, for `history.*` (D52).
+    pub history: Arc<History>,
 }
 
 /// How a session ended, and what to do next.
@@ -758,7 +761,10 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
     let reply = match frame {
         Frame::Req(request) => {
             let privd = &session.config.privd_socket;
-            session.requests.start(request, &session.policy, privd)?
+            let history = &session.config.history;
+            session
+                .requests
+                .start(request, &session.policy, privd, history)?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
@@ -823,6 +829,7 @@ impl Requests {
         request: Request,
         policy: &Arc<PolicyState>,
         privd: &Path,
+        history: &Arc<History>,
     ) -> Option<Response> {
         let refuse = |code, msg: String| Some(Response::err(request.id.clone(), code, msg));
         if self.running.contains_key(&request.id) {
@@ -847,8 +854,9 @@ impl Requests {
         };
         let id = request.id.clone();
         let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
+        let history = Arc::clone(history);
         let task = tokio::spawn(async move {
-            let answer = answer(request, call, &policy, &privd).await;
+            let answer = answer(request, call, &policy, &privd, &history).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
         });
@@ -880,10 +888,21 @@ impl Drop for Requests {
 }
 
 /// Runs one request within its deadline.
-async fn answer(request: Request, call: ops::Call, policy: &PolicyState, privd: &Path) -> Response {
+async fn answer(
+    request: Request,
+    call: ops::Call,
+    policy: &PolicyState,
+    privd: &Path,
+    history: &Arc<History>,
+) -> Response {
     let limit =
         Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
-    match timeout(limit, execute(&request, call, policy, privd, limit)).await {
+    match timeout(
+        limit,
+        execute(&request, call, policy, privd, history, limit),
+    )
+    .await
+    {
         Ok(Ok(data)) => Response::ok(request.id, data),
         Ok(Err(e)) => Response::err(request.id, e.code, e.msg),
         Err(_) => Response::err(
@@ -901,6 +920,7 @@ async fn execute(
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
+    history: &Arc<History>,
     limit: Duration,
 ) -> Result<serde_json::Value, CallError> {
     let summary = serde_json::json!({ "id": request.id, "op": request.op, "actor": request.actor });
@@ -969,6 +989,45 @@ async fn execute(
             .await;
             serde_json::to_value(disk_health(privd, limit).await?)
                 .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::HistoryRead(params) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            let history = Arc::clone(history);
+            let chart = tokio::task::spawn_blocking(move || history.read(&params, now_ms()))
+                .await
+                .map_err(|e| CallError::internal(e.to_string()))??;
+            serde_json::to_value(chart).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::HistoryKeep(keep) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary, "days": keep.days }),
+            )
+            .await;
+            let history = Arc::clone(history);
+            let store = tokio::task::spawn_blocking(move || history.keep(keep.days, now_ms()))
+                .await
+                .map_err(|e| CallError::internal(e.to_string()))??;
+            serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::HistoryClear(_) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            let history = Arc::clone(history);
+            let store = tokio::task::spawn_blocking(move || history.clear())
+                .await
+                .map_err(|e| CallError::internal(e.to_string()))??;
+            serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
         }
         // privd checks the policy again and audits its own decision.
         ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,

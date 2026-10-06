@@ -9,6 +9,7 @@ pub mod capability;
 pub mod codes;
 pub mod enroll;
 pub mod frame;
+pub mod history;
 pub mod logs;
 pub mod network;
 pub mod ops;

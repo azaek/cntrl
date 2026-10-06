@@ -75,6 +75,9 @@ pub enum Command {
     /// Work with the local audit log.
     #[command(subcommand)]
     Audit(AuditCommand),
+    /// Work with the history this machine keeps for Console's charts.
+    #[command(subcommand)]
+    History(HistoryCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -107,4 +110,23 @@ pub enum PolicyCommand {
 pub enum AuditCommand {
     /// Check the audit log's hash chain: 0 when it's intact, 1 when it isn't.
     Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HistoryCommand {
+    /// Show how many days are kept, since when, and the room it takes.
+    Show,
+    /// Keep this many days of history, from 1 to 365; fewer deletes the older
+    /// days at once. Needs root.
+    Keep {
+        /// How many days.
+        days: u32,
+    },
+    /// Delete all of it; the history starts again with the next minute.
+    /// Needs root.
+    Clear {
+        /// Don't ask first.
+        #[arg(long)]
+        yes: bool,
+    },
 }
