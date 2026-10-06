@@ -56,6 +56,8 @@ use windows_sys::Win32::System::Threading::{
 
 use super::Endpoint;
 
+pub mod setup;
+
 /// Who must own a file that says what the agent may do: on Windows, the
 /// Administrators group or SYSTEM, whichever created it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

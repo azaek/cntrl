@@ -4,12 +4,13 @@
 //! genuine releases and never an older one. It downloads this machine's
 //! archive, checks its size and SHA-256 against the manifest, and runs the
 //! installer, which keeps the enrollment: the one in the archive when it
-//! carries one (from 0.1.8), else the copy built into this binary.
+//! carries one (from 0.1.8), else the copy built into this binary. On Windows
+//! the installer is the release's own `cntrl-agent.exe install` (D58).
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, ExitStatus};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -27,6 +28,7 @@ use super::say::{say, say_err};
 /// manifest.
 const RELEASE_KEY: &str = include_str!("../../../../packaging/release-key.pub.pem");
 /// The installer as this agent was built, for an archive without one.
+#[cfg(unix)]
 const INSTALLER: &str = include_str!("../../../../packaging/install.sh");
 /// Where releases are published.
 const RELEASES: &str = "https://github.com/azaek/cntrl/releases/download";
@@ -143,21 +145,10 @@ async fn update(
 
     // A directory only root can reach, so nothing changes the files between
     // checking them and running them.
-    let work = tempfile::Builder::new()
-        .prefix("cntrl-update-")
-        .tempdir()
-        .map_err(|e| format!("can't make a working directory: {e}"))?;
-    let archive_path = work.path().join("agent.tar.gz");
+    let work = work_dir(config)?;
+    let archive_path = work.path().join(ARCHIVE);
     std::fs::write(&archive_path, &archive).map_err(|e| format!("can't save the download: {e}"))?;
-    let installer = installer(work.path(), &archive_path)?;
-    let mut install = Command::new("/bin/sh");
-    install.arg(&installer).arg("--archive").arg(&archive_path);
-    if reinstall {
-        install.arg("--force");
-    }
-    let status = install
-        .status()
-        .map_err(|e| format!("can't run the installer: {e}"))?;
+    let status = install(work.path(), &archive_path, reinstall)?;
     Ok(if status.success() {
         ExitCode::SUCCESS
     } else {
@@ -237,13 +228,50 @@ fn matches(archive: &[u8], artifact: &Artifact) -> Result<(), String> {
     Ok(())
 }
 
-/// The installer to run: the archive's own, from 0.1.8, which knows that
-/// release's steps; else the one built into this agent.
-fn installer(work: &Path, archive: &Path) -> Result<std::path::PathBuf, String> {
+/// The release's archive, as saved.
+#[cfg(unix)]
+const ARCHIVE: &str = "agent.tar.gz";
+#[cfg(windows)]
+const ARCHIVE: &str = "agent.zip";
+
+/// Where the update works: on Unix a new directory in the temporary one,
+/// which only root reaches; on Windows one in `%ProgramData%\cntrl`, since an
+/// administrator's own temporary folder is open to their programs that
+/// aren't elevated.
+fn work_dir(config: &Config) -> Result<tempfile::TempDir, String> {
+    let builder = tempfile::Builder::new().prefix("cntrl-update-").to_owned();
+    #[cfg(unix)]
+    let made = {
+        let _ = config;
+        builder.tempdir()
+    };
+    #[cfg(windows)]
+    let made = builder.tempdir_in(
+        config
+            .paths
+            .state_dir
+            .parent()
+            .unwrap_or(&config.paths.state_dir),
+    );
+    made.map_err(|e| format!("can't make a working directory: {e}"))
+}
+
+/// Unpacks the archive into `work`'s `unpacked`, without its top directory.
+/// Windows' own tar, in System32 since Windows 10 1803, reads the zip.
+fn unpack(work: &Path, archive: &Path) -> Result<std::path::PathBuf, String> {
     let unpacked = work.join("unpacked");
     std::fs::create_dir(&unpacked).map_err(|e| e.to_string())?;
-    let status = Command::new("tar")
-        .arg("-xzf")
+    #[cfg(unix)]
+    let (tar, extract) = (std::path::PathBuf::from("tar"), "-xzf");
+    #[cfg(windows)]
+    let (tar, extract) = (
+        std::env::var_os("SystemRoot")
+            .map_or_else(|| r"C:\Windows".into(), std::path::PathBuf::from)
+            .join(r"System32\tar.exe"),
+        "-xf",
+    );
+    let status = Command::new(tar)
+        .arg(extract)
         .arg(archive)
         .arg("-C")
         .arg(&unpacked)
@@ -254,13 +282,41 @@ fn installer(work: &Path, archive: &Path) -> Result<std::path::PathBuf, String> 
     if !status.success() {
         return Err("the archive doesn't unpack".to_owned());
     }
+    Ok(unpacked)
+}
+
+/// Runs the installer: the archive's own, from 0.1.8, which knows that
+/// release's steps; else the one built into this agent.
+#[cfg(unix)]
+fn install(work: &Path, archive: &Path, reinstall: bool) -> Result<ExitStatus, String> {
+    let unpacked = unpack(work, archive)?;
     let own = unpacked.join("packaging").join("install.sh");
-    if own.is_file() {
-        return Ok(own);
+    let installer = if own.is_file() {
+        own
+    } else {
+        let built_in = work.join("install.sh");
+        std::fs::write(&built_in, INSTALLER).map_err(|e| e.to_string())?;
+        built_in
+    };
+    let mut install = Command::new("/bin/sh");
+    install.arg(&installer).arg("--archive").arg(archive);
+    if reinstall {
+        install.arg("--force");
     }
-    let built_in = work.join("install.sh");
-    std::fs::write(&built_in, INSTALLER).map_err(|e| e.to_string())?;
-    Ok(built_in)
+    install
+        .status()
+        .map_err(|e| format!("can't run the installer: {e}"))
+}
+
+/// Runs the release's own program to install itself, which stops the
+/// services, replaces the agent and starts them again.
+#[cfg(windows)]
+fn install(work: &Path, archive: &Path, _reinstall: bool) -> Result<ExitStatus, String> {
+    let unpacked = unpack(work, archive)?;
+    Command::new(unpacked.join("cntrl-agent.exe"))
+        .arg("install")
+        .status()
+        .map_err(|e| format!("can't run the installer: {e}"))
 }
 
 /// Downloads `url`, refusing more than `limit` bytes, and shows `progress`
@@ -386,6 +442,7 @@ fn release_target() -> Result<String, String> {
     match std::env::consts::OS {
         "linux" => Ok(format!("{arch}-unknown-linux-musl")),
         "macos" => Ok(format!("{arch}-apple-darwin")),
+        "windows" => Ok(format!("{arch}-pc-windows-msvc")),
         other => Err(format!("there are no releases for {other}")),
     }
 }
@@ -513,6 +570,8 @@ mod tests {
         let target = release_target().expect("a target");
         if cfg!(target_os = "linux") {
             assert!(target.ends_with("-unknown-linux-musl"));
+        } else if cfg!(windows) {
+            assert!(target.ends_with("-pc-windows-msvc"));
         } else {
             assert!(target.ends_with("-apple-darwin"));
         }

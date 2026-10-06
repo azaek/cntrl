@@ -80,6 +80,28 @@ pub enum Command {
     /// Work with the history this machine keeps for Console's charts.
     #[command(subcommand)]
     History(HistoryCommand),
+    /// Install the agent from this program, or install it again: its two
+    /// services, under Program Files and %ProgramData%\cntrl. Needs an
+    /// administrator.
+    #[cfg(windows)]
+    Install {
+        /// Where enrollment goes, for a new config.
+        #[arg(long)]
+        console: Option<String>,
+        /// A gateway to use in place of the one enrollment returns, for a new
+        /// config.
+        #[arg(long)]
+        gateway: Option<String>,
+    },
+    /// Remove the agent: its services and its program. Its identity, config,
+    /// audit log and logs stay unless --purge. Needs an administrator.
+    #[cfg(windows)]
+    Uninstall {
+        /// Remove its identity, config, audit log and logs too; the device
+        /// stays in Console until someone removes it there.
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

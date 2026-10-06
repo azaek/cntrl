@@ -15,6 +15,8 @@ mod health;
 mod history;
 mod host;
 mod identity;
+#[cfg(windows)]
+mod install;
 mod ipc;
 mod keys;
 #[cfg(target_os = "macos")]
@@ -100,6 +102,10 @@ pub fn main() -> ExitCode {
         Command::History(HistoryCommand::Show) => client::print_history(&config),
         Command::History(HistoryCommand::Keep { days }) => client::keep_history(&config, days),
         Command::History(HistoryCommand::Clear { yes }) => client::clear_history(&config, yes),
+        #[cfg(windows)]
+        Command::Install { console, gateway } => install::install(&cli.config, console, gateway),
+        #[cfg(windows)]
+        Command::Uninstall { purge } => install::uninstall(&config, &cli.config, purge),
     }
 }
 
