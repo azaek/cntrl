@@ -15,6 +15,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, Notify};
 use tracing::warn;
 
+use super::os::Private;
 use super::uplink::now_ms;
 
 pub const OUTBOX_FILE: &str = "outbox.json";
@@ -163,7 +164,7 @@ async fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
+        .private()
         .open(&temporary)
         .await?;
     file.write_all(bytes).await?;

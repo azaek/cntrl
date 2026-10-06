@@ -6,10 +6,10 @@
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use super::digest::sha256_hex;
+use super::os::{self, Private};
 use cntrl_host::services::service_name;
 use cntrl_protocol::OpInfo;
 use cntrl_protocol::capability;
@@ -169,8 +169,9 @@ struct UpdateSection {
 }
 
 /// Loads the policy at `path`. The file must belong to `owner` (root when privd
-/// runs as root) and be writable by nobody else.
-pub fn load(path: &Path, owner: u32) -> PolicyState {
+/// runs as root; on Windows, Administrators or SYSTEM) and be writable by
+/// nobody else.
+pub fn load(path: &Path, owner: os::Owner) -> PolicyState {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -180,14 +181,8 @@ pub fn load(path: &Path, owner: u32) -> PolicyState {
         }
         Err(e) => return invalid(format!("can't read {}: {e}", path.display())),
     };
-    if metadata.uid() != owner {
-        return invalid(format!("{} must be owned by uid {owner}", path.display()));
-    }
-    if metadata.mode() & 0o022 != 0 {
-        return invalid(format!(
-            "{} must not be writable by group or others",
-            path.display()
-        ));
+    if let Err(reason) = os::check_trusted(path, &metadata, owner) {
+        return invalid(reason);
     }
     match fs::read_to_string(path) {
         Ok(text) => match parse(&text) {
@@ -218,7 +213,7 @@ impl Changed {
 /// and then the file isn't touched.
 pub fn modify(
     path: &Path,
-    owner: u32,
+    owner: os::Owner,
     allow: &[String],
     deny: &[String],
 ) -> Result<Changed, String> {
@@ -290,7 +285,7 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o644)
+        .shared()
         .open(&temporary)
         .map_err(context)?;
     file.write_all(text.as_bytes())
@@ -358,9 +353,12 @@ fn invalid(reason: String) -> PolicyState {
     PolicyState::Invalid { reason }
 }
 
+// These write policy files with Unix modes and owners; Windows judges access
+// lists instead.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     use super::*;
 

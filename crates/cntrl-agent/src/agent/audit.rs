@@ -6,7 +6,6 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::digest::sha256_hex;
+use super::os::Private;
 
 /// The `prev` of the first record.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -44,7 +44,7 @@ impl AuditLog {
     pub fn open(dir: &Path) -> Result<Self, String> {
         fs::DirBuilder::new()
             .recursive(true)
-            .mode(0o700)
+            .private()
             .create(dir)
             .map_err(|e| format!("can't create {}: {e}", dir.display()))?;
         let path = dir.join(FILE_NAME);
@@ -58,7 +58,7 @@ impl AuditLog {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .mode(0o600)
+            .private()
             .open(&path)
             .map_err(|e| format!("can't open {}: {e}", path.display()))?;
         Ok(Self {

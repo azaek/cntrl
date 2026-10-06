@@ -3,7 +3,6 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use base64::Engine as _;
@@ -11,6 +10,8 @@ use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use ring::rand::SystemRandom;
 use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair};
 use sha2::{Digest, Sha256};
+
+use super::os::Private;
 
 pub struct SigningKey {
     pair: EcdsaKeyPair,
@@ -69,14 +70,15 @@ impl SigningKey {
     }
 }
 
-/// Writes `bytes` to `path`, mode 0600, through a temporary file and a rename.
+/// Writes `bytes` to `path`, readable by its owner only, through a temporary
+/// file and a rename.
 pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     let _ = fs::remove_file(&tmp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .private()
         .open(&tmp)
         .map_err(|e| format!("can't write {}: {e}", tmp.display()))?;
     file.write_all(bytes)
@@ -87,8 +89,6 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
 
     use super::*;
@@ -98,8 +98,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("device.key");
         let key = SigningKey::generate(&path).expect("generate");
-        let mode = fs::metadata(&path).expect("metadata").permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
 
         let reloaded = SigningKey::load_or_generate(&path).expect("reload");
         assert_eq!(reloaded.public_key(), key.public_key());

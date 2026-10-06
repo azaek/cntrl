@@ -23,6 +23,7 @@ use super::history::{self, HISTORY_DIR};
 use super::local_api::{
     HistoryClearCommand, HistoryKeepCommand, PauseCommand, PauseOutcome, ResumeOutcome, Status,
 };
+use super::os;
 use super::policy::{self, Policy, PolicyState, Source};
 use super::say::{say, say_err};
 use super::uplink::{UplinkStatus, now_ms};
@@ -234,7 +235,7 @@ pub fn change_capabilities(config: &Config, allow: &[String], deny: &[String]) -
     }
     let path = &config.paths.policy;
     // privd reads the file as root, so root must own it.
-    let changed = match policy::modify(path, 0, &allow, &deny) {
+    let changed = match policy::modify(path, os::ROOT, &allow, &deny) {
         Ok(changed) => changed,
         Err(e) => return fail(&e),
     };
@@ -499,7 +500,7 @@ fn read_token(file: Option<&Path>) -> Result<String, String> {
 
 /// `cntrl policy show` and `cntrl policy check`. The file must belong to root.
 pub fn print_policy(config: &Config, check_only: bool) -> ExitCode {
-    let state = policy::load(&config.paths.policy, 0);
+    let state = policy::load(&config.paths.policy, os::ROOT);
     let valid = matches!(state, PolicyState::Valid { .. });
     if check_only && valid {
         say!("{}: OK", config.paths.policy.display());

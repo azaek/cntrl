@@ -23,6 +23,7 @@ mod local_api;
 mod logging;
 mod logs;
 mod network;
+mod os;
 mod outbox;
 mod paused;
 mod policy;

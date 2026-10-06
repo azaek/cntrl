@@ -12,7 +12,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -30,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::ipc::CallError;
+use super::os::Private;
 use super::uplink::now_ms;
 
 pub const HISTORY_DIR: &str = "history";
@@ -173,7 +173,7 @@ impl History {
         for tier in Tier::ALL {
             if let Err(e) = DirBuilder::new()
                 .recursive(true)
-                .mode(0o700)
+                .private()
                 .create(dir.join(tier.folder()))
             {
                 warn!("can't make {}: {e}", dir.join(tier.folder()).display());
@@ -262,7 +262,7 @@ impl History {
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .mode(0o600)
+                .private()
                 .open(&path)?;
             file.write_all(&line)?;
         }
@@ -477,7 +477,7 @@ impl History {
             .create(true)
             .write(true)
             .truncate(true)
-            .mode(0o600)
+            .private()
             .open(&temporary)?;
         file.write_all(&bytes)?;
         file.sync_all()?;

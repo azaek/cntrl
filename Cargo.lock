@@ -312,6 +312,7 @@ dependencies = [
  "tracing",
  "tracing-journald",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
  "x509-cert",
 ]
 

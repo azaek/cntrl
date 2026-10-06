@@ -5,7 +5,6 @@
 //! or `_cntrl` on macOS) and its own user, and exits after a minute without one.
 
 use std::fs;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -31,6 +30,7 @@ use super::config::Config;
 use super::docker;
 use super::ipc::{self, Call, CallError, Request, Response};
 use super::keys::SigningKey;
+use super::os::{self, Private};
 use super::{local_api, logging, policy};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -49,7 +49,7 @@ struct State {
     policy_path: PathBuf,
     audit_key_path: PathBuf,
     /// The user privd runs as; the policy file must belong to it.
-    owner: u32,
+    owner: os::Owner,
     allowed: Vec<u32>,
     /// The agent's user, whose processes privd won't stop.
     agent: Option<u32>,
@@ -85,10 +85,10 @@ async fn serve(config: &Config) -> Result<(), String> {
     let state_dir = &config.paths.privd_state_dir;
     fs::DirBuilder::new()
         .recursive(true)
-        .mode(0o700)
+        .private()
         .create(state_dir)
         .map_err(|e| format!("can't create {}: {e}", state_dir.display()))?;
-    let owner = own_uid();
+    let owner = os::own_owner();
     let mut allowed = vec![0, owner];
     let agent = uid_of(AGENT_USER);
     allowed.extend(agent);
@@ -878,11 +878,6 @@ async fn log_source(params: &LogsParams) -> Result<super::logs::mac::Source, Cal
     .await
     .map_err(|e| CallError::internal(e.to_string()))?
     .map_err(CallError::from)
-}
-
-/// The user this process runs as.
-fn own_uid() -> u32 {
-    rustix::process::getuid().as_raw()
 }
 
 /// Looks `user` up in `/etc/passwd`, where the installer creates it.
