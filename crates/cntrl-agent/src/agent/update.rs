@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 use super::client::block_on;
 use super::config::Config;
+use super::os;
 use super::say::{say, say_err};
 
 /// The public half of the release key (D21), which signs every release's
@@ -56,9 +57,10 @@ struct Artifact {
 /// out; with `force`, reinstalls the release this agent already is.
 pub fn run(config: &Config, check: bool, force: bool) -> ExitCode {
     let current = env!("CARGO_PKG_VERSION");
-    if !check && !rustix::process::geteuid().is_root() {
+    if !check && !os::is_root() {
         say_err!(
-            "cntrl update: updating replaces the agent's files; run it as root, with `sudo cntrl update`"
+            "cntrl update: updating replaces the agent's files; run {}",
+            os::elevated("cntrl update")
         );
         return ExitCode::FAILURE;
     }
@@ -95,7 +97,8 @@ async fn update(
     }
     if check {
         say!(
-            "cntrl agent {latest} is out; this one is {current}. Update with `sudo cntrl update`."
+            "cntrl agent {latest} is out; this one is {current}. Update with {}.",
+            os::elevated("cntrl update")
         );
         return Ok(ExitCode::SUCCESS);
     }

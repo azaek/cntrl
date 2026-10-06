@@ -69,6 +69,32 @@ pub fn own_owner() -> Owner {
     Owner
 }
 
+/// Whether this process runs as SYSTEM or an elevated administrator.
+pub fn is_root() -> bool {
+    process_account(std::process::id()).is_root()
+}
+
+/// Who may change who controls the machine, as a sentence names them.
+pub const SUPERUSER: &str = "an administrator";
+
+/// How a hint says to run something as an administrator: "run it as
+/// administrator".
+pub const AS_ROOT: &str = "as administrator";
+
+/// A command as an administrator, to copy: `` `cntrl pause` as administrator ``.
+pub fn elevated(command: &str) -> String {
+    format!("`{command}` as administrator")
+}
+
+/// Who ran this command, as this machine names them: the signed-in user,
+/// whom elevating doesn't change.
+pub fn invoker() -> String {
+    std::env::var("USERNAME")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .unwrap_or_else(|| SUPERUSER.to_owned())
+}
+
 /// Files and directories created with who may read them: on Windows, what
 /// they inherit from the install's directory.
 pub trait Private {

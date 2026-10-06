@@ -82,8 +82,9 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
                 .map(|r| format!(": {r}"))
                 .unwrap_or_default();
             say!(
-                "uplink: paused by {by} {} ago{why}; `sudo cntrl resume` reconnects",
-                uptime(ago)
+                "uplink: paused by {by} {} ago{why}; {} reconnects",
+                uptime(ago),
+                os::elevated("cntrl resume")
             );
         }
     }
@@ -287,11 +288,14 @@ fn listed(names: &[String]) -> String {
 /// `cntrl pause`: the agent tells Console who paused it and why, then hangs
 /// up until `cntrl resume` (D46). Needs root.
 pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
-    if !rustix::process::geteuid().is_root() {
-        return fail("pausing cuts Console off from this machine; run `sudo cntrl pause`");
+    if !os::is_root() {
+        return fail(&format!(
+            "pausing cuts Console off from this machine; run {}",
+            os::elevated("cntrl pause")
+        ));
     }
     let body = match serde_json::to_vec(&PauseCommand {
-        by: invoker(),
+        by: os::invoker(),
         reason,
     }) {
         Ok(body) => body,
@@ -308,11 +312,13 @@ pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
                 serde_json::from_slice::<PauseOutcome>(&bytes).is_ok_and(|outcome| outcome.told);
             if told {
                 say!(
-                    "Paused. Console shows this machine as paused, and nothing reaches it until `sudo cntrl resume`."
+                    "Paused. Console shows this machine as paused, and nothing reaches it until {}.",
+                    os::elevated("cntrl resume")
                 );
             } else {
                 say!(
-                    "Paused, but Console couldn't be told, since the link was down: it shows this machine as offline. `sudo cntrl resume` reconnects."
+                    "Paused, but Console couldn't be told, since the link was down: it shows this machine as offline. {} reconnects.",
+                    os::elevated("cntrl resume")
                 );
             }
             ExitCode::SUCCESS
@@ -324,8 +330,12 @@ pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
 
 /// `cntrl resume`: the agent reconnects to Console. Needs root.
 pub fn resume(config: &Config) -> ExitCode {
-    if !rustix::process::geteuid().is_root() {
-        return fail("only root resumes the agent; run `sudo cntrl resume`");
+    if !os::is_root() {
+        return fail(&format!(
+            "only {} resumes the agent; run {}",
+            os::SUPERUSER,
+            os::elevated("cntrl resume")
+        ));
     }
     match block_on(request(
         &config.paths.agent_socket,
@@ -387,11 +397,15 @@ pub fn print_history(config: &Config) -> ExitCode {
 
 /// `cntrl history keep <days>`. Needs root.
 pub fn keep_history(config: &Config, keep: u32) -> ExitCode {
-    if !rustix::process::geteuid().is_root() {
-        return fail("only root changes how much history is kept; run `sudo cntrl history keep`");
+    if !os::is_root() {
+        return fail(&format!(
+            "only {} changes how much history is kept; run {}",
+            os::SUPERUSER,
+            os::elevated("cntrl history keep")
+        ));
     }
     let body = match serde_json::to_vec(&HistoryKeepCommand {
-        by: invoker(),
+        by: os::invoker(),
         days: keep,
     }) {
         Ok(body) => body,
@@ -419,8 +433,12 @@ pub fn keep_history(config: &Config, keep: u32) -> ExitCode {
 /// `cntrl history clear`: asks first at a terminal, unless `--yes`. Needs
 /// root.
 pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
-    if !rustix::process::geteuid().is_root() {
-        return fail("only root clears the history; run `sudo cntrl history clear`");
+    if !os::is_root() {
+        return fail(&format!(
+            "only {} clears the history; run {}",
+            os::SUPERUSER,
+            os::elevated("cntrl history clear")
+        ));
     }
     if !yes && io::stdin().is_terminal() {
         eprint!("Delete all of the history this machine keeps for Console's charts? [y/N] ");
@@ -432,7 +450,7 @@ pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
             return ExitCode::SUCCESS;
         }
     }
-    let body = match serde_json::to_vec(&HistoryClearCommand { by: invoker() }) {
+    let body = match serde_json::to_vec(&HistoryClearCommand { by: os::invoker() }) {
         Ok(body) => body,
         Err(e) => return fail(&e.to_string()),
     };
@@ -450,14 +468,6 @@ pub fn clear_history(config: &Config, yes: bool) -> ExitCode {
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
         Err(_) => fail("the agent isn't running; start its service first"),
     }
-}
-
-/// Who ran sudo, as this machine names them.
-fn invoker() -> String {
-    std::env::var("SUDO_USER")
-        .ok()
-        .filter(|user| !user.is_empty())
-        .unwrap_or_else(|| "root".to_owned())
 }
 
 fn days(count: u32) -> String {

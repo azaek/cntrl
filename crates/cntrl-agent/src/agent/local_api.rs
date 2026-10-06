@@ -140,7 +140,10 @@ async fn enroll_device(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "enrolling changes who controls this machine; run `sudo cntrl enroll`".to_owned(),
+            format!(
+                "enrolling changes who controls this machine; run {}",
+                os::elevated("cntrl enroll")
+            ),
         ));
     }
     // One enrollment at a time, and none while the uplink saves a credential.
@@ -173,7 +176,11 @@ async fn reload_policy(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "only root changes the policy; run it with sudo".to_owned(),
+            format!(
+                "only {} changes the policy; run it {}",
+                os::SUPERUSER,
+                os::AS_ROOT
+            ),
         ));
     }
     state.uplink.policy_changed();
@@ -214,13 +221,16 @@ async fn pause(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "pausing cuts Console off from this machine; run `sudo cntrl pause`".to_owned(),
+            format!(
+                "pausing cuts Console off from this machine; run {}",
+                os::elevated("cntrl pause")
+            ),
         ));
     }
     let clip = |text: &str, max: usize| text.trim().chars().take(max).collect::<String>();
     let by = Some(clip(&command.by, PAUSED_BY_MAX))
         .filter(|by| !by.is_empty())
-        .unwrap_or_else(|| "root".to_owned());
+        .unwrap_or_else(|| os::SUPERUSER.to_owned());
     let reason = command
         .reason
         .map(|reason| clip(&reason, PAUSE_REASON_MAX))
@@ -241,7 +251,11 @@ async fn resume(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "only root resumes the agent; run `sudo cntrl resume`".to_owned(),
+            format!(
+                "only {} resumes the agent; run {}",
+                os::SUPERUSER,
+                os::elevated("cntrl resume")
+            ),
         ));
     }
     let was_paused = state
@@ -285,7 +299,11 @@ async fn keep_history(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "only root changes how much history is kept; run `sudo cntrl history keep`".to_owned(),
+            format!(
+                "only {} changes how much history is kept; run {}",
+                os::SUPERUSER,
+                os::elevated("cntrl history keep")
+            ),
         ));
     }
     let history = Arc::clone(&state.history);
@@ -312,7 +330,11 @@ async fn clear_history(
     if !peer.is_root() {
         return Err((
             StatusCode::FORBIDDEN,
-            "only root clears the history; run `sudo cntrl history clear`".to_owned(),
+            format!(
+                "only {} clears the history; run {}",
+                os::SUPERUSER,
+                os::elevated("cntrl history clear")
+            ),
         ));
     }
     let history = Arc::clone(&state.history);
@@ -417,7 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn enrolling_needs_a_root_peer() {
-        if rustix::process::getuid().is_root() {
+        if os::is_root() {
             return;
         }
         let dir = tempfile::tempdir().expect("temp dir");

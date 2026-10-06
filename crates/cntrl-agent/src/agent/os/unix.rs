@@ -16,6 +16,30 @@ pub fn own_owner() -> Owner {
     rustix::process::getuid().as_raw()
 }
 
+/// Whether this process runs as root.
+pub fn is_root() -> bool {
+    rustix::process::geteuid().is_root()
+}
+
+/// Who may change who controls the machine, as a sentence names them.
+pub const SUPERUSER: &str = "root";
+
+/// How a hint says to run something as root: "run it with sudo".
+pub const AS_ROOT: &str = "with sudo";
+
+/// A command as root, to copy: `` `sudo cntrl pause` ``.
+pub fn elevated(command: &str) -> String {
+    format!("`sudo {command}`")
+}
+
+/// Who ran this command, as this machine names them: whoever ran sudo.
+pub fn invoker() -> String {
+    std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .unwrap_or_else(|| SUPERUSER.to_owned())
+}
+
 /// Files and directories created with who may read them.
 pub trait Private {
     /// Only the owner reads and writes it.

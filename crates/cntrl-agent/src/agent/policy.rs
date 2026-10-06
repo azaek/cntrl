@@ -259,9 +259,11 @@ pub fn modify(
     };
     let text = toml::to_string(&file).map_err(|e| e.to_string())?;
     let text = format!(
-        "# The device policy. Only root changes it: edit this file, or run\n\
-         # `sudo cntrl policy allow <capability>`, `deny`, or\n\
-         # `modify --allow <a,b> --deny <c>`, which rewrite it.\n{text}"
+        "# The device policy. Only {} changes it: edit this file, or run\n\
+         # {}, `deny`, or\n\
+         # `modify --allow <a,b> --deny <c>`, which rewrite it.\n{text}",
+        os::SUPERUSER,
+        os::elevated("cntrl policy allow <capability>")
     );
     write_atomically(path, &text)?;
     Ok(changed)
@@ -271,9 +273,9 @@ pub fn modify(
 fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
     let context = |e: io::Error| {
         let hint = if e.kind() == io::ErrorKind::PermissionDenied {
-            " (run it with sudo)"
+            format!(" (run it {})", os::AS_ROOT)
         } else {
-            ""
+            String::new()
         };
         format!("can't write {}: {e}{hint}", path.display())
     };
