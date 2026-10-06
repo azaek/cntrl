@@ -25,6 +25,7 @@ use crate::HostError;
 use crate::stats::{Background, CpuTicks, DiskCounters, NetworkCounters, Stats, StatsReading};
 use crate::system::System;
 
+pub mod eventlog;
 pub mod network;
 pub(crate) mod power;
 pub mod services;

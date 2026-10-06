@@ -2,7 +2,8 @@
 //! while it's open, its lines gathered into batches. On Linux the agent runs
 //! `journalctl` itself. On a Mac only an admin reads the unified log, so privd
 //! runs `log` as root and sends the batches back over its socket (angle 11
-//! part 3). A session ends its readers with its subscriptions, and stopping a
+//! part 3). On Windows the agent reads the Event Log, which services may
+//! (D58). A session ends its readers with its subscriptions, and stopping a
 //! reader ends what it runs.
 
 use std::collections::HashMap;
@@ -363,14 +364,62 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
     }
 }
 
-/// On Windows a container's log comes through privd, as on Linux; Windows'
-/// own Event Log isn't read yet.
+/// On Windows the agent reads the Event Log on a thread of its own, which
+/// stops once the subscription closes; a container's log comes through
+/// privd, as on Linux.
 #[cfg(windows)]
 async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
+    use cntrl_host::windows::{eventlog, services};
+
     if params.container.is_some() {
         return through_privd(id, params, privd, out).await;
     }
-    "this agent can't read Windows' Event Log yet".to_owned()
+    let unit = params.unit.clone();
+    let priority = params.priority;
+    let earlier = params.lines.unwrap_or(100).min(1000);
+    let (tx, mut rx) = mpsc::channel::<(LogEntry, bool)>(1024);
+    let reader = tokio::task::spawn_blocking(move || {
+        let display = unit.as_deref().and_then(services::display_name);
+        let query = eventlog::query(
+            unit.as_deref().map(|unit| (unit, display.as_deref())),
+            priority,
+        );
+        let watching = tx.clone();
+        eventlog::follow(
+            &query,
+            earlier,
+            &|| watching.is_closed(),
+            &mut |entry, live| tx.blocking_send((entry, live)).is_ok(),
+        )
+    });
+    let mut batcher = Batcher::new(params);
+    let mut flush = flush_timer();
+    let closed = || "the subscription closed".to_owned();
+    loop {
+        tokio::select! {
+            item = rx.recv() => match item {
+                Some((entry, live)) => {
+                    if let Some(full) = batcher.push(entry, live)
+                        && out.send((id.to_owned(), full)).await.is_err()
+                    {
+                        return closed();
+                    }
+                }
+                None => break,
+            },
+            _ = flush.tick() => {
+                if let Some(batch) = batcher.take()
+                    && out.send((id.to_owned(), batch)).await.is_err()
+                {
+                    return closed();
+                }
+            }
+        }
+    }
+    if let Some(batch) = batcher.take() {
+        let _ = out.send((id.to_owned(), batch)).await;
+    }
+    reader.await.unwrap_or_else(|e| e.to_string())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]

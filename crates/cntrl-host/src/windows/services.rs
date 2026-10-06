@@ -16,14 +16,14 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfigW, CloseServiceHandle, ControlService, ENUM_SERVICE_STATUS_PROCESSW,
-    ENUM_SERVICE_STATUSW, EnumDependentServicesW, EnumServicesStatusExW, OpenSCManagerW,
-    OpenServiceW, QueryServiceStatusEx, SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_CONNECT,
-    SC_MANAGER_ENUMERATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ACTIVE, SERVICE_AUTO_START,
-    SERVICE_CHANGE_CONFIG, SERVICE_CONTINUE_PENDING, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START,
-    SERVICE_ENUMERATE_DEPENDENTS, SERVICE_NO_CHANGE, SERVICE_PAUSE_PENDING, SERVICE_PAUSED,
-    SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START, SERVICE_START_PENDING, SERVICE_STATE_ALL,
-    SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOP_PENDING, SERVICE_STOPPED,
-    SERVICE_WIN32, StartServiceW,
+    ENUM_SERVICE_STATUSW, EnumDependentServicesW, EnumServicesStatusExW, GetServiceDisplayNameW,
+    OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, SC_ENUM_PROCESS_INFO, SC_HANDLE,
+    SC_MANAGER_CONNECT, SC_MANAGER_ENUMERATE_SERVICE, SC_STATUS_PROCESS_INFO, SERVICE_ACTIVE,
+    SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_CONTINUE_PENDING, SERVICE_CONTROL_STOP,
+    SERVICE_DEMAND_START, SERVICE_ENUMERATE_DEPENDENTS, SERVICE_NO_CHANGE, SERVICE_PAUSE_PENDING,
+    SERVICE_PAUSED, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START, SERVICE_START_PENDING,
+    SERVICE_STATE_ALL, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOP_PENDING,
+    SERVICE_STOPPED, SERVICE_WIN32, StartServiceW,
 };
 
 use crate::HostError;
@@ -133,6 +133,26 @@ fn stopped_with(process: &SERVICE_STATUS_PROCESS) -> String {
             std::io::Error::from_raw_os_error(process.dwWin32ExitCode as i32)
         )
     }
+}
+
+/// A service's display name, such as `Print Spooler` for `Spooler`, as the
+/// Service Control Manager resolves it.
+pub fn display_name(name: &str) -> Option<String> {
+    let manager = Handle::manager(SC_MANAGER_CONNECT).ok()?;
+    let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    let mut length = 0u32;
+    // SAFETY: a size query, in characters without the NUL.
+    unsafe { GetServiceDisplayNameW(manager.0, wide.as_ptr(), null_mut(), &mut length) };
+    let mut buffer = vec![0u16; length as usize + 1];
+    let mut size = u32::try_from(buffer.len()).ok()?;
+    // SAFETY: the buffer holds `size` characters.
+    if unsafe { GetServiceDisplayNameW(manager.0, wide.as_ptr(), buffer.as_mut_ptr(), &mut size) }
+        == 0
+    {
+        return None;
+    }
+    let length = (size as usize).min(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..length])).filter(|display| !display.is_empty())
 }
 
 /// Starts, stops, restarts, enables or disables a service, waiting for a
@@ -343,4 +363,29 @@ fn last_error() -> u32 {
 
 fn failed(what: &str) -> HostError {
     HostError::Failed(format!("{what}: {}", std::io::Error::last_os_error()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_this_machines_services() {
+        let services = list().expect("services");
+        let event_log = services
+            .iter()
+            .find(|service| service.unit.eq_ignore_ascii_case("EventLog"))
+            .expect("the Event Log's service");
+        assert_eq!(event_log.state, ServiceState::Running);
+        assert!(event_log.pid.is_some());
+        assert_eq!(event_log.enabled, Some(true));
+        assert_eq!(
+            display_name("EventLog").as_deref(),
+            Some("Windows Event Log")
+        );
+        assert!(matches!(
+            act("no-such-service-for-cntrl-tests", ServiceAction::Start),
+            Err(HostError::NotFound(_))
+        ));
+    }
 }
