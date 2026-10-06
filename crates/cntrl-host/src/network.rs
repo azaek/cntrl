@@ -94,7 +94,10 @@ pub struct NetworkReader {
 }
 
 // Elsewhere the reader has no fields yet, so the impl reads as derivable.
-#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(clippy::derivable_impls))]
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "macos")),
+    allow(clippy::derivable_impls)
+)]
 impl Default for NetworkReader {
     fn default() -> Self {
         Self {
@@ -871,7 +874,9 @@ mod tests {
         );
     }
 
+    // A procfs fixture: Linux's paths, with `/` and file-name inodes.
     #[test]
+    #[cfg(unix)]
     fn reads_the_socket_tables_and_their_owners() {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path();

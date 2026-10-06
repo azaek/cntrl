@@ -5,21 +5,21 @@
 //! container; macOS through `shutdown` and `pmset`. The parsers are plain
 //! Rust, so they build and their tests run on any OS.
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 use std::fs;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 use std::path::Path;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use cntrl_protocol::power::PowerAction;
 #[cfg(any(target_os = "macos", test))]
 use cntrl_protocol::power::Session;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 use cntrl_protocol::power::WakeOnLan;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::HostError;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 use crate::hwmon::{entries, read};
 
 #[cfg(any(target_os = "macos", test))]
@@ -98,7 +98,7 @@ pub(crate) fn wired_ports(text: &str) -> Vec<(String, String)> {
     ports
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 /// The wired interface a magic packet would wake on Linux, from sysfs: one
 /// with a device behind it that isn't Wi-Fi, up first. Its `power/wakeup`
 /// follows its Wake-on-LAN setting in most drivers (angle 10).
@@ -124,7 +124,7 @@ pub(crate) fn linux_wake_on_lan(sys: &Path) -> Option<WakeOnLan> {
     })
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 /// Whether Linux's root filesystem sits on dm-crypt, directly or under LVM or
 /// RAID, so a restart may wait for a passphrase.
 pub(crate) fn linux_encrypted_root(sys: &Path, mountinfo: &str) -> bool {
@@ -139,7 +139,7 @@ pub(crate) fn linux_encrypted_root(sys: &Path, mountinfo: &str) -> bool {
     encrypted(&sys.join("dev/block").join(device), 0)
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 fn encrypted(block: &Path, depth: u32) -> bool {
     if read(&block.join("dm/uuid")).is_some_and(|uuid| uuid.starts_with("CRYPT-")) {
         return true;
@@ -509,7 +509,9 @@ mod tests {
         );
     }
 
+    // A sysfs fixture, as Linux lays it out.
     #[test]
+    #[cfg(unix)]
     fn reads_linux_wake_on_lan_and_disk_encryption() {
         let dir = tempfile::tempdir().expect("temp dir");
         let sys = dir.path();
