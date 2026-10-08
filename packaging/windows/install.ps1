@@ -75,6 +75,20 @@
     # Windows PowerShell 5.1 may still offer TLS 1.0 first.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
+    # Smart App Control, while the agent is unsigned (D92): when it's on, it
+    # blocks an unsigned app each time it starts, with no exception for one
+    # app, so nothing is installed until it's off. Evaluating, it blocks
+    # nothing yet. Windows 11 keeps its state here: 0 off, 1 on, 2 evaluating;
+    # older Windows has none.
+    $sac = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name VerifiedAndReputablePolicyState -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
+    if ($sac -eq 1) {
+        Fail ('Smart App Control is on, and it blocks the cntrl agent until the agent is signed. ' +
+            'Turn it off in Windows Security, under App & browser control, then run the command again. Leave it off until the agent is signed.')
+    }
+    if ($sac -eq 2) {
+        Say 'Smart App Control is evaluating this PC. If it turns on, it blocks the cntrl agent until the agent is signed: turn it off then, in Windows Security, under App & browser control.'
+    }
+
     # The machine's own architecture, not this PowerShell's, which may run
     # emulated.
     $machine = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE
