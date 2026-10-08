@@ -115,6 +115,18 @@ impl Outbox {
         }
     }
 
+    /// Drops every record of `kind` Console hasn't acknowledged: the alerts
+    /// from before the device was disabled, which mustn't open incidents once
+    /// it's back (D87).
+    pub async fn discard(&self, kind: RecordKind) {
+        let mut saved = self.saved.lock().await;
+        let before = saved.records.len();
+        saved.records.retain(|record| record.kind != kind);
+        if saved.records.len() != before {
+            self.save(&saved).await;
+        }
+    }
+
     /// What the hello reports.
     pub async fn state(&self) -> OutboxState {
         let saved = self.saved.lock().await;
@@ -194,6 +206,22 @@ mod tests {
         assert_eq!(state.next_seq - first, 3);
         assert_eq!(state.oldest_unacked, Some(first + 2));
         assert_eq!(outbox.pending(1).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn discarding_a_kind_drops_only_its_records_and_holds_after_a_restart() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outbox = Outbox::open(dir.path()).await;
+        outbox.push(RecordKind::Alert, json!({ "rule": "a" })).await;
+        outbox.push(RecordKind::Unknown, json!({})).await;
+        outbox.push(RecordKind::Alert, json!({ "rule": "b" })).await;
+        outbox.discard(RecordKind::Alert).await;
+        let kinds =
+            |records: Vec<OutboxRecord>| records.into_iter().map(|r| r.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(outbox.pending(10).await), [RecordKind::Unknown]);
+        drop(outbox);
+        let reopened = Outbox::open(dir.path()).await;
+        assert_eq!(kinds(reopened.pending(10).await), [RecordKind::Unknown]);
     }
 
     #[tokio::test]

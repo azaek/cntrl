@@ -118,6 +118,7 @@ pub async fn serve(
         .route("/v1/policy/reload", post(reload_policy))
         .route("/v1/pause", post(pause))
         .route("/v1/resume", post(resume))
+        .route("/v1/uninstall", post(uninstall))
         .route("/v1/history", get(history))
         .route("/v1/history/keep", post(keep_history))
         .route("/v1/history/clear", post(clear_history))
@@ -207,6 +208,19 @@ pub struct ResumeOutcome {
     pub was_paused: bool,
 }
 
+/// What `cntrl uninstall` sends before it removes the agent: who ran it (D87).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UninstallCommand {
+    pub by: String,
+}
+
+/// Whether the gateway recorded the uninstall; when the link was down, or the
+/// gateway predates D87, it couldn't.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UninstallOutcome {
+    pub told: bool,
+}
+
 /// The longest name and reason a pause carries, as Console shows them.
 const PAUSED_BY_MAX: usize = 64;
 const PAUSE_REASON_MAX: usize = 200;
@@ -241,6 +255,37 @@ async fn pause(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(PauseOutcome { told }))
+}
+
+/// `cntrl uninstall`, before it removes anything (D87): the uplink tells the
+/// gateway who's uninstalling the agent, hangs up, and stays down.
+async fn uninstall(
+    ConnectInfo(peer): ConnectInfo<Peer>,
+    State(state): State<Arc<AgentState>>,
+    Json(command): Json<UninstallCommand>,
+) -> Result<Json<UninstallOutcome>, (StatusCode, String)> {
+    if !peer.is_root() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "only {} uninstalls the agent; run {}",
+                os::SUPERUSER,
+                os::elevated("cntrl uninstall")
+            ),
+        ));
+    }
+    let by = Some(
+        command
+            .by
+            .trim()
+            .chars()
+            .take(PAUSED_BY_MAX)
+            .collect::<String>(),
+    )
+    .filter(|by| !by.is_empty())
+    .unwrap_or_else(|| os::SUPERUSER.to_owned());
+    let told = state.uplink.uninstall(by).await;
+    Ok(Json(UninstallOutcome { told }))
 }
 
 /// `cntrl resume`: the uplink reconnects.

@@ -21,6 +21,7 @@ use super::enroll::{EnrollCommand, EnrollOutcome};
 use super::history::{self, HISTORY_DIR};
 use super::local_api::{
     HistoryClearCommand, HistoryKeepCommand, PauseCommand, PauseOutcome, ResumeOutcome, Status,
+    UninstallCommand, UninstallOutcome,
 };
 use super::os;
 use super::policy::{self, Policy, PolicyState, Source};
@@ -85,6 +86,20 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
                 "uplink: paused by {by} {} ago{why}; {} reconnects",
                 uptime(ago),
                 os::elevated("cntrl resume")
+            );
+        }
+        UplinkStatus::Disabled {
+            gateway,
+            message,
+            since_ms,
+        } => {
+            let ago = now_ms().saturating_sub(*since_ms) / 1000;
+            let why = message
+                .as_deref()
+                .unwrap_or("its organization's plan doesn't cover this device");
+            say!(
+                "uplink: disabled in Console for {}, at {gateway}: {why}. It comes back on its own once the plan covers it.",
+                uptime(ago)
             );
         }
     }
@@ -347,6 +362,45 @@ pub fn pause(config: &Config, reason: Option<String>) -> ExitCode {
         }
         Ok((_, bytes)) => fail(String::from_utf8_lossy(&bytes).trim()),
         Err(_) => fail("the agent isn't running, so there's nothing to pause"),
+    }
+}
+
+/// Before `cntrl uninstall` removes anything (D87): the running agent tells
+/// Console who's uninstalling it. Whether Console was told; the uninstall goes
+/// on either way.
+pub fn goodbye(config: &Config) -> bool {
+    let Ok(body) = serde_json::to_vec(&UninstallCommand { by: os::invoker() }) else {
+        return false;
+    };
+    let offline =
+        "if this machine is in Console, it shows there as offline until someone removes it";
+    match block_on(request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/uninstall",
+        body,
+    )) {
+        Ok((status, bytes)) if status.is_success() => {
+            let told = serde_json::from_slice::<UninstallOutcome>(&bytes)
+                .is_ok_and(|outcome| outcome.told);
+            if told {
+                say!("Told Console this machine is being uninstalled.");
+            } else {
+                say!("Console couldn't be told; {offline}.");
+            }
+            told
+        }
+        Ok((_, bytes)) => {
+            say!(
+                "Console couldn't be told ({}); {offline}.",
+                String::from_utf8_lossy(&bytes).trim()
+            );
+            false
+        }
+        Err(_) => {
+            say!("The agent isn't running, so Console couldn't be told; {offline}.");
+            false
+        }
     }
 }
 

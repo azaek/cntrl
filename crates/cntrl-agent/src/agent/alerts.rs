@@ -8,7 +8,10 @@
 //! as Grafana's "keep firing for" does. Firing and resolving go out as `alert`
 //! records through the outbox, which keeps them until the hub has them. The
 //! rules and what's firing are saved in the state directory, so a restart
-//! neither loses the rules nor leaves an incident open for good.
+//! neither loses the rules nor leaves an incident open for good. While the
+//! device is disabled in Console the rules rest (D87): nothing is judged,
+//! what was firing is dropped without a word, since Console resolves its side,
+//! and once it's back the rules judge afresh.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -48,11 +51,29 @@ const METRIC_CLEAR_MINUTES: u32 = 2;
 const SERVICE_CLEAR_MINUTES: u32 = 1;
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-/// What's saved: the rules, and what each firing rule reported.
+/// What's saved: the rules, what each firing rule reported, and whether
+/// they rest.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Saved {
     rules: Vec<AlertRule>,
     firing: BTreeMap<String, Firing>,
+    /// The device is disabled in Console (D87). Saved, so a restart doesn't
+    /// judge before the gateway says otherwise.
+    #[serde(default, skip_serializing_if = "is_false")]
+    resting: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+/// The rules to judge: none while they rest.
+fn awake(saved: &Saved) -> Vec<AlertRule> {
+    if saved.resting {
+        Vec::new()
+    } else {
+        saved.rules.clone()
+    }
 }
 
 /// A rule that fired and hasn't resolved.
@@ -94,6 +115,29 @@ impl Alerts {
         }
     }
 
+    /// Rests the rules while the device is disabled in Console, or wakes
+    /// them (D87). Resting drops what was firing without a word: Console
+    /// resolves its side.
+    pub async fn rest(&self, resting: bool) {
+        let mut saved = self.saved.lock().await;
+        if saved.resting == resting {
+            return;
+        }
+        saved.resting = resting;
+        if resting {
+            saved.firing.clear();
+        }
+        save(&self.path, &saved).await;
+        drop(saved);
+        self.changed.notify_one();
+    }
+
+    /// Whether the rules rest.
+    #[cfg(test)]
+    pub async fn resting(&self) -> bool {
+        self.saved.lock().await.resting
+    }
+
     /// The hub's rules for this device, replacing those before.
     pub async fn set(&self, rules: Vec<AlertRule>) {
         let mut saved = self.saved.lock().await;
@@ -123,7 +167,13 @@ pub async fn run(
     let mut minute_start = now_ms();
     let mut samples: Option<watch::Receiver<Option<Arc<StatsSample>>>> = None;
     // The rules as last judged, so a change can resolve what it ends.
-    let mut known = alerts.saved.lock().await.rules.clone();
+    let (mut known, resting) = {
+        let saved = alerts.saved.lock().await;
+        (awake(&saved), saved.resting)
+    };
+    if resting {
+        outbox.discard(RecordKind::Alert).await;
+    }
     loop {
         // A receiver keeps the sampler reading while a rule needs readings.
         let wants_readings = known.iter().any(|rule| rule.kind == AlertRuleKind::Metric);
@@ -183,12 +233,23 @@ pub async fn run(
             () = alerts.changed.notified() => {
                 let mut saved = alerts.saved.lock().await;
                 let state = &mut *saved;
-                let records = ended(&state.rules, &mut state.firing, now_ms());
+                // Resting, nothing resolves: what fired was dropped as the rules
+                // went to rest.
+                let records = if state.resting {
+                    Vec::new()
+                } else {
+                    ended(&state.rules, &mut state.firing, now_ms())
+                };
                 if !records.is_empty() {
                     save(&alerts.path, &saved).await;
                 }
-                known = saved.rules.clone();
+                known = awake(&saved);
+                let resting = saved.resting;
                 drop(saved);
+                // Alerts from before the rest don't go out once the device is back.
+                if resting {
+                    outbox.discard(RecordKind::Alert).await;
+                }
                 // A changed rule starts over, its minute too; a removed one is
                 // forgotten.
                 let unchanged = |id: &String, rev: u64| known.iter().any(|rule| &rule.id == id && rule.rev == rev);
@@ -639,6 +700,69 @@ mod tests {
             enabled: None,
             vendor: false,
         }
+    }
+
+    #[tokio::test]
+    async fn resting_drops_what_fired_and_holds_after_a_restart() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let alerts = Alerts::open(dir.path()).await;
+        alerts.set(vec![cpu_rule(1)]).await;
+        alerts.saved.lock().await.firing.insert(
+            "alr_cpu".to_owned(),
+            Firing {
+                rev: 1,
+                since: 1,
+                peak: Some(0.9),
+            },
+        );
+        alerts.rest(true).await;
+        {
+            let saved = alerts.saved.lock().await;
+            assert!(saved.firing.is_empty(), "resting drops what fired");
+            assert!(awake(&saved).is_empty(), "resting judges nothing");
+            assert_eq!(saved.rules.len(), 1, "the rules stay for when it's back");
+        }
+        drop(alerts);
+        let reopened = Alerts::open(dir.path()).await;
+        assert!(reopened.saved.lock().await.resting, "a restart still rests");
+        reopened.rest(false).await;
+        assert_eq!(awake(&*reopened.saved.lock().await).len(), 1);
+        drop(reopened);
+        let woken = Alerts::open(dir.path()).await;
+        assert!(!woken.saved.lock().await.resting);
+    }
+
+    #[tokio::test]
+    async fn resting_rules_keep_old_alerts_from_going_out() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outbox = Arc::new(Outbox::open(dir.path()).await);
+        outbox
+            .push(RecordKind::Alert, serde_json::json!({ "rule": "alr_cpu" }))
+            .await;
+        let alerts = Arc::new(Alerts::open(dir.path()).await);
+        alerts.set(vec![cpu_rule(1)]).await;
+        let latest = Arc::new(Latest::new(None));
+        let token = CancellationToken::new();
+        let judging = tokio::spawn(run(
+            Arc::clone(&alerts),
+            latest,
+            Arc::clone(&outbox),
+            dir.path().join("privd.sock"),
+            token.clone(),
+        ));
+        alerts.rest(true).await;
+        for _ in 0..50 {
+            if outbox.pending(10).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            outbox.pending(10).await.is_empty(),
+            "the alert from before the rest is dropped"
+        );
+        token.cancel();
+        judging.await.expect("joined").expect("ran");
     }
 
     fn cpu_rule(minutes: u32) -> AlertRule {

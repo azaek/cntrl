@@ -3,7 +3,9 @@
 //! heartbeats, and reconnects with full-jitter backoff. Close codes that mean
 //! "stop" (revoked, locked, unsupported version) park it until the device is
 //! enrolled again; it never ends the agent. `cntrl pause` parks it too, after
-//! telling the gateway, until `cntrl resume` (D46).
+//! telling the gateway, until `cntrl resume` (D46). A device disabled in
+//! Console keeps its link but goes quiet until the gateway brings it back, and
+//! `cntrl uninstall` tells the gateway before the agent goes (D87).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,8 +18,8 @@ use cntrl_protocol::checks::{CheckResults, DeviceCheck};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
 use cntrl_protocol::frame::{
-    AgentInfo, Event, Frame, GoAway, Hello, HelloAuth, Pause, Records, Request, Response, SigAlg,
-    Subscribe, Welcome,
+    AgentInfo, Disabled, Event, Frame, GoAway, HeartbeatConfig, Hello, HelloAuth, Pause, Records,
+    Request, Response, SigAlg, Subscribe, Uninstall, Welcome,
 };
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
 use cntrl_protocol::network::{Listeners, NetworkParams, NetworkSample};
@@ -109,12 +111,28 @@ pub enum UplinkStatus {
         reason: Option<String>,
         since_ms: u64,
     },
+    /// Disabled in Console (D87): the link stays up and quiet until the
+    /// organization's plan covers this device again.
+    Disabled {
+        gateway: String,
+        /// Console's words for why.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        since_ms: u64,
+    },
 }
 
 /// A pause for the online session to tell the gateway about, and where to say
 /// whether the gateway recorded it.
 struct PauseRequest {
     notice: Pause,
+    told: oneshot::Sender<bool>,
+}
+
+/// An uninstall for the session to tell the gateway about (D87), and where to
+/// say whether the gateway recorded it.
+struct UninstallRequest {
+    notice: Uninstall,
     told: oneshot::Sender<bool>,
 }
 
@@ -133,6 +151,9 @@ pub struct Uplink {
     pausing: Notify,
     /// Signalled by `cntrl resume`.
     resumed: Notify,
+    /// An uninstall waiting for the session, which `uninstalling` wakes.
+    uninstall: std::sync::Mutex<Option<UninstallRequest>>,
+    uninstalling: Notify,
 }
 
 impl Uplink {
@@ -145,6 +166,8 @@ impl Uplink {
             pause: std::sync::Mutex::new(None),
             pausing: Notify::new(),
             resumed: Notify::new(),
+            uninstall: std::sync::Mutex::new(None),
+            uninstalling: Notify::new(),
         }
     }
 
@@ -188,6 +211,35 @@ impl Uplink {
     /// The pause waiting for the session, if any.
     fn take_pause(&self) -> Option<PauseRequest> {
         self.pause
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+
+    /// Tells Console the agent is being uninstalled (`cntrl uninstall`, D87):
+    /// the session sends it and hangs up, and the uplink stays down until the
+    /// agent stops. True when the gateway recorded it; false when the link was
+    /// down, or the gateway didn't answer, as one from before D87 doesn't.
+    pub async fn uninstall(&self, by: String) -> bool {
+        let (told, answer) = oneshot::channel();
+        *self
+            .uninstall
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(UninstallRequest {
+            notice: Uninstall { by },
+            told,
+        });
+        self.uninstalling.notify_one();
+        timeout(PAUSE_TIMEOUT.saturating_mul(2), answer)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(false)
+    }
+
+    /// The uninstall waiting for the session, if any.
+    fn take_uninstall(&self) -> Option<UninstallRequest> {
+        self.uninstall
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
@@ -263,6 +315,10 @@ enum End {
     Rejected {
         stable: bool,
     },
+    /// The gateway disabled the device mid-session: the session goes quiet.
+    Disabled(Box<Disabled>),
+    /// Told the gateway the agent is being uninstalled: stay down.
+    Uninstalled,
 }
 
 fn retry(reason: impl Into<String>) -> End {
@@ -294,6 +350,13 @@ pub async fn run(
             });
             tokio::select! {
                 () = uplink.resumed.notified() => {}
+                // Nobody is online to tell.
+                () = uplink.uninstalling.notified() => {
+                    if let Some(request) = uplink.take_uninstall() {
+                        let _ = request.told.send(false);
+                        return gone(&uplink, &token).await;
+                    }
+                }
                 () = token.cancelled() => return Ok(()),
             }
             attempt = 0;
@@ -328,10 +391,12 @@ pub async fn run(
 
         let retry = match session(&config, &identity, &url, &uplink, &token).await {
             End::Shutdown => return Ok(()),
-            End::Reconnect | End::Paused => {
+            // A session meets `Disabled` only to go quiet in place; it never ends one.
+            End::Reconnect | End::Paused | End::Disabled(_) => {
                 attempt = 0;
                 continue;
             }
+            End::Uninstalled => return gone(&uplink, &token).await,
             End::Stop { reason } => {
                 warn!("uplink stopped: {reason}");
                 uplink.set(UplinkStatus::Stopped { reason });
@@ -376,16 +441,41 @@ pub async fn run(
             () = uplink.enrolled.notified() => attempt = 0,
             // Paused while away: the loop parks without waiting out the backoff.
             () = uplink.pausing.notified() => {}
+            // Uninstalled while away: nobody to tell, and nothing to come back to.
+            () = uplink.uninstalling.notified() => {
+                if let Some(request) = uplink.take_uninstall() {
+                    let _ = request.told.send(false);
+                    return gone(&uplink, &token).await;
+                }
+            }
             () = token.cancelled() => return Ok(()),
         }
     }
 }
 
-/// Waits for an enrollment; false on shutdown.
+/// After an uninstall: the link stays down until the agent stops.
+async fn gone(uplink: &Uplink, token: &CancellationToken) -> Result<(), String> {
+    info!("uninstalling; the uplink stays down until the agent stops");
+    uplink.set(UplinkStatus::Stopped {
+        reason: "uninstalling".to_owned(),
+    });
+    token.cancelled().await;
+    Ok(())
+}
+
+/// Waits for an enrollment; false on shutdown. An uninstall meanwhile has
+/// nobody to tell.
 async fn park(uplink: &Uplink, token: &CancellationToken) -> bool {
-    tokio::select! {
-        () = uplink.enrolled.notified() => true,
-        () = token.cancelled() => false,
+    loop {
+        tokio::select! {
+            () = uplink.enrolled.notified() => return true,
+            () = uplink.uninstalling.notified() => {
+                if let Some(request) = uplink.take_uninstall() {
+                    let _ = request.told.send(false);
+                }
+            }
+            () = token.cancelled() => return false,
+        }
     }
 }
 
@@ -477,6 +567,21 @@ async fn session(
     }
     let welcome = match timeout(HANDSHAKE_TIMEOUT, next_frame(&mut ws)).await {
         Ok(Ok(Frame::Welcome(welcome))) => welcome,
+        Ok(Ok(Frame::Disabled(disabled))) => {
+            let beat = Beat::of(&disabled.hb);
+            let started = Instant::now();
+            return quiet(
+                &mut ws,
+                &disabled,
+                beat,
+                started,
+                url,
+                &config.alerts,
+                uplink,
+                token,
+            )
+            .await;
+        }
         Ok(Ok(_)) => return retry("the gateway sent something other than a welcome"),
         Ok(Err(end)) => return end,
         Err(_) => return retry("the gateway sent no welcome"),
@@ -491,13 +596,24 @@ async fn session(
         )
         .await;
     }
+    // On, as ever or once more: the alert rules judge again (D87).
+    config.alerts.rest(false).await;
     info!(session = %welcome.session, gateway = url, "uplink online");
     uplink.set(UplinkStatus::Online {
         gateway: url.to_owned(),
         session: welcome.session.clone(),
         since_ms: now_ms(),
     });
-    online(&mut ws, &welcome, Arc::new(policy), config, uplink, token).await
+    online(
+        &mut ws,
+        &welcome,
+        Arc::new(policy),
+        url,
+        config,
+        uplink,
+        token,
+    )
+    .await
 }
 
 /// The connected session: heartbeats, and frames from Console.
@@ -505,14 +621,15 @@ async fn online(
     ws: &mut Ws,
     welcome: &Welcome,
     policy: Arc<PolicyState>,
+    gateway: &str,
     config: &UplinkConfig,
     uplink: &Uplink,
     token: &CancellationToken,
 ) -> End {
-    let interval = Duration::from_millis(u64::from(welcome.hb.interval_ms))
-        .clamp(HEARTBEAT_MIN, HEARTBEAT_MAX);
-    let pong_timeout = Duration::from_millis(u64::from(welcome.hb.timeout_ms))
-        .clamp(interval, HEARTBEAT_MAX.saturating_mul(2));
+    let Beat {
+        interval,
+        pong_timeout,
+    } = Beat::of(&welcome.hb);
     let started = Instant::now();
     let stable = || started.elapsed() >= STABLE_AFTER;
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
@@ -588,7 +705,12 @@ async fn online(
                     }
                     json => {
                         if let Some(end) = handle(ws, json, stable(), &mut session).await {
-                            return end;
+                            let End::Disabled(disabled) = end else { return end };
+                            // What the session served stops here: subscriptions,
+                            // checks and requests.
+                            drop(session);
+                            let beat = Beat::of(&disabled.hb);
+                            return quiet(ws, &disabled, beat, started, gateway, &config.alerts, uplink, token).await;
                         }
                     }
                 },
@@ -681,6 +803,11 @@ async fn online(
                     return pause(ws, request).await;
                 }
             }
+            () = uplink.uninstalling.notified() => {
+                if let Some(request) = uplink.take_uninstall() {
+                    return goodbye(ws, request).await;
+                }
+            }
             () = token.cancelled() => {
                 close_link(ws, close::RESTARTING, "agent stopping").await;
                 return End::Shutdown;
@@ -689,23 +816,218 @@ async fn online(
     }
 }
 
+/// The heartbeat the gateway asks for, within bounds.
+#[derive(Debug, Clone, Copy)]
+struct Beat {
+    interval: Duration,
+    pong_timeout: Duration,
+}
+
+impl Beat {
+    fn of(hb: &HeartbeatConfig) -> Self {
+        let interval =
+            Duration::from_millis(u64::from(hb.interval_ms)).clamp(HEARTBEAT_MIN, HEARTBEAT_MAX);
+        let pong_timeout = Duration::from_millis(u64::from(hb.timeout_ms))
+            .clamp(interval, HEARTBEAT_MAX.saturating_mul(2));
+        Self {
+            interval,
+            pong_timeout,
+        }
+    }
+}
+
+/// What the agent tells the gateway it understands, as it connects (D87).
+const FEATURES: &str = "disabled";
+
+/// The longest message from Console that `cntrl status` shows.
+const DISABLED_MESSAGE_MAX: usize = 200;
+/// What a request gets while the device is disabled.
+const DISABLED_REFUSAL: &str = "this device is disabled in Console";
+
+/// Disabled in Console (D87): the link stays up and quiet, heartbeats only,
+/// until the gateway closes it to bring the device back. The alert rules rest
+/// meanwhile; requests are refused; a pause or an uninstall still gets told.
+#[allow(clippy::too_many_arguments)]
+async fn quiet(
+    ws: &mut Ws,
+    disabled: &Disabled,
+    beat: Beat,
+    started: Instant,
+    gateway: &str,
+    alerts: &Alerts,
+    uplink: &Uplink,
+    token: &CancellationToken,
+) -> End {
+    info!("disabled in Console; the link stays quiet until the plan covers this device again");
+    uplink.set(UplinkStatus::Disabled {
+        gateway: gateway.to_owned(),
+        message: shown(disabled.message.as_deref()),
+        since_ms: now_ms(),
+    });
+    alerts.rest(true).await;
+    let stable = || started.elapsed() >= STABLE_AFTER;
+    let mut ticker =
+        tokio::time::interval_at(tokio::time::Instant::now() + beat.interval, beat.interval);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_pong = Instant::now();
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                if last_pong.elapsed() > beat.pong_timeout {
+                    close_link(ws, close::HEARTBEAT_TIMEOUT, "heartbeat timeout").await;
+                    return End::Retry {
+                        reason: "the gateway stopped answering heartbeats".to_owned(),
+                        at_least: Duration::ZERO,
+                        stable: stable(),
+                    };
+                }
+                if let Err(e) = ws.send(Message::text(PING)).await {
+                    return End::Retry {
+                        reason: format!("link lost: {e}"),
+                        at_least: Duration::ZERO,
+                        stable: stable(),
+                    };
+                }
+            }
+            message = ws.next() => match message {
+                Some(Ok(Message::Text(text))) => match text.as_str() {
+                    PONG => last_pong = Instant::now(),
+                    PING => {
+                        if let Err(e) = ws.send(Message::text(PONG)).await {
+                            debug!("can't answer a ping: {e}");
+                        }
+                    }
+                    json => {
+                        if let Some(end) = while_disabled(ws, json, stable(), uplink).await {
+                            return end;
+                        }
+                    }
+                },
+                Some(Ok(Message::Close(frame))) => return after_close(frame, stable()),
+                Some(Ok(_)) => {}
+                Some(Err(e)) => {
+                    return End::Retry {
+                        reason: format!("link lost: {e}"),
+                        at_least: Duration::ZERO,
+                        stable: stable(),
+                    };
+                }
+                None => {
+                    return End::Retry {
+                        reason: "the gateway closed the connection".to_owned(),
+                        at_least: Duration::ZERO,
+                        stable: stable(),
+                    };
+                }
+            },
+            () = uplink.enrolled.notified() => {
+                close_link(ws, close::DISCONNECTED_BY_DEVICE, "enrolled again").await;
+                return End::Reconnect;
+            }
+            () = uplink.policy_changed.notified() => {
+                close_link(ws, close::DISCONNECTED_BY_DEVICE, "policy changed").await;
+                return End::Reconnect;
+            }
+            () = uplink.pausing.notified() => {
+                if let Some(request) = uplink.take_pause() {
+                    return pause(ws, request).await;
+                }
+            }
+            () = uplink.uninstalling.notified() => {
+                if let Some(request) = uplink.take_uninstall() {
+                    return goodbye(ws, request).await;
+                }
+            }
+            () = token.cancelled() => {
+                close_link(ws, close::RESTARTING, "agent stopping").await;
+                return End::Shutdown;
+            }
+        }
+    }
+}
+
+/// A frame from Console while disabled. Requests and subscriptions are
+/// refused, so a hub that hasn't caught up doesn't wait on them; a goaway is
+/// honoured; a new word on why is shown; anything else waits for the device to
+/// be back, when the hub sends it again.
+async fn while_disabled(ws: &mut Ws, json: &str, stable: bool, uplink: &Uplink) -> Option<End> {
+    let frame = match serde_json::from_str::<Frame>(json) {
+        Ok(frame) => frame,
+        Err(e) => {
+            debug!("ignoring an unreadable frame: {e}");
+            return None;
+        }
+    };
+    let refuse =
+        |id: String| Frame::Res(Response::err(id, ErrorCode::PolicyDenied, DISABLED_REFUSAL));
+    let reply = match frame {
+        Frame::Req(request) => refuse(request.id),
+        Frame::Sub(subscribe) => refuse(subscribe.id),
+        Frame::Goaway(goaway) => return Some(go_away(ws, &goaway, stable).await),
+        Frame::Disabled(disabled) => {
+            if let UplinkStatus::Disabled {
+                gateway, since_ms, ..
+            } = uplink.status()
+            {
+                uplink.set(UplinkStatus::Disabled {
+                    gateway,
+                    message: shown(disabled.message.as_deref()),
+                    since_ms,
+                });
+            }
+            return None;
+        }
+        other => {
+            debug!(?other, "disabled; ignoring a frame");
+            return None;
+        }
+    };
+    send(ws, &reply).await.err()
+}
+
+/// Console's words as `cntrl status` may print them to a terminal: without
+/// control or direction-changing characters, and not too long.
+fn shown(text: Option<&str>) -> Option<String> {
+    let kept: String = text?
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .take(DISABLED_MESSAGE_MAX)
+        .collect();
+    let kept = kept.trim();
+    (!kept.is_empty()).then(|| kept.to_owned())
+}
+
 /// Tells the gateway who paused the agent and why, waits for it to record the
 /// pause, and hangs up.
 async fn pause(ws: &mut Ws, request: PauseRequest) -> End {
-    let told = send(ws, &Frame::Pause(request.notice)).await.is_ok() && recorded(ws).await;
+    let told = send(ws, &Frame::Pause(request.notice)).await.is_ok()
+        && answered(ws, |frame| matches!(frame, Frame::Paused(_))).await;
     let _ = request.told.send(told);
     close_link(ws, close::DISCONNECTED_BY_DEVICE, "paused").await;
     End::Paused
 }
 
-/// Whether the gateway answers `paused` before the pause times out. The session
-/// is ending, so anything else it sends goes unanswered.
-async fn recorded(ws: &mut Ws) -> bool {
+/// Tells the gateway the agent is being uninstalled, waits for it to record
+/// that, and hangs up (D87).
+async fn goodbye(ws: &mut Ws, request: UninstallRequest) -> End {
+    let told = send(ws, &Frame::Uninstall(request.notice)).await.is_ok()
+        && answered(ws, |frame| matches!(frame, Frame::Uninstalled(_))).await;
+    let _ = request.told.send(told);
+    close_link(ws, close::DISCONNECTED_BY_DEVICE, "uninstalled").await;
+    End::Uninstalled
+}
+
+/// Whether the gateway answers as `is_answer` expects before the pause times
+/// out. The session is ending, so anything else it sends goes unanswered.
+async fn answered(ws: &mut Ws, is_answer: impl Fn(&Frame) -> bool) -> bool {
     let wait = async {
         while let Some(message) = ws.next().await {
             match message {
                 Ok(Message::Text(text)) => {
-                    if matches!(serde_json::from_str::<Frame>(&text), Ok(Frame::Paused(_))) {
+                    if serde_json::from_str::<Frame>(&text).is_ok_and(|frame| is_answer(&frame)) {
                         return true;
                     }
                 }
@@ -862,6 +1184,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             return None;
         }
         Frame::Checks(set) => return session.set_checks(ws, set.checks).await.err(),
+        Frame::Disabled(disabled) => return Some(End::Disabled(Box::new(disabled))),
         other => {
             debug!(?other, "ignoring a frame");
             return None;
@@ -2044,6 +2367,9 @@ fn connect_request(
         "user-agent",
         HeaderValue::from_static(concat!("cntrl-agent/", env!("CARGO_PKG_VERSION"))),
     );
+    // What this agent understands that older ones don't: a gateway keeps a
+    // disabled device's link quiet only for those that say `disabled` (D87).
+    headers.insert("cntrl-features", HeaderValue::from_static(FEATURES));
     Ok(request)
 }
 
@@ -2214,7 +2540,364 @@ fn user_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use cntrl_protocol::frame::DisabledReason;
+    use tokio_tungstenite::WebSocketStream;
+
     use super::*;
+    use crate::agent::paused::PausedState;
+
+    /// A heartbeat fast enough for a test.
+    const QUICK: Beat = Beat {
+        interval: Duration::from_millis(40),
+        pong_timeout: Duration::from_secs(5),
+    };
+
+    fn disabled(message: &str) -> Disabled {
+        Disabled {
+            reason: DisabledReason::Plan,
+            message: Some(message.to_owned()),
+            hb: HeartbeatConfig {
+                interval_ms: 300_000,
+                timeout_ms: 600_000,
+            },
+        }
+    }
+
+    /// A loopback link: the agent's end, and the gateway's.
+    async fn link() -> (Ws, WebSocketStream<TcpStream>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let accepting = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("handshake")
+        });
+        let (agent, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .expect("connect");
+        (agent, accepting.await.expect("joined"))
+    }
+
+    /// The next frame the agent sends the gateway, answering its heartbeats;
+    /// none if the link ends first.
+    async fn next_frame_from(gateway: &mut WebSocketStream<TcpStream>) -> Option<Frame> {
+        loop {
+            let message = timeout(Duration::from_secs(5), gateway.next())
+                .await
+                .ok()??
+                .ok()?;
+            match message {
+                Message::Text(text) if text.as_str() == PING => {
+                    gateway.send(Message::text(PONG)).await.ok()?;
+                }
+                Message::Text(text) => return serde_json::from_str(text.as_str()).ok(),
+                _ => {}
+            }
+        }
+    }
+
+    /// The next frame, as `pick` takes it apart.
+    async fn next<T>(
+        gateway: &mut WebSocketStream<TcpStream>,
+        pick: impl Fn(Frame) -> Option<T>,
+    ) -> Option<T> {
+        next_frame_from(gateway).await.and_then(pick)
+    }
+
+    /// Runs the gateway's end until the agent's close finishes.
+    async fn drain(gateway: &mut WebSocketStream<TcpStream>) {
+        while let Some(Ok(_)) = gateway.next().await {}
+    }
+
+    #[tokio::test]
+    async fn a_disabled_link_sends_only_heartbeats_and_refuses_requests() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let alerts = Alerts::open(dir.path()).await;
+        let uplink = Uplink::new();
+        let token = CancellationToken::new();
+        let (mut agent, mut gateway) = link().await;
+        let notice =
+            disabled("Free covers 3 devices\u{1b}[31m, and this isn't one of them.\u{202e}");
+        let quieting = quiet(
+            &mut agent,
+            &notice,
+            QUICK,
+            Instant::now(),
+            "ws://gateway",
+            &alerts,
+            &uplink,
+            &token,
+        );
+        let gatewaying = async {
+            // Heartbeats only, and nothing else, for a few of them.
+            for _ in 0..3 {
+                let message = timeout(Duration::from_secs(5), gateway.next())
+                    .await
+                    .expect("in time");
+                assert!(
+                    matches!(&message, Some(Ok(Message::Text(text))) if text.as_str() == PING),
+                    "a disabled link sends only heartbeats: {message:?}"
+                );
+                gateway.send(Message::text(PONG)).await.expect("pong");
+            }
+            // A request is refused, not left waiting.
+            let request = r#"{"t":"req","id":"req_1","op":"system.info","ver":1,"deadline_ms":15000,"data":{}}"#;
+            gateway.send(Message::text(request)).await.expect("request");
+            let answer = next(&mut gateway, |frame| match frame {
+                Frame::Res(answer) => Some(answer),
+                _ => None,
+            })
+            .await
+            .expect("an answer");
+            assert_eq!(answer.id, "req_1");
+            assert_eq!(
+                answer.err.map(|err| err.code),
+                Some(ErrorCode::PolicyDenied)
+            );
+            // The gateway brings the device back by closing the link.
+            let restart = CloseFrame {
+                code: CloseCode::from(close::SERVICE_RESTART),
+                reason: "back on".into(),
+            };
+            // The agent's end hangs up when the session ends; it doesn't answer here.
+            gateway.close(Some(restart)).await.expect("close");
+        };
+        let (end, ()) = tokio::join!(quieting, gatewaying);
+        assert!(
+            matches!(end, End::Retry { at_least, stable: false, .. } if at_least == Duration::ZERO),
+            "a 1012 reconnects"
+        );
+        assert!(
+            matches!(
+                uplink.status(),
+                UplinkStatus::Disabled { message: Some(message), .. }
+                    if message == "Free covers 3 devices[31m, and this isn't one of them."
+            ),
+            "disabled, and Console's words lose their control characters: {:?}",
+            uplink.status()
+        );
+        assert!(alerts.resting().await, "the alert rules rest");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_link_still_tells_the_gateway_of_a_pause() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let alerts = Alerts::open(dir.path()).await;
+        let uplink = Uplink::new();
+        let token = CancellationToken::new();
+        let (mut agent, mut gateway) = link().await;
+        let notice = disabled("Free covers 3 devices.");
+        let quieting = quiet(
+            &mut agent,
+            &notice,
+            QUICK,
+            Instant::now(),
+            "ws://gateway",
+            &alerts,
+            &uplink,
+            &token,
+        );
+        let pausing = uplink.pause(dir.path(), "alok".to_owned(), Some("moving it".to_owned()));
+        let gatewaying = async {
+            let pause = next(&mut gateway, |frame| match frame {
+                Frame::Pause(pause) => Some(pause),
+                _ => None,
+            })
+            .await
+            .expect("a pause");
+            assert_eq!(pause.by, "alok");
+            gateway
+                .send(Message::text(r#"{"t":"paused"}"#))
+                .await
+                .expect("paused");
+            drain(&mut gateway).await;
+        };
+        let (end, told, ()) = tokio::join!(quieting, pausing, gatewaying);
+        assert!(matches!(end, End::Paused));
+        assert_eq!(told, Ok(true));
+    }
+
+    #[tokio::test]
+    async fn an_uninstall_tells_the_gateway_from_a_disabled_link() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let alerts = Alerts::open(dir.path()).await;
+        let uplink = Uplink::new();
+        let token = CancellationToken::new();
+        let (mut agent, mut gateway) = link().await;
+        let notice = disabled("Free covers 3 devices.");
+        let quieting = quiet(
+            &mut agent,
+            &notice,
+            QUICK,
+            Instant::now(),
+            "ws://gateway",
+            &alerts,
+            &uplink,
+            &token,
+        );
+        let uninstalling = uplink.uninstall("alok".to_owned());
+        let gatewaying = async {
+            let uninstall = next(&mut gateway, |frame| match frame {
+                Frame::Uninstall(uninstall) => Some(uninstall),
+                _ => None,
+            })
+            .await
+            .expect("an uninstall");
+            assert_eq!(uninstall.by, "alok");
+            gateway
+                .send(Message::text(r#"{"t":"uninstalled"}"#))
+                .await
+                .expect("uninstalled");
+            drain(&mut gateway).await;
+        };
+        let (end, told, ()) = tokio::join!(quieting, uninstalling, gatewaying);
+        assert!(matches!(end, End::Uninstalled));
+        assert!(told, "the gateway recorded it");
+    }
+
+    #[tokio::test]
+    async fn an_uninstall_from_an_unanswering_gateway_isnt_told() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let alerts = Alerts::open(dir.path()).await;
+        let uplink = Uplink::new();
+        let token = CancellationToken::new();
+        let (mut agent, mut gateway) = link().await;
+        let notice = disabled("Free covers 3 devices.");
+        let quieting = quiet(
+            &mut agent,
+            &notice,
+            QUICK,
+            Instant::now(),
+            "ws://gateway",
+            &alerts,
+            &uplink,
+            &token,
+        );
+        let uninstalling = uplink.uninstall("alok".to_owned());
+        // A gateway from before D87 ignores the frame it doesn't know.
+        let gatewaying = async {
+            let frame = next_frame_from(&mut gateway).await;
+            assert!(matches!(frame, Some(Frame::Uninstall(_))), "{frame:?}");
+            drain(&mut gateway).await;
+        };
+        let (end, told, ()) = tokio::join!(quieting, uninstalling, gatewaying);
+        assert!(matches!(end, End::Uninstalled));
+        assert!(!told, "nobody answered");
+    }
+
+    async fn uplink_config(dir: &Path) -> UplinkConfig {
+        UplinkConfig {
+            state_dir: dir.to_path_buf(),
+            privd_socket: dir.join("privd.sock"),
+            gateway_url: None,
+            stats: Arc::new(Latest::new(None)),
+            processes: Arc::new(processes::Latest::new(None)),
+            network: Arc::new(network::Latest::new(None)),
+            storage: Arc::new(storage::Latest::new(None)),
+            containers: Arc::new(containers::Latest::new(None)),
+            outbox: Arc::new(Outbox::open(dir).await),
+            alerts: Arc::new(Alerts::open(dir).await),
+            history: Arc::new(History::open(dir)),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_uninstall_with_nobody_to_tell_answers_at_once() {
+        // Not enrolled, so parked.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let uplink = Arc::new(Uplink::new());
+        let token = CancellationToken::new();
+        let running = tokio::spawn(run(
+            uplink_config(dir.path()).await,
+            Arc::clone(&uplink),
+            token.clone(),
+        ));
+        let asked = Instant::now();
+        assert!(!uplink.uninstall("alok".to_owned()).await);
+        assert!(
+            asked.elapsed() < Duration::from_secs(2),
+            "it doesn't wait out the timeout"
+        );
+        token.cancel();
+        running.await.expect("joined").expect("ran");
+
+        // Paused, so nobody is online.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = PausedState {
+            by: "alok".to_owned(),
+            reason: None,
+            since_ms: now_ms(),
+        };
+        paused::save(dir.path(), &state).expect("paused");
+        let uplink = Arc::new(Uplink::new());
+        let token = CancellationToken::new();
+        let running = tokio::spawn(run(
+            uplink_config(dir.path()).await,
+            Arc::clone(&uplink),
+            token.clone(),
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let asked = Instant::now();
+        assert!(!uplink.uninstall("alok".to_owned()).await);
+        assert!(
+            asked.elapsed() < Duration::from_secs(2),
+            "it doesn't wait out the timeout"
+        );
+        assert_eq!(
+            uplink.status(),
+            UplinkStatus::Stopped {
+                reason: "uninstalling".to_owned()
+            },
+            "and the uplink stays down"
+        );
+        token.cancel();
+        running.await.expect("joined").expect("ran");
+    }
+
+    #[test]
+    fn a_restarting_gateway_brings_a_long_session_back_within_a_second() {
+        let frame = CloseFrame {
+            code: CloseCode::from(close::SERVICE_RESTART),
+            reason: "".into(),
+        };
+        let end = after_close(Some(frame), true);
+        assert!(
+            matches!(end, End::Retry { at_least, stable: true, .. } if at_least == Duration::ZERO)
+        );
+        // A stable session resets the attempts, so the wait is the first step's at most.
+        assert!(backoff(0) <= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn consoles_words_are_cleaned_before_a_terminal_shows_them() {
+        assert_eq!(
+            shown(Some("  plan\u{7}\u{1b}[2J limits\u{2066}  ")).as_deref(),
+            Some("plan[2J limits")
+        );
+        assert_eq!(shown(Some("\u{0}\u{1b}")), None);
+        assert_eq!(shown(None), None);
+        let long = "x".repeat(DISABLED_MESSAGE_MAX * 2);
+        assert_eq!(
+            shown(Some(&long)).map(|text| text.chars().count()),
+            Some(DISABLED_MESSAGE_MAX)
+        );
+    }
+
+    #[test]
+    fn the_agent_says_it_understands_disabled() {
+        let request =
+            connect_request("ws://localhost:8787/v1/agent", "dev_01", None).expect("request");
+        assert_eq!(
+            request
+                .headers()
+                .get("cntrl-features")
+                .and_then(|value| value.to_str().ok()),
+            Some("disabled")
+        );
+    }
 
     #[tokio::test]
     async fn a_new_log_past_the_limit_closes_the_oldest() {
