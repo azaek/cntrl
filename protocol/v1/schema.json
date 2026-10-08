@@ -204,6 +204,48 @@
           "description": "The gateway has recorded a pause."
         },
         {
+          "$ref": "#/$defs/Disabled",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "disabled"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The device is disabled in Console: its organization's plan doesn't\ncover it (D86, D87). Sent in place of `welcome`, or during a session\nonce it's disabled. The agent keeps the link but sends nothing except\nheartbeats, at the interval given, until the gateway closes the link to\nbring it back. Agents before 0.1.19 don't know it."
+        },
+        {
+          "$ref": "#/$defs/Uninstall",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "uninstall"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The agent is being uninstalled on its machine (`cntrl uninstall`): who\nran it. The gateway answers `uninstalled`; the agent then hangs up (D87)."
+        },
+        {
+          "$ref": "#/$defs/Uninstalled",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "uninstalled"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The gateway has recorded an uninstall."
+        },
+        {
           "$ref": "#/$defs/AlertRules",
           "type": "object",
           "properties": {
@@ -907,6 +949,62 @@
     "Paused": {
       "type": "object",
       "description": "The gateway's answer to `pause`, once it has recorded it."
+    },
+    "DisabledReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "plan",
+          "description": "Its organization's plan covers fewer devices than it has (D86)."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "A reason from a newer revision."
+        }
+      ],
+      "description": "Why a device is disabled in Console."
+    },
+    "Disabled": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/DisabledReason"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Console's words for it, which `cntrl status` shows."
+        },
+        "hb": {
+          "$ref": "#/$defs/HeartbeatConfig",
+          "description": "How often the agent pings while disabled, and how long it waits for a pong."
+        }
+      },
+      "required": [
+        "reason",
+        "hb"
+      ],
+      "description": "The gateway's word that the device is disabled in Console (D87)."
+    },
+    "Uninstall": {
+      "type": "object",
+      "properties": {
+        "by": {
+          "type": "string",
+          "description": "The account that ran it, as the machine names it."
+        }
+      },
+      "required": [
+        "by"
+      ],
+      "description": "Uninstalling the agent on its machine, as `cntrl uninstall` does (D87)."
+    },
+    "Uninstalled": {
+      "type": "object",
+      "description": "The gateway's answer to `uninstall`, once it has recorded it."
     },
     "AlertRule": {
       "type": "object",

@@ -37,6 +37,17 @@ pub enum Frame {
     Pause(Pause),
     /// The gateway has recorded a pause.
     Paused(Paused),
+    /// The device is disabled in Console: its organization's plan doesn't
+    /// cover it (D86, D87). Sent in place of `welcome`, or during a session
+    /// once it's disabled. The agent keeps the link but sends nothing except
+    /// heartbeats, at the interval given, until the gateway closes the link to
+    /// bring it back. Agents before 0.1.19 don't know it.
+    Disabled(Disabled),
+    /// The agent is being uninstalled on its machine (`cntrl uninstall`): who
+    /// ran it. The gateway answers `uninstalled`; the agent then hangs up (D87).
+    Uninstall(Uninstall),
+    /// The gateway has recorded an uninstall.
+    Uninstalled(Uninstalled),
     /// The alert rules this device decides itself (D43), the whole set.
     Alerts(crate::alerts::AlertRules),
     /// The checks this device runs (D56), the whole set. Agents before 0.1.14
@@ -379,6 +390,43 @@ pub struct Pause {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Paused {}
+
+/// Why a device is disabled in Console.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum DisabledReason {
+    /// Its organization's plan covers fewer devices than it has (D86).
+    Plan,
+    /// A reason from a newer revision.
+    #[serde(other)]
+    Unknown,
+}
+
+/// The gateway's word that the device is disabled in Console (D87).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Disabled {
+    pub reason: DisabledReason,
+    /// Console's words for it, which `cntrl status` shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// How often the agent pings while disabled, and how long it waits for a pong.
+    pub hb: HeartbeatConfig,
+}
+
+/// Uninstalling the agent on its machine, as `cntrl uninstall` does (D87).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Uninstall {
+    /// The account that ran it, as the machine names it.
+    pub by: String,
+}
+
+/// The gateway's answer to `uninstall`, once it has recorded it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Uninstalled {}
 
 /// A random delay between `min_ms` and `max_ms` spreads reconnects out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

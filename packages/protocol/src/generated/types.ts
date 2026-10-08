@@ -348,6 +348,18 @@ export interface DeviceCheck {
     ignore_tls?: boolean;
 }
 
+/** The gateway's word that the device is disabled in Console (D87). */
+export interface Disabled {
+    reason: DisabledReason;
+    /** Console's words for it, which `cntrl status` shows. */
+    message?: string | null;
+    /** How often the agent pings while disabled, and how long it waits for a pong. */
+    hb: HeartbeatConfig;
+}
+
+/** Why a device is disabled in Console. */
+export type DisabledReason = "plan" | "unknown";
+
 /** A physical disk, with its traffic since the previous reading. */
 export interface Disk {
     /** As the OS names it, such as `sda`, `nvme0n1` or `disk0`. */
@@ -542,6 +554,9 @@ export type Frame =
     | (GoAway & { t: "goaway" })
     | (Pause & { t: "pause" })
     | (Paused & { t: "paused" })
+    | (Disabled & { t: "disabled" })
+    | (Uninstall & { t: "uninstall" })
+    | (Uninstalled & { t: "uninstalled" })
     | (AlertRules & { t: "alerts" })
     | (CheckSet & { t: "checks" })
     | (CheckResults & { t: "check_results" });
@@ -1370,6 +1385,15 @@ export interface Temperature {
     label: string;
     celsius: number;
 }
+
+/** Uninstalling the agent on its machine, as `cntrl uninstall` does (D87). */
+export interface Uninstall {
+    /** The account that ran it, as the machine names it. */
+    by: string;
+}
+
+/** The gateway's answer to `uninstall`, once it has recorded it. */
+export type Uninstalled = { [key: string]: never };
 
 /** Ends a subscription. */
 export interface Unsubscribe {
