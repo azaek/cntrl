@@ -66,6 +66,11 @@ pub fn main() -> ExitCode {
     let cli = Cli::parse();
     let config = match Config::load(&cli.config) {
         Ok(config) => config,
+        // A broken install is when people uninstall: the default paths do.
+        Err(e) if matches!(cli.command, Command::Uninstall { .. }) => {
+            say_err!("{e}; uninstalling with the default paths");
+            Config::default()
+        }
         Err(e) => {
             say_err!("{e}");
             return ExitCode::from(EXIT_CONFIG);

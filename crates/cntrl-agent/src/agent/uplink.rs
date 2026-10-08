@@ -2788,6 +2788,73 @@ mod tests {
         assert!(!told, "nobody answered");
     }
 
+    #[tokio::test]
+    async fn a_session_disabled_midway_goes_quiet_and_refuses_requests() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = uplink_config(dir.path()).await;
+        let uplink = Uplink::new();
+        let token = CancellationToken::new();
+        let (mut agent, mut gateway) = link().await;
+        let welcome = Welcome {
+            session: "ses_test".to_owned(),
+            hb: HeartbeatConfig {
+                interval_ms: 30_000,
+                timeout_ms: 75_000,
+            },
+            acked_upto: None,
+            limits: cntrl_protocol::frame::Limits {
+                max_frame_bytes: MAX_FRAME_BYTES,
+                max_inflight: 8,
+                max_rec_batch: 50,
+            },
+            subs: Vec::new(),
+            credential: None,
+        };
+        let policy = Arc::new(PolicyState::Invalid {
+            reason: "none in a test".to_owned(),
+        });
+        let session = online(
+            &mut agent,
+            &welcome,
+            policy,
+            "ws://gateway",
+            &config,
+            &uplink,
+            &token,
+        );
+        let gatewaying = async {
+            // The hub disables it during the session; the heartbeat it gives is
+            // past the agent's least, so nothing else should come for a while.
+            let notice =
+                serde_json::to_string(&Frame::Disabled(disabled("Free covers 3 devices.")))
+                    .expect("frame");
+            gateway.send(Message::text(notice)).await.expect("disabled");
+            let request = r#"{"t":"req","id":"req_2","op":"system.info","ver":1,"deadline_ms":15000,"data":{}}"#;
+            gateway.send(Message::text(request)).await.expect("request");
+            let answer = next(&mut gateway, |frame| match frame {
+                Frame::Res(answer) => Some(answer),
+                _ => None,
+            })
+            .await
+            .expect("an answer");
+            assert_eq!(answer.id, "req_2");
+            assert_eq!(
+                answer.err.map(|err| (err.code, err.msg)),
+                Some((ErrorCode::PolicyDenied, DISABLED_REFUSAL.to_owned())),
+                "the quiet link answered it, not the session"
+            );
+            let restart = CloseFrame {
+                code: CloseCode::from(close::SERVICE_RESTART),
+                reason: "back on".into(),
+            };
+            gateway.close(Some(restart)).await.expect("close");
+        };
+        let (end, ()) = tokio::join!(session, gatewaying);
+        assert!(matches!(end, End::Retry { .. }), "a 1012 reconnects");
+        assert!(matches!(uplink.status(), UplinkStatus::Disabled { .. }));
+        assert!(config.alerts.resting().await, "the alert rules rest");
+    }
+
     async fn uplink_config(dir: &Path) -> UplinkConfig {
         UplinkConfig {
             state_dir: dir.to_path_buf(),

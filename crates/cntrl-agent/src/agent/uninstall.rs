@@ -87,8 +87,10 @@ pub fn uninstall(config: &Config, config_path: &Path, purge: bool) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        // Every step takes what's already gone in its stride, so running it
+        // again finishes the job.
         Err(e) => {
-            say_err!("cntrl uninstall: {e}");
+            say_err!("cntrl uninstall: {e}; run it again to finish");
             ExitCode::FAILURE
         }
     }
