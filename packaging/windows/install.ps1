@@ -68,6 +68,56 @@
         return ("$said".Trim() -split ' ')[-1]
     }
 
+    # The banner (D93): cntrl's mark beside the name, the version and the
+    # site, harvested from Console's lab (/lab/banner; its settings are
+    # lib/install-banner.json there). Colour only where the console shows it
+    # and NO_COLOR isn't set: the mark in 256-colour blue through VT sequences
+    # where the console takes them, else in Write-Host's blue. A window under
+    # 30 columns gets one line.
+    function Banner([string]$Version) {
+        $name = 'cntrl agent'
+        $url = 'https://cntrl.pw'
+        $width = 80
+        try { if ($Host.UI.RawUI.WindowSize.Width -gt 0) { $width = $Host.UI.RawUI.WindowSize.Width } } catch {}
+        $colour = -not $env:NO_COLOR -and -not [Console]::IsOutputRedirected
+        $vt = $colour -and $Host.UI.SupportsVirtualTerminal
+        $e = [char]27
+        if ($width -lt 30) {
+            if ($vt) { Write-Host ("$e[1m$name$e[0m $Version").TrimEnd() } else { Write-Host ("$name $Version").TrimEnd() }
+            Write-Host ''
+            return
+        }
+        # Under the name, the version and then the site; the site moves up a
+        # line when there's no version.
+        $beside = @('', $name) + @($Version, $url | Where-Object { $_ })
+        $art = @('    //////', '   //// ///', '   ///   //', '    //////')
+        for ($row = 0; $row -lt $art.Count; $row++) {
+            $line = $art[$row]
+            $words = if ($row -lt $beside.Count) { $beside[$row] } else { '' }
+            $pad = if ($words) { ' ' * (14 - $line.Length) } else { '' }
+            if ($vt) {
+                $style = if ($row -eq 1) { "$e[1m" } else { "$e[2m" }
+                $text = if ($words) { "$pad$style$words$e[0m" } else { '' }
+                Write-Host "$e[38;5;33m$line$e[0m$text"
+            } elseif ($colour) {
+                Write-Host $line -ForegroundColor Blue -NoNewline
+                if ($row -eq 1) {
+                    Write-Host "$pad$words"
+                } elseif ($words) {
+                    Write-Host $pad -NoNewline
+                    Write-Host $words -ForegroundColor DarkGray
+                } else {
+                    Write-Host ''
+                }
+            } else {
+                Write-Host "$line$pad$words"
+            }
+        }
+        Write-Host ''
+    }
+
+    Banner $CNTRL_VERSION
+
     $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Fail 'open PowerShell as administrator, then run the command again'

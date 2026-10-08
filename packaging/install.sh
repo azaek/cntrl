@@ -45,6 +45,47 @@ fail() {
     exit 1
 }
 
+# The banner (D93): cntrl's mark beside the name, the version when it's known
+# and the site, harvested from Console's lab (/lab/banner; its settings are
+# lib/install-banner.json there). Colour only on a terminal, without NO_COLOR
+# and not with TERM=dumb: the mark in 256-colour blue, or ANSI's bright blue
+# where there are fewer colours. A terminal under 30 columns gets one line.
+banner() {
+    name='cntrl agent' url=https://cntrl.pw
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+        if [ "$(tput colors 2>/dev/null || echo 8)" -ge 256 ] 2>/dev/null; then
+            mark=$(printf '\033[38;5;33m')
+        else
+            mark=$(printf '\033[94m')
+        fi
+        bold=$(printf '\033[1m') dim=$(printf '\033[2m') off=$(printf '\033[0m')
+    else
+        mark= bold= dim= off=
+    fi
+    # The terminal's width, from the terminal itself: inside $(), tput can't
+    # see it and says 80.
+    cols=$( (stty size </dev/tty) 2>/dev/null | awk '{ print $2 }')
+    [ -n "$cols" ] || cols=80
+    if [ "$cols" -lt 30 ] 2>/dev/null; then
+        say "$bold$name$off${1:+ $1}"
+        say ''
+        return
+    fi
+    # Under the name, the version and then the site; the site moves up a line
+    # when there's no version.
+    second=${1:-$url} third=
+    [ -z "$1" ] || third=$url
+    say "$mark    //////$off"
+    say "$mark   //// ///$off   $bold$name$off"
+    say "$mark   ///   //$off   $dim$second$off"
+    if [ -n "$third" ]; then
+        say "$mark    //////$off    $dim$third$off"
+    else
+        say "$mark    //////$off"
+    fi
+    say ''
+}
+
 # The Rust target this machine needs.
 target() {
     case $(uname -m) in
@@ -334,6 +375,20 @@ main() {
         *) fail "unknown option $1" ;;
         esac
     done
+    # The version the banner says: Console's release, a binary's own, or an
+    # archive's from its name (cntrl update's has none).
+    shown=$CNTRL_VERSION
+    if [ -z "$shown" ] && [ -n "$binary" ]; then shown=$(version_of "$binary"); fi
+    if [ -z "$shown" ] && [ -n "$archive" ]; then
+        case ${archive##*/} in
+        cntrl-agent-*.tar.gz)
+            shown=${archive##*/}
+            shown=${shown#cntrl-agent-}
+            shown=${shown%%-*}
+            ;;
+        esac
+    fi
+    banner "$shown"
     [ "$(id -u)" -eq 0 ] || fail "run it as root, with sudo"
     tgt=$(target)
     # On macOS the binary root runs stays out of /usr/local: Homebrew on Intel
