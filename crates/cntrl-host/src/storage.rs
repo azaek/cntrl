@@ -107,6 +107,11 @@ pub trait Storage: Send + Sync {
     fn disks(&self) -> Vec<DiskReading>;
     /// The volumes as of the last look, which runs on a slower clock.
     fn volumes(&self) -> Vec<Volume>;
+    /// Whether the volumes have been looked at yet; until then they read as
+    /// none. It doesn't block, so it's fine off a blocking thread.
+    fn volumes_ready(&self) -> bool {
+        true
+    }
 }
 
 /// This OS's storage reader.
@@ -205,6 +210,10 @@ pub mod linux {
         fn volumes(&self) -> Vec<Volume> {
             let (root, stuck) = (self.root.clone(), std::sync::Arc::clone(&self.stuck));
             self.volumes.get(move || volumes(&root, &stuck))
+        }
+
+        fn volumes_ready(&self) -> bool {
+            self.volumes.ready()
         }
     }
 
@@ -644,6 +653,10 @@ pub mod mac {
             let layout = self.layout();
             let stuck = std::sync::Arc::clone(&self.stuck);
             self.volumes.get(move || volumes(&layout, &stuck))
+        }
+
+        fn volumes_ready(&self) -> bool {
+            self.volumes.ready()
         }
     }
 

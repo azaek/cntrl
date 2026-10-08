@@ -2962,7 +2962,7 @@
       "required": [
         "entries"
       ],
-      "description": "Log lines, in the order they were logged."
+      "description": "Log lines, in the order they were logged. From agent 0.1.18 the first\nbatch comes once the earlier lines are all read, with none in it when\nthere weren't any, so a viewer can tell an empty log from one whose lines\nare still on their way."
     },
     "LogEntry": {
       "type": "object",

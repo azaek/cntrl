@@ -802,7 +802,12 @@ export interface LogEntry {
     message: string;
 }
 
-/** Log lines, in the order they were logged. */
+/**
+ * Log lines, in the order they were logged. From agent 0.1.18 the first
+ * batch comes once the earlier lines are all read, with none in it when
+ * there weren't any, so a viewer can tell an empty log from one whose lines
+ * are still on their way.
+ */
 export interface LogsBatch {
     entries: LogEntry[];
     /**

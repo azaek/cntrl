@@ -313,8 +313,9 @@ pub async fn act(id: &str, action: Action) -> Result<ContainerState, String> {
 }
 
 /// Reads one container's log until it ends or the caller drops this: the
-/// earlier lines `params.lines` asks for, then new ones. Returns why it
-/// stopped.
+/// earlier lines `params.lines` asks for, read to their end, so the agent
+/// knows when it has them all, then new ones, followed from the last of them.
+/// Returns why it stopped.
 pub async fn read_logs(params: &LogsParams, out: &mpsc::Sender<LogsBatch>) -> String {
     let Some(id) = params.container.as_deref() else {
         return "no container named".to_owned();
@@ -330,37 +331,67 @@ pub async fn read_logs(params: &LogsParams, out: &mpsc::Sender<LogsBatch>) -> St
         .lines
         .unwrap_or(journal::DEFAULT_LINES)
         .min(journal::MAX_LINES);
-    let path = format!("/containers/{id}/logs?follow=1&stdout=1&stderr=1&timestamps=1&tail={tail}");
-    let response = match tokio::time::timeout(CALL_LIMIT, call(&socket, Method::GET, &path)).await {
-        Ok(Ok(response)) => response,
-        Ok(Err(e)) => return e,
-        Err(_) => return "the engine didn't answer in time".to_owned(),
-    };
-    let status = response.status();
-    if !status.is_success() {
-        let body = read_body(response.into_body()).await.unwrap_or_default();
-        return engine_error(status, &body);
-    }
-    let multiplexed = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.contains("multiplexed"));
-    let started = now_ms();
-    let mut body = response.into_body();
-    let mut frames = Frames::new(multiplexed);
     let mut batcher = Batcher::new(params);
-    let mut flush = flush_timer();
     let closed = || "the subscription closed".to_owned();
+
+    // The engine sends the earlier lines and stops, without following.
+    let mut newest: Option<u128> = None;
+    if tail > 0 {
+        let path = format!("/containers/{id}/logs?stdout=1&stderr=1&timestamps=1&tail={tail}");
+        let (mut body, multiplexed) = match open_log(&socket, &path).await {
+            Ok(opened) => opened,
+            Err(e) => return e,
+        };
+        let mut frames = Frames::new(multiplexed);
+        loop {
+            match tokio::time::timeout(CALL_LIMIT, body.frame()).await {
+                Ok(Some(Ok(frame))) => {
+                    let Ok(data) = frame.into_data() else {
+                        continue;
+                    };
+                    for (stream, line) in frames.push(&data) {
+                        newest = stamp_ns(&line).or(newest);
+                        if let Some(full) = batcher.push(entry(stream, &line), false)
+                            && out.send(full).await.is_err()
+                        {
+                            return closed();
+                        }
+                    }
+                }
+                Ok(Some(Err(e))) => return format!("lost the container's log: {e}"),
+                Ok(None) => break,
+                Err(_) => return "the engine didn't finish its log in time".to_owned(),
+            }
+        }
+    }
+    // Said even with no earlier lines, so a viewer can tell an empty log from
+    // one still on its way.
+    if out.send(batcher.caught_up()).await.is_err() {
+        return closed();
+    }
+
+    // Then new lines. `since` takes in a line at that very time, so it starts
+    // a nanosecond after the last earlier one; with none, the log was empty a
+    // moment ago, so every line in it now is new.
+    let from = match (tail, newest) {
+        (0, _) => "&tail=0".to_owned(),
+        (_, Some(at)) => format!("&since={}", since(at + 1)),
+        (_, None) => String::new(),
+    };
+    let path = format!("/containers/{id}/logs?follow=1&stdout=1&stderr=1&timestamps=1{from}");
+    let (mut body, multiplexed) = match open_log(&socket, &path).await {
+        Ok(opened) => opened,
+        Err(e) => return e,
+    };
+    let mut frames = Frames::new(multiplexed);
+    let mut flush = flush_timer();
     loop {
         tokio::select! {
             frame = body.frame() => match frame {
                 Some(Ok(frame)) => {
                     let Ok(data) = frame.into_data() else { continue };
                     for (stream, line) in frames.push(&data) {
-                        let entry = entry(stream, &line);
-                        let live = entry.ts >= started;
-                        if let Some(full) = batcher.push(entry, live)
+                        if let Some(full) = batcher.push(entry(stream, &line), true)
                             && out.send(full).await.is_err()
                         {
                             return closed();
@@ -384,6 +415,37 @@ pub async fn read_logs(params: &LogsParams, out: &mpsc::Sender<LogsBatch>) -> St
     }
     // Following a log ends when the container stops.
     "the container stopped".to_owned()
+}
+
+/// A container's log as the engine streams it, and whether its frames are
+/// multiplexed (stdout and stderr in one stream) or plain, when it says.
+async fn open_log(socket: &Path, path: &str) -> Result<(Incoming, Option<bool>), String> {
+    let response = match tokio::time::timeout(CALL_LIMIT, call(socket, Method::GET, path)).await {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err("the engine didn't answer in time".to_owned()),
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = read_body(response.into_body()).await.unwrap_or_default();
+        return Err(engine_error(status, &body));
+    }
+    let multiplexed = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.contains("multiplexed"));
+    Ok((response.into_body(), multiplexed))
+}
+
+/// A log line's engine timestamp, in nanoseconds since the Unix epoch.
+fn stamp_ns(line: &str) -> Option<u128> {
+    rfc3339_ns(line.split_once(' ')?.0)
+}
+
+/// A time as the engine's `since` takes it: seconds and nanoseconds.
+fn since(nanos: u128) -> String {
+    format!("{}.{:09}", nanos / 1_000_000_000, nanos % 1_000_000_000)
 }
 
 /// A log line as the Logs viewer takes it: its time, from the engine's
@@ -500,6 +562,12 @@ impl Frames {
 /// An RFC 3339 time, as the engine stamps a log line
 /// (`2026-10-06T07:31:09.123456789Z`), in Unix milliseconds.
 fn rfc3339_ms(stamp: &str) -> Option<u64> {
+    u64::try_from(rfc3339_ns(stamp)? / 1_000_000).ok()
+}
+
+/// An RFC 3339 time in nanoseconds since the Unix epoch, as the engine's
+/// timestamps carry them.
+fn rfc3339_ns(stamp: &str) -> Option<u128> {
     let (date, time) = stamp.split_once('T')?;
     let mut date = date.splitn(3, '-').map(str::parse::<i64>);
     let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
@@ -522,13 +590,13 @@ fn rfc3339_ms(stamp: &str) -> Option<u64> {
         parts.next()?.ok()?,
         parts.next()?.ok()?,
     );
-    let millis: i64 = format!("{fraction:0<3}")
-        .get(..3)
+    let nanos: u128 = format!("{fraction:0<9}")
+        .get(..9)
         .and_then(|digits| digits.parse().ok())
         .unwrap_or(0);
     let days = days_from_civil(year, month, day);
     let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60;
-    u64::try_from(seconds * 1_000 + millis).ok()
+    Some(u128::try_from(seconds).ok()? * 1_000_000_000 + nanos)
 }
 
 /// Days since the Unix epoch of a date (Howard Hinnant's `days_from_civil`).

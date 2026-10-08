@@ -142,14 +142,17 @@ pub fn priority(level: u8) -> Option<u8> {
 
 /// Reads `query`: the latest `earlier` events, oldest first, then new ones as
 /// they come, handing each to `each` with whether it's new, until `each`
-/// says to stop or `closed` says nobody reads. Returns why it stopped.
+/// says to stop or `closed` says nobody reads. `caught_up` is called once,
+/// when the earlier events are all handed over, even if there were none.
+/// Returns why it stopped.
 pub fn follow(
     query: &str,
     earlier: u32,
     closed: &dyn Fn() -> bool,
     each: &mut dyn FnMut(LogEntry, bool) -> bool,
+    caught_up: &mut dyn FnMut() -> bool,
 ) -> String {
-    match read(query, earlier, closed, each) {
+    match read(query, earlier, closed, each, caught_up) {
         Ok(()) => "the subscription closed".to_owned(),
         Err(e) => e,
     }
@@ -160,6 +163,7 @@ fn read(
     earlier: u32,
     closed: &dyn Fn() -> bool,
     each: &mut dyn FnMut(LogEntry, bool) -> bool,
+    caught_up: &mut dyn FnMut() -> bool,
 ) -> Result<(), String> {
     let query: Vec<u16> = query.encode_utf16().chain(Some(0)).collect();
     let context = Handle::evt(
@@ -235,6 +239,9 @@ fn read(
                 return Ok(());
             }
         }
+    }
+    if !caught_up() {
+        return Ok(());
     }
     loop {
         if closed() {

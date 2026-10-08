@@ -158,6 +158,12 @@ impl<T: Clone + Default + Send + 'static> Background<T> {
         }
         state.value.clone()
     }
+
+    /// Whether a read has ended, so the value is what was read and not the
+    /// default it starts as.
+    pub(crate) fn ready(&self) -> bool {
+        lock(&self.shared).stored > 0
+    }
 }
 
 fn lock<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {

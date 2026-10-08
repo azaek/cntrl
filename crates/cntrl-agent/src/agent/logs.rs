@@ -131,6 +131,13 @@ impl Batcher {
         (self.batch.entries.len() >= BATCH_LINES || self.bytes >= BATCH_BYTES).then(|| self.drain())
     }
 
+    /// What's gathered, even if nothing: a reader sends it once its earlier
+    /// lines are all read, so a viewer can tell a log with none from one whose
+    /// lines are still on their way.
+    pub fn caught_up(&mut self) -> LogsBatch {
+        self.drain()
+    }
+
     /// What's gathered, if there's anything.
     pub fn take(&mut self) -> Option<LogsBatch> {
         (!self.batch.entries.is_empty() || self.batch.skipped > 0 || !self.counts.is_empty())
@@ -237,6 +244,11 @@ pub(super) fn flush_timer() -> tokio::time::Interval {
     flush
 }
 
+/// Why a log stops when the agent can't read the system journal.
+#[cfg(target_os = "linux")]
+const NO_ACCESS: &str =
+    "the agent can't read the system journal; run the install command again, which gives it access";
+
 #[cfg(target_os = "linux")]
 async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> String {
     use cntrl_host::journal;
@@ -249,8 +261,84 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
         return through_privd(id, params, privd, out).await;
     }
 
-    let started = now_ms();
-    let mut child = match journal::command(params).spawn() {
+    // The earlier lines first, read to their end, so the agent knows when it
+    // has them all; then new ones, followed from the last of them.
+    let before = now_ms();
+    let mut batcher = Batcher::new(params);
+    let closed = || "the subscription closed".to_owned();
+    let mut earlier = match journal::command(journal::earlier_args(params)).spawn() {
+        Ok(child) => child,
+        Err(e) => return format!("can't run journalctl: {e}"),
+    };
+    let (Some(stdout), Some(stderr)) = (earlier.stdout.take(), earlier.stderr.take()) else {
+        return "journalctl gave nothing to read".to_owned();
+    };
+    // Read alongside and to its end, so a full stderr pipe can't hold
+    // journalctl up; the first 4 KiB is plenty to say why.
+    let problem = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut kept = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if kept.len() < 4_096 {
+                kept.push_str(&line);
+                kept.push('\n');
+            }
+        }
+        kept
+    });
+    let mut lines = BufReader::new(stdout).lines();
+    let mut last: Option<String> = None;
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                let Some(entry) = journal::parse(&line) else {
+                    continue;
+                };
+                last = Some(line);
+                if let Some(full) = batcher.push(entry, false)
+                    && out.send((id.to_owned(), full)).await.is_err()
+                {
+                    return closed();
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return format!("can't read journalctl: {e}"),
+        }
+    }
+    let problem = problem.await.unwrap_or_default();
+    // Without access to the system journal, journalctl warns and shows
+    // nothing, which isn't an empty log, so stop with a reason.
+    if problem.contains("insufficient permissions") {
+        return NO_ACCESS.to_owned();
+    }
+    match earlier.wait().await {
+        Ok(status) if !status.success() => {
+            return match problem.lines().rfind(|line| !line.trim().is_empty()) {
+                Some(line) => format!("journalctl stopped: {}", line.trim()),
+                None => format!("journalctl stopped ({status})"),
+            };
+        }
+        Ok(_) => {}
+        Err(e) => return format!("journalctl stopped: {e}"),
+    }
+    if out
+        .send((id.to_owned(), batcher.caught_up()))
+        .await
+        .is_err()
+    {
+        return closed();
+    }
+
+    let resume = if params.lines == Some(0) {
+        journal::Resume::New
+    } else {
+        match last.as_deref().and_then(journal::cursor) {
+            Some(cursor) => journal::Resume::After(cursor),
+            // Nothing to read a moment ago, so all from then on is new.
+            None => journal::Resume::Since((before / 1_000).saturating_sub(1)),
+        }
+    };
+    let mut child = match journal::command(journal::follow_args(params, &resume)).spawn() {
         Ok(child) => child,
         Err(e) => return format!("can't run journalctl: {e}"),
     };
@@ -259,17 +347,14 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
     };
     let mut lines = BufReader::new(stdout).lines();
     let mut errors = BufReader::new(stderr).lines();
-    let mut batcher = Batcher::new(params);
     let mut flush = flush_timer();
     let mut stderr_open = true;
-    let closed = || "the subscription closed".to_owned();
     loop {
         tokio::select! {
             line = lines.next_line() => match line {
                 Ok(Some(line)) => {
                     let Some(entry) = journal::parse(&line) else { continue };
-                    let live = entry.ts >= started;
-                    if let Some(full) = batcher.push(entry, live)
+                    if let Some(full) = batcher.push(entry, true)
                         && out.send((id.to_owned(), full)).await.is_err()
                     {
                         return closed();
@@ -279,11 +364,7 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
                 Err(e) => return format!("can't read journalctl: {e}"),
             },
             line = errors.next_line(), if stderr_open => match line {
-                // Without access to the system journal, journalctl warns
-                // and goes on showing nothing, so stop with a reason.
-                Ok(Some(line)) if line.contains("insufficient permissions") => {
-                    return "the agent can't read the system journal; run the install command again, which gives it access".to_owned();
-                }
+                Ok(Some(line)) if line.contains("insufficient permissions") => return NO_ACCESS.to_owned(),
                 Ok(Some(_)) => {}
                 Ok(None) | Err(_) => stderr_open = false,
             },
@@ -330,6 +411,9 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
     if let Err(e) = ipc::send(&mut channel, &request).await {
         return format!("can't ask the agent's root helper: {e}");
     }
+    // privd's first batch says the earlier lines are read, so it goes on even
+    // when it's empty; after it, only batches with something in them.
+    let mut first = true;
     loop {
         let batch = match ipc::receive::<_, Response>(&mut channel).await {
             Ok(Some(Response {
@@ -344,7 +428,9 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
             Err(e) => return format!("lost the root helper: {e}"),
         };
         let ended = batch.ended.clone();
-        if (!batch.entries.is_empty() || batch.skipped > 0)
+        let something = !batch.entries.is_empty() || batch.skipped > 0;
+        let caught_up = std::mem::take(&mut first) && ended.is_none();
+        if (something || caught_up)
             && out
                 .send((
                     id.to_owned(),
@@ -364,6 +450,14 @@ async fn through_privd(id: &str, params: &LogsParams, privd: &Path, out: &Batche
     }
 }
 
+/// What the Event Log's thread hands over: a line, with whether it's new, or
+/// that the earlier ones are all read.
+#[cfg(windows)]
+enum Read {
+    Line(LogEntry, bool),
+    CaughtUp,
+}
+
 /// On Windows the agent reads the Event Log on a thread of its own, which
 /// stops once the subscription closes; a container's log comes through
 /// privd, as on Linux.
@@ -377,7 +471,7 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
     let unit = params.unit.clone();
     let priority = params.priority;
     let earlier = params.lines.unwrap_or(100).min(1000);
-    let (tx, mut rx) = mpsc::channel::<(LogEntry, bool)>(1024);
+    let (tx, mut rx) = mpsc::channel::<Read>(1024);
     let reader = tokio::task::spawn_blocking(move || {
         let display = unit.as_deref().and_then(services::display_name);
         let query = eventlog::query(
@@ -385,11 +479,13 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
             priority,
         );
         let watching = tx.clone();
+        let done = tx.clone();
         eventlog::follow(
             &query,
             earlier,
             &|| watching.is_closed(),
-            &mut |entry, live| tx.blocking_send((entry, live)).is_ok(),
+            &mut |entry, live| tx.blocking_send(Read::Line(entry, live)).is_ok(),
+            &mut || done.blocking_send(Read::CaughtUp).is_ok(),
         )
     });
     let mut batcher = Batcher::new(params);
@@ -398,10 +494,17 @@ async fn read(id: &str, params: &LogsParams, privd: &Path, out: &Batches) -> Str
     loop {
         tokio::select! {
             item = rx.recv() => match item {
-                Some((entry, live)) => {
+                Some(Read::Line(entry, live)) => {
                     if let Some(full) = batcher.push(entry, live)
                         && out.send((id.to_owned(), full)).await.is_err()
                     {
+                        return closed();
+                    }
+                }
+                // Said even with no earlier events, so a viewer can tell an
+                // empty log from one still on its way.
+                Some(Read::CaughtUp) => {
+                    if out.send((id.to_owned(), batcher.caught_up())).await.is_err() {
                         return closed();
                     }
                 }
@@ -531,7 +634,9 @@ pub mod mac {
             tails.spawn(follow(file.clone(), source.files_as, file_out.clone()));
         }
         drop(file_out);
-        if !send(batcher.take()).await {
+        // Said even with no earlier lines, so a viewer can tell an empty log
+        // from one `log show` is still reading.
+        if out.send(batcher.caught_up()).await.is_err() {
             return closed();
         }
 
@@ -754,6 +859,19 @@ mod batching {
             batches.iter().map(|batch| batch.entries.len()).sum(),
             batches,
         )
+    }
+
+    #[test]
+    fn the_caught_up_batch_goes_even_empty() {
+        let mut batcher = Batcher::new(&LogsParams::default());
+        // Nothing gathered: a flush sends nothing, but caught-up still says so.
+        assert!(batcher.take().is_none());
+        let caught_up = batcher.caught_up();
+        assert!(caught_up.entries.is_empty() && caught_up.ended.is_none());
+        // With earlier lines gathered, it carries them.
+        let _ = batcher.push(line("app", 1), false);
+        assert_eq!(batcher.caught_up().entries.len(), 1);
+        assert!(batcher.take().is_none());
     }
 
     #[test]
