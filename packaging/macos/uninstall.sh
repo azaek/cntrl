@@ -1,7 +1,8 @@
 #!/bin/sh
 # Removes the cntrl agent from macOS: its launchd jobs and the binary. With
 # --purge it also removes the agent's identity, config and logs and the _cntrl
-# user; the device then stays in Console until someone removes it there.
+# user; the device then stays in Console until someone removes it there. An
+# agent that has `cntrl uninstall` does it, and tells Console first.
 #
 # Usage: sudo packaging/macos/uninstall.sh [--purge]
 
@@ -21,6 +22,11 @@ esac
 [ "$(id -u)" -eq 0 ] || fail "run it with sudo"
 
 bin="/Library/Application Support/cntrl/bin/cntrl-agent"
+# From 0.1.19 the agent removes itself, telling Console first (D87). What
+# follows is for an install whose program is gone or predates that.
+if [ -x "$bin" ] && "$bin" uninstall --help >/dev/null 2>&1; then
+    exec "$bin" uninstall ${PURGE:+--purge}
+fi
 for label in pw.cntrl.agent pw.cntrl.privd; do
     launchctl bootout "system/$label" 2>/dev/null || true
     rm -f "/Library/LaunchDaemons/$label.plist"

@@ -36,6 +36,8 @@ mod service;
 mod stats;
 mod storage;
 mod supervisor;
+#[cfg(unix)]
+mod uninstall;
 mod update;
 mod uplink;
 
@@ -106,6 +108,8 @@ pub fn main() -> ExitCode {
         Command::Install { console, gateway } => install::install(&cli.config, console, gateway),
         #[cfg(windows)]
         Command::Uninstall { purge, wait } => install::uninstall(&config, &cli.config, purge, wait),
+        #[cfg(unix)]
+        Command::Uninstall { purge, wait: _ } => uninstall::uninstall(&config, &cli.config, purge),
     }
 }
 

@@ -93,16 +93,16 @@ pub enum Command {
         #[arg(long)]
         gateway: Option<String>,
     },
-    /// Remove the agent: its services and its program. Its identity, config,
-    /// audit log and logs stay unless --purge. Needs an administrator.
-    #[cfg(windows)]
+    /// Remove the agent: it tells Console first, then its services and its
+    /// program go. Its identity, config, audit log and logs stay unless
+    /// --purge. Needs root, or an administrator on Windows.
     Uninstall {
         /// Remove its identity, config, audit log and logs too; the device
-        /// stays in Console until someone removes it there.
+        /// stays in Console, uninstalled, until someone removes it there.
         #[arg(long)]
         purge: bool,
         /// Wait for Enter before ending, so the window Apps & features opens
-        /// stays to show what happened.
+        /// stays to show what happened. Windows only.
         #[arg(long, hide = true)]
         wait: bool,
     },

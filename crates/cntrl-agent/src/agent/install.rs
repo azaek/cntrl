@@ -123,10 +123,10 @@ fn try_install(
     Ok(())
 }
 
-/// `cntrl uninstall`: the services and the program go; with `purge`, the
-/// identity, config, audit log and logs too, and the device stays in Console
-/// until someone removes it there. With `wait`, as from Apps & features, the
-/// window stays until Enter.
+/// `cntrl uninstall`: the agent tells Console first (D87), then the services
+/// and the program go; with `purge`, the identity, config, audit log and logs
+/// too, and the device stays in Console, uninstalled, until someone removes it
+/// there. With `wait`, as from Apps & features, the window stays until Enter.
 pub fn uninstall(config: &Config, config_path: &Path, purge: bool, wait: bool) -> ExitCode {
     let code = match try_uninstall(config, config_path, purge) {
         Ok(()) => ExitCode::SUCCESS,
@@ -185,6 +185,8 @@ fn try_uninstall(config: &Config, config_path: &Path, purge: bool) -> Result<(),
             os::AS_ROOT
         ));
     }
+    // Before anything stops: the link that tells Console is the agent's (D87).
+    super::client::goodbye(config);
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .map_err(|e| format!("can't reach the Service Control Manager: {}", why(&e)))?;
     for name in [AGENT, PRIVD] {
