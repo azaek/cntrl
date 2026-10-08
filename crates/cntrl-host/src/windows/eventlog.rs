@@ -571,11 +571,23 @@ mod tests {
     #[test]
     fn reads_the_latest_events() {
         let mut got = Vec::new();
-        let reason = follow(&query(None, None), 20, &|| false, &mut |entry, live| {
-            got.push((entry, live));
-            got.len() < 20
-        });
-        assert!(!got.is_empty(), "{reason}");
+        let mut caught_up = 0;
+        // Stops at caught-up, which comes once, after the earlier events.
+        let reason = follow(
+            &query(None, None),
+            20,
+            &|| false,
+            &mut |entry, live| {
+                got.push((entry, live));
+                true
+            },
+            &mut || {
+                caught_up += 1;
+                false
+            },
+        );
+        assert_eq!(caught_up, 1, "{reason}");
+        assert!(!got.is_empty() && got.len() <= 20, "{reason}");
         assert!(got.iter().all(|(_, live)| !live));
         assert!(
             got.iter()
