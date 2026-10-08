@@ -449,7 +449,8 @@ export interface EnrollError {
 export type EnrollErrorCode =
     | ("bad_request" | "invalid_token" | "token_expired" | "token_used" | "bad_signature" | "internal" | "unknown")
     | "already_enrolled"
-    | "confirm_move";
+    | "confirm_move"
+    | "plan_limit";
 
 /** `POST /v1/enroll`. */
 export interface EnrollRequest {
@@ -507,7 +508,9 @@ export interface ErrorBody {
  * Why an operation failed. Stable within a protocol major version; a code from
  * a newer revision decodes as `Unknown`.
  */
-export type ErrorCode = "bad_request" | "unknown_op" | "unsupported_version" | "policy_denied" | "not_found" | "busy" | "timeout" | "cancelled" | "internal" | "device_offline" | "link_lost" | "unknown";
+export type ErrorCode =
+    | ("bad_request" | "unknown_op" | "unsupported_version" | "policy_denied" | "not_found" | "busy" | "timeout" | "cancelled" | "internal" | "device_offline" | "link_lost" | "unknown")
+    | "device_disabled";
 
 /** One message on a subscription. */
 export interface Event {

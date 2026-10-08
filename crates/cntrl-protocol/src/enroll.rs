@@ -181,6 +181,9 @@ pub enum EnrollErrorCode {
     /// The machine is in another organization; enroll again with `replace`
     /// to move it.
     ConfirmMove,
+    /// The organization's plan has no room for another device (D86); the
+    /// message says what to do. Agents before 0.1.19 show the message.
+    PlanLimit,
     Internal,
     #[serde(other)]
     Unknown,

@@ -720,20 +720,29 @@
       "description": "Why a request failed."
     },
     "ErrorCode": {
-      "type": "string",
-      "enum": [
-        "bad_request",
-        "unknown_op",
-        "unsupported_version",
-        "policy_denied",
-        "not_found",
-        "busy",
-        "timeout",
-        "cancelled",
-        "internal",
-        "device_offline",
-        "link_lost",
-        "unknown"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "bad_request",
+            "unknown_op",
+            "unsupported_version",
+            "policy_denied",
+            "not_found",
+            "busy",
+            "timeout",
+            "cancelled",
+            "internal",
+            "device_offline",
+            "link_lost",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "device_disabled",
+          "description": "The device is disabled in Console: its plan doesn't cover it (D86).\nThe gateway says this; agents never do."
+        }
       ],
       "description": "Why an operation failed. Stable within a protocol major version; a code from\na newer revision decodes as `Unknown`."
     },
@@ -4034,6 +4043,11 @@
           "type": "string",
           "const": "confirm_move",
           "description": "The machine is in another organization; enroll again with `replace`\nto move it."
+        },
+        {
+          "type": "string",
+          "const": "plan_limit",
+          "description": "The organization's plan has no room for another device (D86); the\nmessage says what to do. Agents before 0.1.19 show the message."
         }
       ],
       "description": "Machine-readable reason in an [`EnrollError`]."

@@ -19,6 +19,9 @@ pub enum ErrorCode {
     Internal,
     DeviceOffline,
     LinkLost,
+    /// The device is disabled in Console: its plan doesn't cover it (D86).
+    /// The gateway says this; agents never do.
+    DeviceDisabled,
     #[serde(other)]
     Unknown,
 }

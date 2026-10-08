@@ -96,7 +96,8 @@ pub fn print_status(config: &Config, json: bool) -> ExitCode {
             let ago = now_ms().saturating_sub(*since_ms) / 1000;
             let why = message
                 .as_deref()
-                .unwrap_or("its organization's plan doesn't cover this device");
+                .unwrap_or("its organization's plan doesn't cover this device")
+                .trim_end_matches('.');
             say!(
                 "uplink: disabled in Console for {}, at {gateway}: {why}. It comes back on its own once the plan covers it.",
                 uptime(ago)
