@@ -84,7 +84,9 @@ A machine can also require that every change is signed by a browser its organiza
    sudo cntrl policy require-signatures
    ```
 
-   It lists the signers' names and fingerprints. Compare each one with the fingerprints Console shows, then confirm.
+   It lists the signers' names and fingerprints. Check each with its signer: their own browser shows its code under **Signed commands** as "This browser's code". Then confirm.
+
+   Compare with each signer's own browser, not with Console's list of signers: that list comes from Console's servers, which are what signing protects against.
 
 From then on, the machine acts on these only when a trusted browser signed them: `services.manage`, `containers.manage`, `processes.signal`, the power actions and `history.manage`. Reading anything needs no signature. A signature is good once, for this machine only, and within 5 minutes of its clock.
 

@@ -745,7 +745,9 @@ pub fn require_signatures(config: &Config, yes: bool) -> ExitCode {
         trust.org
     );
     print_signers(&trust);
-    say!("Compare each fingerprint with Console's, under Organization, Signed commands.");
+    say!(
+        "Check each with its signer: their own browser shows its code under Organization, Signed commands, as \"This browser's code\"."
+    );
     if !yes {
         match confirm(
             "Act on commands that change this machine only when one of them signed it? [y/N] ",
