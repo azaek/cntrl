@@ -42,6 +42,7 @@ It shows the agent's version, its connection to Console, its device ID and its p
 - **The policy file is broken.** If `/etc/cntrl/policy.toml` is invalid, or someone other than root can write it, the agent allows Console nothing. `cntrl policy check` says what's wrong.
 - **Your role doesn't allow it.** Members can look, but only owners and admins can act. See [Roles](/docs/console/people#roles).
 - **The machine doesn't support it.** Power actions show only where the machine has them; many servers can't sleep or hibernate, for example.
+- **The machine requires signed commands.** This browser isn't one its organization trusts yet. Press **Ask to be trusted** under **Organization**, **Signed commands**, and have a signer approve it. If it says the signature is ahead of or behind the machine's clock, the machine's clock is off. See [Signed commands](/docs/console/permissions#signed-commands).
 
 ## Still stuck
 

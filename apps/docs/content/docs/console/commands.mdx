@@ -42,9 +42,13 @@ cntrl policy check                      # exit 0 if the policy file is valid, 1 
 sudo cntrl policy allow <permission>…   # allow one or more
 sudo cntrl policy deny <permission>…    # stop allowing one or more
 sudo cntrl policy modify --allow a,b --deny c
+sudo cntrl policy require-signatures    # act on changes only when a trusted browser signed them
+sudo cntrl policy allow-unsigned        # stop requiring signatures
 ```
 
 Each change rewrites the policy file and reconnects the agent once. See [Permissions](/docs/console/permissions) for every permission.
+
+`require-signatures` shows the signers Console relayed last, by name and fingerprint, for you to compare with Console before you confirm; `--yes` skips the question, for scripts. See [Signed commands](/docs/console/permissions#signed-commands).
 
 ## History
 
@@ -130,4 +134,5 @@ Get-ChildItem "$env:ProgramData\cntrl\logs\agent.*.log" | Sort-Object LastWriteT
 | Policy         | `/etc/cntrl/policy.toml`  | `/etc/cntrl/policy.toml`                      | `%ProgramData%\cntrl\policy.toml` |
 | State and history | `/var/lib/cntrl`       | `/Library/Application Support/cntrl/agent`    | `%ProgramData%\cntrl\agent`       |
 | Audit log      | `/var/log/cntrl/audit`    | `/var/log/cntrl/audit`                        | `%ProgramData%\cntrl\audit`       |
+| Trusted signers | `/var/lib/cntrl-privd/signers.json` | `/Library/Application Support/cntrl/privd/signers.json` | `%ProgramData%\cntrl\privd\signers.json` |
 | Logs           | the journal (`journalctl -u cntrl-agent`) | `/var/log/cntrl`                              | `%ProgramData%\cntrl\logs`        |

@@ -28,6 +28,21 @@ Console can only ask for the operations in one list, [`ops.rs`](https://github.c
 - SSH and the agent's own services can't be stopped or restarted through Console.
 - Console can't pause a machine, or resume one that someone paused.
 
+## Signed commands
+
+An organization can turn on signed commands, and each machine can require them (see [Permissions](/docs/console/permissions#signed-commands)). Then a change runs only when a browser the organization trusts signed it, so a breach of Console's servers, its database or its gateway, or a stolen session cookie, can't restart, stop or power off a machine.
+
+- **The keys.** Each browser makes its own P-256 key and keeps it in its own storage. The private half can be used to sign, but not read out, not even by Console's code.
+- **Whom a machine trusts.** The organization's signers are an append-only log, like [Tailscale's Tailnet Lock](https://tailscale.com/kb/1226/tailnet-lock). The first entry adds the owner's key. Each later entry adds or removes a key, names the hash of the entry before it, and is signed by a key already trusted. Console stores the log and the gateway relays it, but every machine checks each entry itself, so neither can add a key or bring a removed one back. A machine trusts the log it was shown when someone at it ran `require-signatures` and compared fingerprints.
+- **The fingerprints** people compare are 64 bits of the key's hash, worked out in each browser and on the machine, never sent by Console. Nobody can make a key that matches one.
+- **What's checked.** Before acting, the agent checks that the signature is from a trusted key, covers this machine, this request and its data exactly, is within 5 minutes of the machine's clock, and hasn't been used before. privd keeps the trusted log in its own directory, and only root can change it. The audit log records which key signed each command.
+
+What it doesn't cover:
+
+- If Console's web code itself were replaced, it could ask your browser to sign something you didn't mean to. Signing outside the page would close that, and isn't built yet.
+- A breached Console can delay a removal reaching machines, but can't forge one.
+- Checks a machine runs for you (`checks.run`) aren't signed, so a breached Console could still have a machine that allows them check addresses on its network.
+
 ## The audit log
 
 privd writes every action Console asks for to the audit log before it runs it, and syncs it to disk. Each line carries the SHA-256 of the line before it, so an edited or deleted line breaks the chain. The agent checks the chain whenever it opens the log, and you can check it any time:
