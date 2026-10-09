@@ -23,6 +23,7 @@ export default function HomePage() {
                     __html: JSON.stringify(createSoftwareAppJsonLd()),
                 }}
             />
+            <ConsoleBanner phone />
             <div className="bg-fd-background relative flex h-10 w-full max-w-350 flex-1 items-stretch overflow-hidden min-[1400px]:border-x">
                 <div
                     className="pointer-events-none absolute top-20 left-0 hidden aspect-656/792 w-full max-w-164 xl:block"
