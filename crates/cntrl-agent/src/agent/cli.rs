@@ -134,6 +134,17 @@ pub enum PolicyCommand {
         #[arg(required = true)]
         capabilities: Vec<String>,
     },
+    /// Act on commands that change the machine only when one of its
+    /// organization's signers signed them (D108). Shows the signers Console
+    /// relayed last, to compare with Console, then pins them. Needs root.
+    RequireSignatures {
+        /// Pin them without asking.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Stop requiring signed commands, forgetting the pinned signers. Needs
+    /// root.
+    AllowUnsigned,
     /// Allow some capabilities and stop allowing others at once, as Console's
     /// permissions dialog writes it: rewrites the policy file and reconnects
     /// the agent once. A wrong name changes nothing. Needs root.

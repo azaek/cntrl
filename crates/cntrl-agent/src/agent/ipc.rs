@@ -33,6 +33,13 @@ pub enum Call {
     Ping,
     /// The policy in force, as privd reads it.
     PolicyShow,
+    /// The pinned signer log (D108), as privd reads it.
+    SignersShow,
+    /// The gateway's signer log, for privd to extend the pinned one with,
+    /// checking each new entry first. Nothing pinned, nothing changes.
+    SignersApply {
+        log: cntrl_protocol::signers::SignerLog,
+    },
     /// Appends a record from the agent to the audit log.
     AuditAppend {
         kind: String,

@@ -22,6 +22,12 @@ pub enum ErrorCode {
     /// The device is disabled in Console: its plan doesn't cover it (D86).
     /// The gateway says this; agents never do.
     DeviceDisabled,
+    /// The machine requires signed commands (D108), and this one has no
+    /// signature from a key it trusts.
+    SignatureRequired,
+    /// The signature doesn't check out: tampered, from another device or
+    /// organization, too far from the machine's clock, or replayed.
+    SignatureInvalid,
     #[serde(other)]
     Unknown,
 }

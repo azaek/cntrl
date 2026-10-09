@@ -341,10 +341,12 @@ dependencies = [
 name = "cntrl-protocol"
 version = "0.1.19"
 dependencies = [
+ "base64 0.22.1",
  "crc32fast",
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

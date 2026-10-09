@@ -133,6 +133,9 @@ impl PolicyState {
             features.push(cntrl_protocol::checks::FEATURE.to_owned());
         }
         features.push(cntrl_protocol::logs::REDACTED_FEATURE.to_owned());
+        // It checks signed commands (D108), so Console signs for it, and the
+        // gateway sends it the signer log to pin.
+        features.push(cntrl_protocol::signers::FEATURE.to_owned());
         Caps {
             ops: allowed(OPS),
             topics: allowed(TOPICS),
@@ -146,10 +149,12 @@ impl PolicyState {
             Self::Valid { policy } => PolicySummary {
                 hash: policy.hash.clone(),
                 error: None,
+                signatures: None,
             },
             Self::Invalid { reason } => PolicySummary {
                 hash: String::new(),
                 error: Some(reason.clone()),
+                signatures: None,
             },
         }
     }
@@ -629,7 +634,10 @@ mod tests {
         assert_eq!(caps.ops.get("system.info"), Some(&1));
         assert!(!caps.ops.contains_key("service.restart"));
         assert_eq!(caps.topics.get("stats"), Some(&1));
-        assert_eq!(caps.features, vec!["logs.redacted".to_owned()]);
+        assert_eq!(
+            caps.features,
+            vec!["logs.redacted".to_owned(), "signed_commands".to_owned()]
+        );
         assert!(state.summary().error.is_none());
 
         // Checks come in a frame, so the hello names them as a feature (D56).
@@ -641,7 +649,11 @@ mod tests {
         let checks = load(&path, own_uid(&path)).caps();
         assert_eq!(
             checks.features,
-            vec!["checks".to_owned(), "logs.redacted".to_owned()]
+            vec![
+                "checks".to_owned(),
+                "logs.redacted".to_owned(),
+                "signed_commands".to_owned()
+            ]
         );
 
         let denied = PolicyState::Invalid {

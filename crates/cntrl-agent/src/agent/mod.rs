@@ -34,6 +34,7 @@ mod processes;
 mod redact;
 mod say;
 mod service;
+mod signers;
 mod stats;
 mod storage;
 mod supervisor;
@@ -106,6 +107,10 @@ pub fn main() -> ExitCode {
         Command::Policy(PolicyCommand::Modify { allow, deny }) => {
             client::change_capabilities(&config, &allow, &deny)
         }
+        Command::Policy(PolicyCommand::RequireSignatures { yes }) => {
+            client::require_signatures(&config, yes)
+        }
+        Command::Policy(PolicyCommand::AllowUnsigned) => client::allow_unsigned(&config),
         Command::Audit(AuditCommand::Verify) => client::print_audit_verify(&config),
         Command::History(HistoryCommand::Show) => client::print_history(&config),
         Command::History(HistoryCommand::Keep { days }) => client::keep_history(&config, days),
@@ -169,6 +174,7 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
             outbox: Arc::clone(&outbox),
             alerts: Arc::clone(&alert_rules),
             history: Arc::clone(&history),
+            signing: Arc::new(signers::Gate::new(&state_dir)),
         };
         let state = Arc::new(AgentState::new(
             config,

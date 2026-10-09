@@ -18,8 +18,8 @@ use cntrl_protocol::checks::{CheckResults, DeviceCheck};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
 use cntrl_protocol::frame::{
-    AgentInfo, Disabled, Event, Frame, GoAway, HeartbeatConfig, Hello, HelloAuth, Pause, Records,
-    Request, Response, SigAlg, Subscribe, Uninstall, Welcome,
+    AgentInfo, Disabled, Event, Frame, GoAway, HeartbeatConfig, Hello, HelloAuth, Pause,
+    PolicySummary, Records, Request, Response, SigAlg, Subscribe, Uninstall, Welcome,
 };
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
 use cntrl_protocol::network::{Listeners, NetworkParams, NetworkSample};
@@ -27,6 +27,7 @@ use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
+use cntrl_protocol::signers::{self as signatures, SignatureState, SignerLog};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::storage::{DisksHealth, StorageParams, StorageSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
@@ -61,6 +62,7 @@ use super::outbox::Outbox;
 use super::paused::{self, PausedState};
 use super::policy::PolicyState;
 use super::processes::{self, Table};
+use super::signers;
 use super::stats::Latest;
 use super::storage;
 
@@ -292,6 +294,8 @@ pub struct UplinkConfig {
     pub alerts: Arc<Alerts>,
     /// The history this device keeps, for `history.*` (D52).
     pub history: Arc<History>,
+    /// Signed commands (D108): whom the machine trusts, and what it's seen.
+    pub signing: Arc<signers::Gate>,
 }
 
 /// How a session ended, and what to do next.
@@ -541,6 +545,9 @@ async fn session(
         }
     };
     let policy = policy(&config.privd_socket).await;
+    // Whom it trusts to sign commands (D108), set before any request can come.
+    let signing = signers_view(&config.privd_socket).await;
+    config.signing.set(signing.pin());
     let hello = Hello {
         v: PROTOCOL_VERSION,
         agent: AgentInfo {
@@ -559,7 +566,10 @@ async fn session(
             sig,
         },
         caps: policy.caps(),
-        policy: policy.summary(),
+        policy: PolicySummary {
+            signatures: Some(signing.state.clone()),
+            ..policy.summary()
+        },
         outbox: config.outbox.state().await,
     };
     if let Err(end) = send(&mut ws, &Frame::Hello(Box::new(hello))).await {
@@ -608,6 +618,7 @@ async fn session(
         &mut ws,
         &welcome,
         Arc::new(policy),
+        &identity.device_id,
         url,
         config,
         uplink,
@@ -617,10 +628,12 @@ async fn session(
 }
 
 /// The connected session: heartbeats, and frames from Console.
+#[allow(clippy::too_many_arguments)]
 async fn online(
     ws: &mut Ws,
     welcome: &Welcome,
     policy: Arc<PolicyState>,
+    device_id: &str,
     gateway: &str,
     config: &UplinkConfig,
     uplink: &Uplink,
@@ -643,6 +656,7 @@ async fn online(
         subs: Subscriptions::new(config.privd_socket.clone()),
         checks: checks::Runner::new(check_results),
         policy,
+        device_id: device_id.to_owned(),
         config,
         in_flight: None,
         batch: (welcome.limits.max_rec_batch as usize).max(1),
@@ -1048,6 +1062,8 @@ struct Session<'a> {
     checks: checks::Runner,
     /// The policy the hello reported; a change reconnects.
     policy: Arc<PolicyState>,
+    /// This device, which a signed command must name (D108).
+    device_id: String,
     config: &'a UplinkConfig,
     /// The outbox batch awaiting Console's ack. One at a time, so an ack never
     /// covers a batch Console didn't store.
@@ -1153,9 +1169,10 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
         Frame::Req(request) => {
             let privd = &session.config.privd_socket;
             let history = &session.config.history;
+            let signing = (&*session.config.signing, session.device_id.as_str());
             session
                 .requests
-                .start(request, &session.policy, privd, history)?
+                .start(request, &session.policy, privd, history, signing)?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
@@ -1184,6 +1201,10 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             return None;
         }
         Frame::Checks(set) => return session.set_checks(ws, set.checks).await.err(),
+        Frame::Signers(log) => {
+            signers_received(session.config, log).await;
+            return None;
+        }
         Frame::Disabled(disabled) => return Some(End::Disabled(Box::new(disabled))),
         other => {
             debug!(?other, "ignoring a frame");
@@ -1228,6 +1249,7 @@ impl Requests {
         policy: &Arc<PolicyState>,
         privd: &Path,
         history: &Arc<History>,
+        (signing, device_id): (&signers::Gate, &str),
     ) -> Option<Response> {
         let refuse = |code, msg: String| Some(Response::err(request.id.clone(), code, msg));
         if self.running.contains_key(&request.id) {
@@ -1250,10 +1272,45 @@ impl Requests {
             Ok(call) => call,
             Err(e) => return refuse(e.code(), e.to_string()),
         };
+        // An operation that changes the machine needs a trusted signer's
+        // signature where the machine requires them (D108).
+        let needs = ops::OPS
+            .iter()
+            .find(|info| info.name == request.op)
+            .is_some_and(|info| signatures::needs_signature(info.capability));
+        let signer = if needs {
+            match signing.admit(device_id, &request, now_ms()) {
+                Ok(signer) => signer,
+                Err(signers::Refusal::Required(msg)) => {
+                    return refuse(ErrorCode::SignatureRequired, msg);
+                }
+                Err(signers::Refusal::Invalid(msg)) => {
+                    return refuse(ErrorCode::SignatureInvalid, msg);
+                }
+            }
+        } else {
+            None
+        };
         let id = request.id.clone();
         let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
         let history = Arc::clone(history);
         let task = tokio::spawn(async move {
+            if let Some(signer) = signer {
+                // Who signed it, on the record before it runs: Console's actor
+                // isn't signed, the signature is.
+                let record = Call::AuditAppend {
+                    kind: "command.signed".to_owned(),
+                    data: serde_json::json!({
+                        "request_id": request.id,
+                        "op": request.op,
+                        "key": signer.id,
+                        "name": signer.name,
+                    }),
+                };
+                if let Err(e) = ipc::call_once(&privd, record).await {
+                    warn!("a signed command's signer wasn't audited: {e}");
+                }
+            }
             let answer = answer(request, call, &policy, &privd, &history).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
@@ -2300,6 +2357,47 @@ async fn go_away(ws: &mut Ws, goaway: &GoAway, stable: bool) -> End {
     }
 }
 
+/// Whom the machine trusts to sign commands, as privd reads it (D108).
+/// Without privd's answer, a machine is taken to require signatures it can't
+/// check, so nothing that needs one passes.
+async fn signers_view(privd_socket: &Path) -> signers::View {
+    let broken = |error: String| signers::View {
+        state: SignatureState {
+            required: true,
+            seq: None,
+            head: None,
+            error: Some(error),
+        },
+        entries: Vec::new(),
+    };
+    match ipc::call_once(privd_socket, Call::SignersShow).await {
+        Ok(value) => serde_json::from_value(value)
+            .unwrap_or_else(|e| broken(format!("privd's signers reply is unreadable: {e}"))),
+        Err(e) => broken(format!("privd is unreachable: {e}")),
+    }
+}
+
+/// The gateway's signer log: kept for `cntrl policy require-signatures` to
+/// pin, and handed to privd, which extends a pinned log with it.
+async fn signers_received(config: &UplinkConfig, log: SignerLog) {
+    let latest = signers::latest_path(&config.state_dir);
+    match serde_json::to_vec(&log) {
+        Ok(bytes) => {
+            if let Err(e) = tokio::fs::write(&latest, bytes).await {
+                warn!("the signer log wasn't kept: {e}");
+            }
+        }
+        Err(e) => warn!("the signer log wasn't kept: {e}"),
+    }
+    match ipc::call_once(&config.privd_socket, Call::SignersApply { log }).await {
+        Ok(value) => match serde_json::from_value::<signers::View>(value) {
+            Ok(view) => config.signing.set(view.pin()),
+            Err(e) => warn!("privd's signers reply is unreadable: {e}"),
+        },
+        Err(e) => warn!("privd didn't take the signer log: {e}"),
+    }
+}
+
 /// The policy as privd reads it. Anything short of a valid policy allows nothing.
 async fn policy(privd_socket: &Path) -> PolicyState {
     match ipc::call_once(privd_socket, Call::PolicyShow).await {
@@ -2817,6 +2915,7 @@ mod tests {
             &mut agent,
             &welcome,
             policy,
+            "dev_test",
             "ws://gateway",
             &config,
             &uplink,
@@ -2868,6 +2967,7 @@ mod tests {
             outbox: Arc::new(Outbox::open(dir).await),
             alerts: Arc::new(Alerts::open(dir).await),
             history: Arc::new(History::open(dir)),
+            signing: Arc::new(signers::Gate::new(dir)),
         }
     }
 

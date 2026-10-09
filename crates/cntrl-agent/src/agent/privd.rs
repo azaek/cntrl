@@ -33,7 +33,7 @@ use super::docker;
 use super::ipc::{self, Call, CallError, Request, Response};
 use super::keys::SigningKey;
 use super::os::{self, Private};
-use super::{logging, policy};
+use super::{logging, policy, signers};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Whether privd exits when idle: systemd and launchd start it again when the
@@ -183,6 +183,21 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
         )),
         Call::PolicyShow => serde_json::to_value(policy::load(&state.policy_path, state.owner))
             .map_err(|e| CallError::internal(e.to_string())),
+        Call::SignersShow => {
+            let path = signers::path_beside(&state.policy_path);
+            serde_json::to_value(signers::View::of(&signers::load(&path, state.owner)))
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        Call::SignersApply { log } => {
+            let path = signers::path_beside(&state.policy_path);
+            let owner = state.owner;
+            blocking(move || {
+                serde_json::to_value(signers::View::of(&signers::apply(&path, owner, &log)))
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(CallError::internal)
+        }
         Call::AuditAppend { kind, data } => blocking(move || {
             let mut log = state.audit.lock().unwrap_or_else(PoisonError::into_inner);
             log.append("agent", &kind, data)

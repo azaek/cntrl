@@ -286,6 +286,20 @@
             "t"
           ],
           "description": "Results of the checks the device ran, or why it runs none."
+        },
+        {
+          "$ref": "#/$defs/SignerLog",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "signers"
+            }
+          },
+          "required": [
+            "t"
+          ],
+          "description": "The organization's signer log, the whole of it (D108), to an agent that\nreports the `signed_commands` feature: after its hello, and whenever\nthe log grows. Older agents ignore it."
         }
       ],
       "description": "Any frame of protocol v1."
@@ -436,12 +450,58 @@
             "null"
           ],
           "description": "Why no valid policy is in force. The agent then denies everything."
+        },
+        "signatures": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignatureState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the machine requires signed commands, and the signer log it\ntrusts (D108); absent from agents that don't check signatures."
         }
       },
       "required": [
         "hash"
       ],
       "description": "The device policy in force, by hash."
+    },
+    "SignatureState": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether it acts on changing operations only when they're signed."
+        },
+        "seq": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "The last entry of the signer log it trusts, by place and hash; none\nbefore it has pinned one."
+        },
+        "head": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why it can't check signatures, when its trusted log is missing or\nunreadable; it then refuses every changing operation."
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "description": "Where a machine stands on signatures, in its hello's policy summary."
     },
     "OutboxState": {
       "type": "object",
@@ -648,6 +708,31 @@
       ],
       "description": "The kind of [`Actor`]."
     },
+    "CommandSignature": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "The signing key's ID."
+        },
+        "at": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was signed, in Unix milliseconds."
+        },
+        "sig": {
+          "type": "string",
+          "description": "The signature over [`command_signing_string`]."
+        }
+      },
+      "required": [
+        "key",
+        "at",
+        "sig"
+      ],
+      "description": "A command's signature, on the `req` frame of an operation that needs one."
+    },
     "Request": {
       "type": "object",
       "properties": {
@@ -688,6 +773,17 @@
             "null"
           ],
           "description": "Retries of non-idempotent operations reuse this key, so they act once."
+        },
+        "sig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandSignature"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A signer's signature (D108), for an operation that changes the machine,\nsent to agents that report the `signed_commands` feature."
         }
       },
       "required": [
@@ -742,6 +838,16 @@
           "type": "string",
           "const": "device_disabled",
           "description": "The device is disabled in Console: its plan doesn't cover it (D86).\nThe gateway says this; agents never do."
+        },
+        {
+          "type": "string",
+          "const": "signature_required",
+          "description": "The machine requires signed commands (D108), and this one has no\nsignature from a key it trusts."
+        },
+        {
+          "type": "string",
+          "const": "signature_invalid",
+          "description": "The signature doesn't check out: tampered, from another device or\norganization, too far from the machine's clock, or replayed."
         }
       ],
       "description": "Why an operation failed. Stable within a protocol major version; a code from\na newer revision decodes as `Unknown`."
@@ -1340,6 +1446,131 @@
         }
       },
       "description": "Results of checks this device ran, or why it runs none."
+    },
+    "SignerEntry": {
+      "type": "object",
+      "properties": {
+        "org": {
+          "type": "string",
+          "description": "The organization's ID."
+        },
+        "seq": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Its place in the log, from 0."
+        },
+        "prev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The hash of the entry before ([`entry_hash`]); none for the first."
+        },
+        "change": {
+          "$ref": "#/$defs/SignerChange"
+        },
+        "at": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was signed, in Unix milliseconds."
+        },
+        "by": {
+          "type": "string",
+          "description": "The ID of the key that signed it."
+        },
+        "sig": {
+          "type": "string",
+          "description": "The signature over [`entry_signing_string`]."
+        }
+      },
+      "required": [
+        "org",
+        "seq",
+        "change",
+        "at",
+        "by",
+        "sig"
+      ],
+      "description": "One entry of the signer log."
+    },
+    "SignerChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/SignerKey"
+            },
+            "kind": {
+              "type": "string",
+              "const": "add"
+            }
+          },
+          "required": [
+            "kind",
+            "key"
+          ],
+          "description": "A key joins the signers."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "remove"
+            }
+          },
+          "required": [
+            "kind",
+            "key_id"
+          ],
+          "description": "A key stops being trusted."
+        }
+      ],
+      "description": "What an entry changes."
+    },
+    "SignerKey": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "[`key_id`] of `public`."
+        },
+        "public": {
+          "type": "string",
+          "description": "The uncompressed P-256 point, base64url."
+        },
+        "name": {
+          "type": "string",
+          "description": "Whose it is and where, such as \"Ana, Chrome on Windows\": shown, never trusted."
+        }
+      },
+      "required": [
+        "id",
+        "public",
+        "name"
+      ],
+      "description": "A signer's public key."
+    },
+    "SignerLog": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SignerEntry"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "description": "The organization's signer log, the whole of it, oldest first: what the\ngateway sends an agent that checks signatures, after its hello and when\nthe log grows."
     },
     "NoParams": {
       "type": "object",

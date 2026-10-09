@@ -1,0 +1,1 @@
+{"t":"req","id":"req_01m4signersvector00000001","op":"service.restart","ver":1,"deadline_ms":30000,"data":{"unit":"nginx.service"},"actor":{"kind":"user","id":"usr_01m4signersvector000000","via":"console"},"sig":{"key":"sk_4b3b5a12d6035ff9f998","at":1791600200000,"sig":"V7ciBbAtNvv6Uv_Drd3ZXuSSWWSsY1c2rlBKSKnl24XQnZ4rGd4i0Mf0OW67JQDQBEU6ceeSEN7FP4Zq97dq9Q"}}

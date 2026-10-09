@@ -1,0 +1,126 @@
+{
+  "note": "Test keys only. Made with WebCrypto (Node's, as a browser signs): ECDSA P-256 with SHA-256, signatures r||s base64url, keys uncompressed points base64url.",
+  "keys": [
+    {
+      "id": "sk_4b3b5a12d6035ff9f998",
+      "public": "BG_vBntGsQDeYynQ8Is1hUc1RcUZFXKSLPyulRtRoqVfAFQcsPSshDWw6kf9OfTSdlsDmCdDhdYadPNSyyK4RaA",
+      "fingerprint": "4b3b 5a12 d603 5ff9",
+      "private_jwk": {
+        "key_ops": [
+          "sign"
+        ],
+        "ext": true,
+        "kty": "EC",
+        "x": "b-8Ge0axAN5jKdDwizWFRzVFxRkVcpIs_K6VG1GipV8",
+        "y": "AFQcsPSshDWw6kf9OfTSdlsDmCdDhdYadPNSyyK4RaA",
+        "crv": "P-256",
+        "d": "Baozjj16ga7JywcYfG5fJtfw9L5OvH0WwIylrt5Mf3Q"
+      }
+    },
+    {
+      "id": "sk_123bd30b552c64c46ce8",
+      "public": "BBhH_IrlIkO-fv7ykoGIEj8fweNddPT1v6xFI81hN48Kt9pUYyAIyGyeEuOGjkg_7XXXmo4hDZCTJdUtZFgUZmY",
+      "fingerprint": "123b d30b 552c 64c4",
+      "private_jwk": {
+        "key_ops": [
+          "sign"
+        ],
+        "ext": true,
+        "kty": "EC",
+        "x": "GEf8iuUiQ75-_vKSgYgSPx_B41109PW_rEUjzWE3jwo",
+        "y": "t9pUYyAIyGyeEuOGjkg_7XXXmo4hDZCTJdUtZFgUZmY",
+        "crv": "P-256",
+        "d": "iKP3GJFzob11GpdxDYTuFuNVBiGq44pVUFvav0XETuc"
+      }
+    }
+  ],
+  "entries": [
+    {
+      "entry": {
+        "org": "ws_01m4signersvector0000000",
+        "seq": 0,
+        "change": {
+          "kind": "add",
+          "key": {
+            "id": "sk_4b3b5a12d6035ff9f998",
+            "public": "BG_vBntGsQDeYynQ8Is1hUc1RcUZFXKSLPyulRtRoqVfAFQcsPSshDWw6kf9OfTSdlsDmCdDhdYadPNSyyK4RaA",
+            "name": "Alok, Chrome on Mac"
+          }
+        },
+        "at": 1791600000000,
+        "by": "sk_4b3b5a12d6035ff9f998",
+        "sig": "A3BGWCJ_vNd7lD_j82C8jCsGlS80CMh_bEoz3HhIZEwpknOJYptKVV62OHRT0k2k9p2dUpwPPKAE1AcVq-F1RA"
+      },
+      "signing_string": "cntrl-signers-v1\nws_01m4signersvector0000000\n0\n-\nadd\nsk_4b3b5a12d6035ff9f998\nBG_vBntGsQDeYynQ8Is1hUc1RcUZFXKSLPyulRtRoqVfAFQcsPSshDWw6kf9OfTSdlsDmCdDhdYadPNSyyK4RaA\nAlok, Chrome on Mac\n1791600000000\nsk_4b3b5a12d6035ff9f998",
+      "hash": "b6156ddbf5d668070202a5290dbc4d7ee5f80cc5cf5a551920abb804fe37afa5"
+    },
+    {
+      "entry": {
+        "org": "ws_01m4signersvector0000000",
+        "seq": 1,
+        "prev": "b6156ddbf5d668070202a5290dbc4d7ee5f80cc5cf5a551920abb804fe37afa5",
+        "change": {
+          "kind": "add",
+          "key": {
+            "id": "sk_123bd30b552c64c46ce8",
+            "public": "BBhH_IrlIkO-fv7ykoGIEj8fweNddPT1v6xFI81hN48Kt9pUYyAIyGyeEuOGjkg_7XXXmo4hDZCTJdUtZFgUZmY",
+            "name": "Ana, Firefox on Windows"
+          }
+        },
+        "at": 1791600060000,
+        "by": "sk_4b3b5a12d6035ff9f998",
+        "sig": "s0HBUBLY8Wt1xZr_LrDVu5SqT6jw_NU_W1R-34OwzkltcAFaTsMotrSCJ89-SNd3nK10_gfZdQUwSQxQDeX9WQ"
+      },
+      "signing_string": "cntrl-signers-v1\nws_01m4signersvector0000000\n1\nb6156ddbf5d668070202a5290dbc4d7ee5f80cc5cf5a551920abb804fe37afa5\nadd\nsk_123bd30b552c64c46ce8\nBBhH_IrlIkO-fv7ykoGIEj8fweNddPT1v6xFI81hN48Kt9pUYyAIyGyeEuOGjkg_7XXXmo4hDZCTJdUtZFgUZmY\nAna, Firefox on Windows\n1791600060000\nsk_4b3b5a12d6035ff9f998",
+      "hash": "d71ed8714f1ec12c7066b8d781dd6bf0f25ad10526b2c613325bc7a208bac60d"
+    },
+    {
+      "entry": {
+        "org": "ws_01m4signersvector0000000",
+        "seq": 2,
+        "prev": "d71ed8714f1ec12c7066b8d781dd6bf0f25ad10526b2c613325bc7a208bac60d",
+        "change": {
+          "kind": "remove",
+          "key_id": "sk_123bd30b552c64c46ce8"
+        },
+        "at": 1791600120000,
+        "by": "sk_4b3b5a12d6035ff9f998",
+        "sig": "C3xpq-ZTzsWhXS-8Z7g6U1qEUEuYpGxrbYKoG6acsM5h2g9UOhwfCPtgZeXdWuPdUpyV_l-8OLSLeHMb0krxUQ"
+      },
+      "signing_string": "cntrl-signers-v1\nws_01m4signersvector0000000\n2\nd71ed8714f1ec12c7066b8d781dd6bf0f25ad10526b2c613325bc7a208bac60d\nremove\nsk_123bd30b552c64c46ce8\n-\n-\n1791600120000\nsk_4b3b5a12d6035ff9f998",
+      "hash": "a0953a98eb61cd05f999b8271dbf2b53c26f92b9f3cd1c126a63e24020bfc8b7"
+    }
+  ],
+  "command": {
+    "org": "ws_01m4signersvector0000000",
+    "device_id": "dev_01m4signersvector000device",
+    "request_id": "req_01m4signersvector00000001",
+    "op": "service.restart",
+    "data": {
+      "unit": "nginx.service",
+      "scope": "system",
+      "note": "ünï \"quoted\" \\ back\nslash\t/   😀",
+      "pid": 4242,
+      "force": false,
+      "nested": {
+        "b": [
+          1,
+          2,
+          {
+            "z": null,
+            "a": true
+          }
+        ],
+        "a": "x"
+      }
+    },
+    "canonical_data": "{\"force\":false,\"nested\":{\"a\":\"x\",\"b\":[1,2,{\"a\":true,\"z\":null}]},\"note\":\"ünï \\\"quoted\\\" \\\\ back\\nslash\\t/   😀\",\"pid\":4242,\"scope\":\"system\",\"unit\":\"nginx.service\"}",
+    "data_hash": "410dbdb36d9abcfcc46780e5e9a729ac358bd622a4ad476816cec088244b20b2",
+    "signature": {
+      "key": "sk_4b3b5a12d6035ff9f998",
+      "at": 1791600200000,
+      "sig": "V7ciBbAtNvv6Uv_Drd3ZXuSSWWSsY1c2rlBKSKnl24XQnZ4rGd4i0Mf0OW67JQDQBEU6ceeSEN7FP4Zq97dq9Q"
+    },
+    "signing_string": "cntrl-command-v1\nws_01m4signersvector0000000\ndev_01m4signersvector000device\nreq_01m4signersvector00000001\nservice.restart\n410dbdb36d9abcfcc46780e5e9a729ac358bd622a4ad476816cec088244b20b2\n1791600200000\nsk_4b3b5a12d6035ff9f998"
+  }
+}

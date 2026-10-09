@@ -20,6 +20,7 @@ pub mod process;
 pub mod records;
 mod registry;
 pub mod service;
+pub mod signers;
 pub mod stats;
 pub mod storage;
 pub mod system;

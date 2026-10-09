@@ -55,6 +55,10 @@ pub enum Frame {
     Checks(crate::checks::CheckSet),
     /// Results of the checks the device ran, or why it runs none.
     CheckResults(crate::checks::CheckResults),
+    /// The organization's signer log, the whole of it (D108), to an agent that
+    /// reports the `signed_commands` feature: after its hello, and whenever
+    /// the log grows. Older agents ignore it.
+    Signers(crate::signers::SignerLog),
     /// A frame type from a newer protocol revision. Receivers ignore it.
     #[serde(other)]
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -147,6 +151,10 @@ pub struct PolicySummary {
     /// Why no valid policy is in force. The agent then denies everything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Whether the machine requires signed commands, and the signer log it
+    /// trusts (D108); absent from agents that don't check signatures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signatures: Option<crate::signers::SignatureState>,
 }
 
 /// Where the agent's outbox stands.
@@ -210,6 +218,10 @@ pub struct Request {
     /// Retries of non-idempotent operations reuse this key, so they act once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idem: Option<String>,
+    /// A signer's signature (D108), for an operation that changes the machine,
+    /// sent to agents that report the `signed_commands` feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<crate::signers::CommandSignature>,
 }
 
 /// Who asked for a request.

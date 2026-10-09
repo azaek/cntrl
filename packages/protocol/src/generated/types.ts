@@ -205,6 +205,16 @@ export interface CheckSet {
     checks: DeviceCheck[];
 }
 
+/** A command's signature, on the `req` frame of an operation that needs one. */
+export interface CommandSignature {
+    /** The signing key's ID. */
+    key: string;
+    /** When it was signed, in Unix milliseconds. */
+    at: number;
+    /** The signature over {@link command_signing_string}. */
+    sig: string;
+}
+
 /**
  * A container, and for a running one what it used since the previous
  * reading.
@@ -510,7 +520,9 @@ export interface ErrorBody {
  */
 export type ErrorCode =
     | ("bad_request" | "unknown_op" | "unsupported_version" | "policy_denied" | "not_found" | "busy" | "timeout" | "cancelled" | "internal" | "device_offline" | "link_lost" | "unknown")
-    | "device_disabled";
+    | "device_disabled"
+    | "signature_required"
+    | "signature_invalid";
 
 /** One message on a subscription. */
 export interface Event {
@@ -562,7 +574,8 @@ export type Frame =
     | (Uninstalled & { t: "uninstalled" })
     | (AlertRules & { t: "alerts" })
     | (CheckSet & { t: "checks" })
-    | (CheckResults & { t: "check_results" });
+    | (CheckResults & { t: "check_results" })
+    | (SignerLog & { t: "signers" });
 
 /**
  * Asks the agent to disconnect and come back within a window, for example
@@ -968,6 +981,11 @@ export interface PolicySummary {
     hash: string;
     /** Why no valid policy is in force. The agent then denies everything. */
     error?: string | null;
+    /**
+     * Whether the machine requires signed commands, and the signer log it
+     * trusts (D108); absent from agents that don't check signatures.
+     */
+    signatures?: SignatureState | null;
 }
 
 /** A power action, by the name of its operation's second part. */
@@ -1145,6 +1163,11 @@ export interface Request {
     actor?: Actor | null;
     /** Retries of non-idempotent operations reuse this key, so they act once. */
     idem?: string | null;
+    /**
+     * A signer's signature (D108), for an operation that changes the machine,
+     * sent to agents that report the `signed_commands` feature.
+     */
+    sig?: CommandSignature | null;
 }
 
 /** The final answer to a {@link Request}. */
@@ -1264,6 +1287,62 @@ export interface Session {
 
 /** Signature algorithm of the device key. */
 export type SigAlg = "Unknown" | "ES256";
+
+/** Where a machine stands on signatures, in its hello's policy summary. */
+export interface SignatureState {
+    /** Whether it acts on changing operations only when they're signed. */
+    required: boolean;
+    /**
+     * The last entry of the signer log it trusts, by place and hash; none
+     * before it has pinned one.
+     */
+    seq?: number | null;
+    head?: string | null;
+    /**
+     * Why it can't check signatures, when its trusted log is missing or
+     * unreadable; it then refuses every changing operation.
+     */
+    error?: string | null;
+}
+
+/** What an entry changes. */
+export type SignerChange = { key: SignerKey; kind: "add" } | { key_id: string; kind: "remove" };
+
+/** One entry of the signer log. */
+export interface SignerEntry {
+    /** The organization's ID. */
+    org: string;
+    /** Its place in the log, from 0. */
+    seq: number;
+    /** The hash of the entry before ({@link entry_hash}); none for the first. */
+    prev?: string | null;
+    change: SignerChange;
+    /** When it was signed, in Unix milliseconds. */
+    at: number;
+    /** The ID of the key that signed it. */
+    by: string;
+    /** The signature over {@link entry_signing_string}. */
+    sig: string;
+}
+
+/** A signer's public key. */
+export interface SignerKey {
+    /** {@link key_id} of `public`. */
+    id: string;
+    /** The uncompressed P-256 point, base64url. */
+    public: string;
+    /** Whose it is and where, such as "Ana, Chrome on Windows": shown, never trusted. */
+    name: string;
+}
+
+/**
+ * The organization's signer log, the whole of it, oldest first: what the
+ * gateway sends an agent that checks signatures, after its hello and when
+ * the log grows.
+ */
+export interface SignerLog {
+    entries: SignerEntry[];
+}
 
 export type SocketProtocol = "tcp" | "udp";
 

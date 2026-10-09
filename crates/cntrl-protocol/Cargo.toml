@@ -16,7 +16,9 @@ schema = ["dep:schemars"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+base64 = "0.22"
 crc32fast = "1"
+sha2 = "0.10"
 schemars = { workspace = true, optional = true }
 
 [lints]

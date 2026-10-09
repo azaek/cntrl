@@ -26,6 +26,7 @@ use super::local_api::{
 use super::os;
 use super::policy::{self, Policy, PolicyState, Source};
 use super::say::{say, say_err};
+use super::signers::{self, Pin, Trust};
 use super::uplink::{UplinkStatus, now_ms};
 
 pub fn print_status(config: &Config, json: bool) -> ExitCode {
@@ -141,6 +142,19 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, replace: bool) -> 
                 }
                 say!("Device key fingerprint: {}", outcome.fingerprint);
                 say!("Check that Console shows the same fingerprint.");
+                // Another organization's, or another device's, signers aren't
+                // this one's to trust (D108).
+                if outcome.replaced.is_some() {
+                    let pinned = signers::path_beside(&config.paths.policy);
+                    match signers::unpin(&pinned) {
+                        Ok(true) => say!(
+                            "Signed commands aren't required here any more. Once it's online, run `{}` to require its organization's.",
+                            os::elevated("cntrl policy require-signatures")
+                        ),
+                        Ok(false) => {}
+                        Err(e) => say_err!("{e}"),
+                    }
+                }
                 return ExitCode::SUCCESS;
             }
             Ok(Err(refused)) => refused,
@@ -587,11 +601,14 @@ fn read_token(file: Option<&Path>) -> Result<String, String> {
 /// `cntrl policy show` and `cntrl policy check`. The file must belong to root.
 pub fn print_policy(config: &Config, check_only: bool) -> ExitCode {
     let state = policy::load(&config.paths.policy, os::ROOT);
-    let valid = matches!(state, PolicyState::Valid { .. });
+    let pinned = signers::path_beside(&config.paths.policy);
+    let pin = signers::load(&pinned, os::ROOT);
+    let valid = matches!(state, PolicyState::Valid { .. }) && !matches!(pin, Pin::Broken(_));
     if check_only && valid {
         say!("{}: OK", config.paths.policy.display());
     } else {
         print_policy_state(&state);
+        print_pin(&pin);
     }
     if valid {
         ExitCode::SUCCESS
@@ -639,6 +656,157 @@ fn print_valid_policy(policy: &Policy) {
         let protect: Vec<&str> = policy.protect.iter().map(String::as_str).collect();
         say!("  protected units: {}", protect.join(", "));
     }
+}
+
+/// Where the machine stands on signed commands (D108).
+fn print_pin(pin: &Pin) {
+    match pin {
+        Pin::Off => say!("signatures: not required"),
+        Pin::On(trust) => {
+            let head = trust.head.get(..12).unwrap_or(&trust.head);
+            say!(
+                "signatures: required, from {}'s signers (log entry {}, {head})",
+                trust.org,
+                trust.seq()
+            );
+            print_signers(trust);
+        }
+        Pin::Broken(reason) => {
+            say!(
+                "signatures: required, but the trusted signers can't be read, so every changing operation is refused"
+            );
+            say!("  {reason}");
+        }
+    }
+}
+
+/// Each signer's name and fingerprint, to compare with Console's.
+fn print_signers(trust: &Trust) {
+    let width = trust
+        .signers
+        .values()
+        .map(|signer| signer.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    for signer in trust.signers.values() {
+        say!("  {:width$}  {}", signer.name, signer.fingerprint);
+    }
+}
+
+/// `cntrl policy require-signatures` (D108): shows the signers the gateway
+/// relayed last and, with a yes, pins them, so the machine acts on changing
+/// operations only when one of them signed. Needs root.
+pub fn require_signatures(config: &Config, yes: bool) -> ExitCode {
+    if !os::is_root() {
+        return fail(&format!(
+            "only {} requires signatures; run it {}",
+            os::SUPERUSER,
+            os::AS_ROOT
+        ));
+    }
+    let latest = signers::latest_path(&config.paths.state_dir);
+    let log: cntrl_protocol::signers::SignerLog = match fs::read_to_string(&latest) {
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(log) => log,
+            Err(e) => return fail(&format!("{} is unreadable: {e}", latest.display())),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return fail(
+                "This machine hasn't heard of its organization's signers yet. Turn on signed commands in Console, under Organization, wait until the machine is online, then run this again.",
+            );
+        }
+        Err(e) => return fail(&format!("can't read {}: {e}", latest.display())),
+    };
+    let trust = match Trust::from_log(&log.entries) {
+        Ok(trust) => trust,
+        Err(e) => {
+            return fail(&format!(
+                "The signer log doesn't check out, so nothing changed: {e}"
+            ));
+        }
+    };
+    let pinned = signers::path_beside(&config.paths.policy);
+    if let Pin::On(current) = signers::load(&pinned, os::ROOT)
+        && current.head == trust.head
+    {
+        say!("Signed commands are already required, from these signers:");
+        print_signers(&current);
+        return ExitCode::SUCCESS;
+    }
+    say!(
+        "These keys may sign commands for this machine, for {}:",
+        trust.org
+    );
+    print_signers(&trust);
+    say!("Compare each fingerprint with Console's, under Organization, Signed commands.");
+    if !yes {
+        match confirm(
+            "Act on commands that change this machine only when one of them signed it? [y/N] ",
+        ) {
+            Some(true) => {}
+            Some(false) => return fail("Nothing changed."),
+            None => return fail("There's no terminal to ask on: run it again with --yes."),
+        }
+    }
+    if let Err(e) = signers::save(&pinned, &trust) {
+        return fail(&e);
+    }
+    say!("Signed commands are required now: {}.", pinned.display());
+    reload_agent(config);
+    ExitCode::SUCCESS
+}
+
+/// `cntrl policy allow-unsigned` (D108): the pinned signers go, and changing
+/// operations need no signature again. Needs root.
+pub fn allow_unsigned(config: &Config) -> ExitCode {
+    if !os::is_root() {
+        return fail(&format!(
+            "only {} stops requiring signatures; run it {}",
+            os::SUPERUSER,
+            os::AS_ROOT
+        ));
+    }
+    let pinned = signers::path_beside(&config.paths.policy);
+    match signers::unpin(&pinned) {
+        Ok(true) => say!("Signed commands aren't required any more."),
+        Ok(false) => {
+            say!("Signed commands weren't required; nothing changed.");
+            return ExitCode::SUCCESS;
+        }
+        Err(e) => return fail(&e),
+    }
+    reload_agent(config);
+    ExitCode::SUCCESS
+}
+
+/// Asks the running agent to reconnect, so its hello says what changed.
+fn reload_agent(config: &Config) {
+    let reload = request(
+        &config.paths.agent_socket,
+        Method::POST,
+        "/v1/policy/reload",
+        Vec::new(),
+    );
+    match block_on(reload) {
+        Ok((status, _)) if status.is_success() => say!("The agent is reconnecting."),
+        Ok((_, bytes)) => say_err!(
+            "The agent didn't reload: {}",
+            String::from_utf8_lossy(&bytes).trim()
+        ),
+        Err(_) => say!("The agent isn't running; it reads this when it starts."),
+    }
+}
+
+/// A yes or no on the terminal; none when there's no terminal.
+fn confirm(question: &str) -> Option<bool> {
+    let (input, mut output) = terminal()?;
+    write!(output, "{question}").ok()?;
+    let mut answer = String::new();
+    BufReader::new(input).read_line(&mut answer).ok()?;
+    Some(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 pub async fn get_status(socket: &Path) -> Result<Status, String> {
