@@ -159,6 +159,25 @@ pub fn constants() -> String {
         "export const MONITOR_ONLY: readonly Capability[] = {};\n",
         string_array(capability::MONITOR_ONLY)
     ));
+    out.push_str(
+        "\n/** Capabilities whose operations change a machine, so need a signature where it requires them (D108). */\n",
+    );
+    out.push_str(&format!(
+        "export const SIGNED_CAPABILITIES: readonly Capability[] = {};\n",
+        string_array(cntrl_protocol::signers::SIGNED_CAPABILITIES)
+    ));
+    out.push_str(&format!(
+        "\n/** How far a signed command's time may be from the machine's clock, either way, in milliseconds. */\nexport const SIGNATURE_WINDOW_MS = {};\n",
+        cntrl_protocol::signers::WINDOW_MS
+    ));
+    out.push_str(&format!(
+        "\n/** The hello feature of an agent that checks signed commands. */\nexport const SIGNED_COMMANDS_FEATURE = \"{}\";\n",
+        cntrl_protocol::signers::FEATURE
+    ));
+    out.push_str(&format!(
+        "\n/** The longest name a signer's key may have. */\nexport const SIGNER_NAME_MAX = {};\n",
+        cntrl_protocol::signers::NAME_MAX
+    ));
     out
 }
 

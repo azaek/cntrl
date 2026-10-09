@@ -47,6 +47,8 @@ const JOB_LIMIT: Duration = Duration::from_secs(300);
 struct State {
     audit: Mutex<AuditLog>,
     policy_path: PathBuf,
+    /// The pinned signer log (D108), in privd's own directory.
+    signers_path: PathBuf,
     audit_key_path: PathBuf,
     /// The user privd runs as; the policy file must belong to it.
     owner: os::Owner,
@@ -104,6 +106,7 @@ async fn serve(config: &Config, stop: CancellationToken) -> Result<(), String> {
     let state = Arc::new(State {
         audit: Mutex::new(audit),
         policy_path: config.paths.policy.clone(),
+        signers_path: signers::path_in(state_dir),
         audit_key_path: state_dir.join(AUDIT_KEY_FILE),
         owner,
         allowed,
@@ -184,12 +187,12 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
         Call::PolicyShow => serde_json::to_value(policy::load(&state.policy_path, state.owner))
             .map_err(|e| CallError::internal(e.to_string())),
         Call::SignersShow => {
-            let path = signers::path_beside(&state.policy_path);
+            let path = state.signers_path.clone();
             serde_json::to_value(signers::View::of(&signers::load(&path, state.owner)))
                 .map_err(|e| CallError::internal(e.to_string()))
         }
         Call::SignersApply { log } => {
-            let path = signers::path_beside(&state.policy_path);
+            let path = state.signers_path.clone();
             let owner = state.owner;
             blocking(move || {
                 serde_json::to_value(signers::View::of(&signers::apply(&path, owner, &log)))

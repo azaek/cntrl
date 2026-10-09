@@ -54,3 +54,24 @@ export const MONITOR_ONLY: readonly Capability[] = [
     "network.read",
     "containers.read",
 ];
+
+/** Capabilities whose operations change a machine, so need a signature where it requires them (D108). */
+export const SIGNED_CAPABILITIES: readonly Capability[] = [
+    "services.manage",
+    "containers.manage",
+    "processes.signal",
+    "power.reboot",
+    "power.poweroff",
+    "power.suspend",
+    "power.hibernate",
+    "history.manage",
+];
+
+/** How far a signed command's time may be from the machine's clock, either way, in milliseconds. */
+export const SIGNATURE_WINDOW_MS = 300000;
+
+/** The hello feature of an agent that checks signed commands. */
+export const SIGNED_COMMANDS_FEATURE = "signed_commands";
+
+/** The longest name a signer's key may have. */
+export const SIGNER_NAME_MAX = 80;

@@ -2,9 +2,10 @@
 //! require-signatures` pins its organization's signer log, the agent acts on
 //! an operation that changes the machine only when a key that log trusts
 //! signed it, for this device, recently, and not before. The pinned log is
-//! `signers.json` beside the policy, which only root writes: the command pins
-//! it, and privd extends it with entries the gateway relays, checking each
-//! one first. An entry that doesn't follow on from the pinned log (another
+//! `signers.json` in privd's state directory, which only root reaches: the
+//! command pins it, and privd extends it with entries the gateway relays,
+//! checking each one first. Not beside the policy: privd's sandbox can write
+//! only its own directory. An entry that doesn't follow on from the pinned log (another
 //! first entry, a gap, a fork or an older log) is refused, so Console can
 //! neither add a key nor roll one back.
 //!
@@ -27,9 +28,10 @@ use serde::{Deserialize, Serialize};
 
 use super::os::{self, Private};
 
-/// The pinned log's file, beside the policy: `/etc/cntrl/signers.json`.
-pub fn path_beside(policy: &Path) -> PathBuf {
-    policy.with_file_name("signers.json")
+/// The pinned log's file, in privd's state directory, such as
+/// `/var/lib/cntrl-privd/signers.json`.
+pub fn path_in(privd_state_dir: &Path) -> PathBuf {
+    privd_state_dir.join("signers.json")
 }
 
 /// A key the pinned log trusts.
@@ -401,10 +403,14 @@ pub fn unpin(path: &Path) -> Result<bool, String> {
 pub fn apply(path: &Path, owner: os::Owner, log: &SignerLog) -> Pin {
     match load(path, owner) {
         Pin::On(trust) => match trust.extend(&log.entries) {
-            Ok(Some(next)) => match save(path, &next) {
-                Ok(()) => Pin::On(next),
-                Err(reason) => Pin::Broken(reason),
-            },
+            Ok(Some(next)) => {
+                // Checked, so trusted now even if it can't be kept: the
+                // gateway sends the log again on the next connection.
+                if let Err(reason) = save(path, &next) {
+                    tracing::warn!("the extended signer log wasn't kept: {reason}");
+                }
+                Pin::On(next)
+            }
             Ok(None) => Pin::On(trust),
             Err(reason) => {
                 // The pinned log stands; the gateway's is refused.

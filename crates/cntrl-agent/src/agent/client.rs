@@ -145,7 +145,7 @@ pub fn run_enroll(config: &Config, token_file: Option<&Path>, replace: bool) -> 
                 // Another organization's, or another device's, signers aren't
                 // this one's to trust (D108).
                 if outcome.replaced.is_some() {
-                    let pinned = signers::path_beside(&config.paths.policy);
+                    let pinned = signers::path_in(&config.paths.privd_state_dir);
                     match signers::unpin(&pinned) {
                         Ok(true) => say!(
                             "Signed commands aren't required here any more. Once it's online, run `{}` to require its organization's.",
@@ -601,14 +601,21 @@ fn read_token(file: Option<&Path>) -> Result<String, String> {
 /// `cntrl policy show` and `cntrl policy check`. The file must belong to root.
 pub fn print_policy(config: &Config, check_only: bool) -> ExitCode {
     let state = policy::load(&config.paths.policy, os::ROOT);
-    let pinned = signers::path_beside(&config.paths.policy);
-    let pin = signers::load(&pinned, os::ROOT);
-    let valid = matches!(state, PolicyState::Valid { .. }) && !matches!(pin, Pin::Broken(_));
+    // The pinned signers are in privd's own directory, which only root reads.
+    let pin = os::is_root()
+        .then(|| signers::load(&signers::path_in(&config.paths.privd_state_dir), os::ROOT));
+    let valid = matches!(state, PolicyState::Valid { .. }) && !matches!(pin, Some(Pin::Broken(_)));
     if check_only && valid {
         say!("{}: OK", config.paths.policy.display());
     } else {
         print_policy_state(&state);
-        print_pin(&pin);
+        match &pin {
+            Some(pin) => print_pin(pin),
+            None => say!(
+                "signatures: run it {} to see whom this machine trusts",
+                os::AS_ROOT
+            ),
+        }
     }
     if valid {
         ExitCode::SUCCESS
@@ -725,7 +732,7 @@ pub fn require_signatures(config: &Config, yes: bool) -> ExitCode {
             ));
         }
     };
-    let pinned = signers::path_beside(&config.paths.policy);
+    let pinned = signers::path_in(&config.paths.privd_state_dir);
     if let Pin::On(current) = signers::load(&pinned, os::ROOT)
         && current.head == trust.head
     {
@@ -766,7 +773,7 @@ pub fn allow_unsigned(config: &Config) -> ExitCode {
             os::AS_ROOT
         ));
     }
-    let pinned = signers::path_beside(&config.paths.policy);
+    let pinned = signers::path_in(&config.paths.privd_state_dir);
     match signers::unpin(&pinned) {
         Ok(true) => say!("Signed commands aren't required any more."),
         Ok(false) => {
