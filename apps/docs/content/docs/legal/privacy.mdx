@@ -1,0 +1,124 @@
+---
+title: Privacy policy
+description: What cntrl collects, why, who handles it for us, and what you can ask for.
+icon: ShieldCheck
+---
+
+_Last updated: [DATE]. Draft, not yet in force._
+
+This policy covers Cntrl Console (console.cntrl.pw), the cntrl agent you install on your machines, the gateway they connect to (gw.cntrl.pw), and this website (cntrl.pw). Cntrl Bridge, the desktop app, runs on your own network and sends us nothing.
+
+## Who we are
+
+cntrl is run by azaek, a sole proprietorship based in [COUNTRY], which decides how your data is used (the "controller", in GDPR's words). Write to **privacy@cntrl.pw** about anything here.
+
+## What we collect
+
+### Your account
+
+- Your name, your email address, and your picture if you sign in with GitHub.
+- How you sign in: an emailed code, or GitHub. We never see your GitHub password; a sign-in code is kept hashed and expires after 5 minutes.
+- For each session: its IP address and browser, to keep you signed in and spot misuse. A session ends when you sign out or it expires.
+
+### Your organizations
+
+- Each organization's name, its members and their roles.
+- Invitations: the invited address and role. An invitation expires after 7 days.
+- Its plan, and with a paid plan, the link to its subscription.
+
+### Your devices
+
+When you add a machine, the agent tells Console about it:
+
+- Its hostname, the name you give it, its tags, its operating system and version, its architecture, its CPU model and memory size, the agent's version, and when it was last seen.
+- A hash of its machine ID, so a reinstalled machine is recognized, and its public keys, so it can prove who it is. Its private keys never leave it.
+- What its local policy allows Console to do.
+
+While you have a device's page open, its live readings pass through our gateway to your browser: CPU, memory, disks, network, GPUs, processes, services, containers, ports and log lines. **We don't store them.** The charts' history is kept on the device itself. The agent removes common secrets from log lines, such as passwords, tokens and keys, before a line leaves the machine; agents older than that feature send log lines as they are, and Console says so on the Logs tab.
+
+### Alerts and checks
+
+- Your alert rules, and where they send: email, or a Discord, Slack, ntfy or webhook address, which we keep encrypted.
+- The alerts that fired and the results of your checks, kept for 90 days. The Free plan shows the last 7 of those days.
+- A check's target, which is the website or port you ask us to watch.
+
+### Billing
+
+Polar (polar.sh) is the merchant of record for paid plans: it takes the payment, handles tax and invoices, and keeps your card details. We never see them. From Polar we receive the subscription's plan, status, dates and price, tied to your account's ID.
+
+### Email
+
+We send sign-in codes, invitations and alerts through Resend, which handles the recipient's address and the message.
+
+### Product analytics, only if you say yes
+
+If you accept analytics, Console sends PostHog which pages you visit (by path only, without page titles or anything after a `?`), your account's ID, your plan and role, and a few steps such as adding a check or opening the plans. It never sends a device's data, names, addresses or log lines, and doesn't pass on your IP address. If you decline, PostHog isn't loaded at all. You can change your choice any time on your own card on the Organization page.
+
+### Things your browser keeps
+
+- Cookies Console needs to work: your session, your theme, and how you've laid out your device list and sidebar. They aren't used for tracking, so they don't need consent.
+- Your analytics choice, in the browser's local storage.
+- Readings history for agents older than 0.1.12, which keep none themselves, in your browser's own database. It's cleared when you sign out.
+
+### Server logs
+
+Our servers on Cloudflare log errors and requests so we can fix problems. Cloudflare keeps these for a few days.
+
+### When you write to us
+
+Your message and address, to answer you.
+
+## Why, and on what basis
+
+| What for | Basis, in GDPR's terms |
+| --- | --- |
+| Running Console, the agent and the gateway for you; sending codes, invitations and alerts | Our contract with you |
+| Keeping accounts and devices secure, and stopping abuse | Our legitimate interest in a safe service |
+| Billing, through Polar | Our contract with you, and the law on records |
+| Product analytics | Your consent, which you can withdraw |
+| Answering you | Our legitimate interest in replying, or our contract |
+
+We don't sell your data, use it for advertising, or train AI models on it.
+
+## Who handles it for us
+
+| Service | What it does | Where |
+| --- | --- | --- |
+| Cloudflare | Hosts Console and the gateway; relays live readings | Its global network |
+| Neon | Console's database | United States (AWS, Ohio) |
+| Resend | Sends email | United States |
+| Polar | Payments, tax and invoices, as merchant of record | United States and Europe |
+| PostHog | Product analytics, only with your consent | United States |
+| GitHub | Sign-in, if you choose it | United States |
+
+Each works under its own data processing terms. Where data leaves the EU, the UK or your country, these providers rely on the European Commission's standard contractual clauses or an equivalent safeguard.
+
+## How long we keep it
+
+- Your account and organizations: until you delete them.
+- Sessions: until you sign out, or they expire.
+- Invitations: 7 days.
+- Alerts that fired, and check results: 90 days.
+- Billing records: as long as Polar and the law on records require.
+- Analytics: as long as PostHog keeps events for our project.
+- Once you ask us to delete your account, we delete it within 30 days. Our database's backups keep it for up to their restore window after that.
+
+## What you can ask for
+
+You can ask us to show you, correct, export or delete your data, to stop using it for a purpose, or to restrict how we use it, and you can withdraw consent to analytics at any time. Write to **privacy@cntrl.pw** and we'll answer within 30 days. Until Console has a button for it, deleting your account is done by writing to us. If you're in the EU or the UK, you can also complain to your data protection authority.
+
+## Security
+
+Connections are encrypted. Sign-in codes, enrollment tokens and heartbeat URLs are kept hashed or random, channel addresses are encrypted, and each device proves itself with its own key. What Console can do on a machine is limited by that machine's own policy, which only someone on the machine can change.
+
+## Children
+
+cntrl isn't meant for anyone under 16, and we don't knowingly collect their data.
+
+## Changes
+
+We'll post any change here with its date. If a change matters, we'll also email account owners before it applies.
+
+## Contact
+
+**privacy@cntrl.pw**, or azaek, [POSTAL ADDRESS].
