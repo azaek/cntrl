@@ -23,7 +23,6 @@ export default function HomePage() {
                     __html: JSON.stringify(createSoftwareAppJsonLd()),
                 }}
             />
-            <ConsoleBanner />
             <div className="bg-fd-background relative flex h-10 w-full max-w-350 flex-1 items-stretch overflow-hidden min-[1400px]:border-x">
                 <div
                     className="pointer-events-none absolute top-20 left-0 hidden aspect-656/792 w-full max-w-164 xl:block"
@@ -89,7 +88,8 @@ export default function HomePage() {
                                 className="absolute -left-12 min-w-[256px] translate-y-[-10%] sm:-left-6"
                             />
                         </div>
-                        <div className="flex-1">
+                        <div className="min-w-0 flex-1">
+                            <ConsoleBanner />
                             <p className="text-fd-muted-foreground mb-4 text-sm font-medium">
                                 Cntrl Bridge
                             </p>
