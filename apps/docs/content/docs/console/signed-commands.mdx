@@ -65,22 +65,22 @@ A machine that requires signatures takes later changes to the signers on its own
 
 Every change to a machine is signed: starting, stopping and restarting services and containers, stopping processes, quitting apps, the power actions, and changing or clearing its history. Reading anything needs no signature.
 
-In Console, an action this browser signs ends with a lock. Hover it to see whether this browser signs it, or can't yet.
+In Console, an action that's signed ends with a shield.
 
 A signature covers one request, for one machine, in one organization. The machine refuses it if it's more than 5 minutes from its own clock, or if it was used before.
 
 ## When a machine refuses
 
-The refusal shows the machine's own words, and what to do:
+Console says what happened, and what to do:
 
-| What Console says                                | What to do                                                                                                                                 |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| This browser can't sign yet                      | Press **Ask to be trusted**, and have a signer review it.                                                                                  |
-| Asked to be trusted                              | Wait for a signer: read them the code it shows.                                                                                            |
-| The machine doesn't know this browser's key yet  | It hears of new signers when it connects. If the owner started over, run `require-signatures` on it.                                       |
-| The machine's clock is off                       | Set the clock on the machine, or on this computer, then try again.                                                                          |
-| The machine refused the signature                | Try again. If it's refused twice, tell a signer: something changed the command on its way.                                                 |
-| The machine can't read whom it trusts            | It refuses every change until it does. Run `require-signatures` on it.                                                                     |
+| What Console says                              | What to do                                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| This browser can't make changes here yet       | Press **Ask to be trusted**, and have a signer review it.                                                    |
+| Waiting for a signer to trust this browser     | When a signer asks, read them the code it shows.                                                             |
+| The machine doesn't know this browser yet      | Try again in a moment: it picks up new signers when it's online. If the owner started over, run `require-signatures` on it. |
+| The machine's clock is off                     | Correct the time on the machine or on this computer, then try again.                                         |
+| The machine didn't run it                      | The request changed on its way. Try again, and if it happens again, tell your organization's owner.          |
+| The machine can't check who's allowed          | It refuses every change until it can. Run `require-signatures` on it.                                        |
 
 ## Keep a browser's key
 
