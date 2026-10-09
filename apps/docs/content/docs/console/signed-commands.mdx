@@ -20,9 +20,9 @@ Each browser has its own code, shown large on the Organization page with a small
 
 Each owner or admin who acts on machines needs a trusted browser, and so does each extra browser they use:
 
-1. In that browser, press **Ask to be trusted** under **Organization**, **Signed commands**. The browser makes its own key and shows its code.
+1. In that browser, press **Ask to be trusted** under **Organization**, **Signed commands**. The browser makes its own key and shows its code. Changed your mind? **Cancel** beside your request takes it back.
 2. A signer presses **Review** on the request. Console shows the code that browser worked out, and asks: "Does their screen show this?"
-3. The signer asks the person to read out their code, by phone or in person, and compares it, digits and picture.
+3. The signer gets the person's code, read out or sent (**Copy** beside it copies a line to paste into a message), and compares it, digits and picture.
 4. **They match** trusts the browser. **They don't match** declines it: the request may not have come from their browser, so ask them to ask again, and compare once more.
 
 Trust a second browser even if you work alone: a lost key then means asking again, not starting over.
@@ -76,7 +76,7 @@ Console says what happened, and what to do:
 | What Console says                              | What to do                                                                                                   |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | This browser can't make changes here yet       | Press **Ask to be trusted**, and have a signer review it.                                                    |
-| Waiting for a signer to trust this browser     | When a signer asks, read them the code it shows.                                                             |
+| Waiting for a signer to trust this browser     | Send or read the code it shows to an owner or admin who signs. **Copy** copies it.                           |
 | The machine doesn't know this browser yet      | Try again in a moment: it picks up new signers when it's online. If the owner started over, run `require-signatures` on it. |
 | The machine's clock is off                     | Correct the time on the machine or on this computer, then try again.                                         |
 | The machine didn't run it                      | The request changed on its way. Try again, and if it happens again, tell your organization's owner.          |
