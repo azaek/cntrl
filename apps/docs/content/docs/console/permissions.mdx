@@ -90,7 +90,7 @@ A machine can also require that every change is signed by a browser its organiza
 
 From then on, the machine acts on these only when a trusted browser signed them: `services.manage`, `containers.manage`, `processes.signal`, the power actions and `history.manage`. Reading anything needs no signature. A signature is good once, for this machine only, and within 5 minutes of its clock.
 
-To stop requiring signatures, run `sudo cntrl policy allow-unsigned`. If every signer's browser is lost, the owner presses **Start over** in Console, then on each machine you run `sudo cntrl policy allow-unsigned` and `sudo cntrl policy require-signatures` again.
+To stop requiring signatures, run `sudo cntrl policy allow-unsigned`. If every signer's browser is lost, the owner presses **Start over** in Console. Then run `sudo cntrl policy require-signatures` on each machine again: it shows the signers it trusts now and the new ones, and asks before replacing them.
 
 It needs an agent released after 0.1.19. See [Security](/docs/console/security#signed-commands) for what it protects against, and what it doesn't.
 

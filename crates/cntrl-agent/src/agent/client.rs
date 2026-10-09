@@ -733,28 +733,57 @@ pub fn require_signatures(config: &Config, yes: bool) -> ExitCode {
         }
     };
     let pinned = signers::path_in(&config.paths.privd_state_dir);
-    if let Pin::On(current) = signers::load(&pinned, os::ROOT)
-        && current.head == trust.head
-    {
-        say!("Signed commands are already required, from these signers:");
-        print_signers(&current);
-        return ExitCode::SUCCESS;
-    }
-    say!(
-        "These keys may sign commands for this machine, for {}:",
-        trust.org
-    );
-    print_signers(&trust);
-    say!(
-        "Check each with its signer: their own browser shows its code under Organization, Signed commands, as \"This browser's code\"."
-    );
-    if !yes {
-        match confirm(
-            "Act on commands that change this machine only when one of them signed it? [y/N] ",
-        ) {
-            Some(true) => {}
-            Some(false) => return fail("Nothing changed."),
-            None => return fail("There's no terminal to ask on: run it again with --yes."),
+    // What's pinned decides the question: none, the same signers, later
+    // entries of the same log, or a different log, as after the owner
+    // starts over in Console.
+    let question = match signers::load(&pinned, os::ROOT) {
+        Pin::On(current) if current.head == trust.head => {
+            say!("Signed commands are already required, from these signers:");
+            print_signers(&current);
+            return ExitCode::SUCCESS;
+        }
+        Pin::On(current) => match current.extend(&log.entries) {
+            // Later entries of the log it trusts, checked by keys it trusts:
+            // nothing to ask, as privd would take them itself.
+            Ok(_) => {
+                say!("Signed commands are already required; these are the signers now:");
+                print_signers(&trust);
+                None
+            }
+            Err(_) => {
+                say!(
+                    "This machine trusts these signers now, for {}:",
+                    current.org
+                );
+                print_signers(&current);
+                say!("Console relays different ones, as when the owner starts over in Console:");
+                Some("Replace them with these? [y/N] ")
+            }
+        },
+        Pin::Broken(reason) => {
+            say!("This machine requires signed commands, but can't read whom it trusts: {reason}");
+            say!("Console relays these signers, for {}:", trust.org);
+            Some("Trust these instead? [y/N] ")
+        }
+        Pin::Off => {
+            say!(
+                "These keys may sign commands for this machine, for {}:",
+                trust.org
+            );
+            Some("Act on commands that change this machine only when one of them signed it? [y/N] ")
+        }
+    };
+    if let Some(question) = question {
+        print_signers(&trust);
+        say!(
+            "Check each with its signer: their own browser shows its code under Organization, Signed commands, as \"This browser's code\"."
+        );
+        if !yes {
+            match confirm(question) {
+                Some(true) => {}
+                Some(false) => return fail("Nothing changed."),
+                None => return fail("There's no terminal to ask on: run it again with --yes."),
+            }
         }
     }
     if let Err(e) = signers::save(&pinned, &trust) {
