@@ -1,0 +1,22 @@
+{
+    "title": "Cntrl Console",
+    "description": "Your machines, from anywhere",
+    "icon": "MonitorDot",
+    "root": true,
+    "pages": [
+        "---Getting started---",
+        "index",
+        "add-a-device",
+        "permissions",
+        "---Using Console---",
+        "devices",
+        "alerts",
+        "checks",
+        "people",
+        "---The agent---",
+        "commands",
+        "update-and-remove",
+        "security",
+        "troubleshooting"
+    ]
+}

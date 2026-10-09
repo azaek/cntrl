@@ -1,0 +1,72 @@
+---
+title: Devices
+description: Each machine's page, what's on its tabs, and what you can do from its Actions menu.
+icon: Monitor
+---
+
+**Devices** lists every machine in your organization, with its status, system and headline readings. Each machine has a page of its own, with a tab for each part of it.
+
+## A device's tabs
+
+What a tab shows depends on the machine's [permissions](/docs/console/permissions). The read permissions are on out of the box. The ones that change something aren't.
+
+| Tab        | Shows                                                                                                    | Can do, when allowed                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Overview   | Live CPU, memory, network, disk and GPU, with charts from an hour to a year; temperatures; space on each filesystem; the machine, its CPU and uptime |                                                             |
+| Services   | systemd units, launchd jobs or Windows services, with their state; each service's log                     | Start, stop, restart, and choose which start at boot        |
+| Containers | Docker or Podman containers grouped by Compose project, with state, health, ports and live CPU, memory and network; their logs | Start, stop and restart                                     |
+| Processes  | The busiest processes by CPU and memory, live, with search                                               | Stop a process, or force it when it won't stop              |
+| Storage    | Disks with live reads, writes and their health; volumes with free space and inodes                       |                                                             |
+| Network    | Interfaces with live traffic, routes and DNS; the ports the machine listens on, and the process, user and service behind each |                                                             |
+| Logs       | The system's log as it's written: the journal on Linux, the unified log on a Mac, the event log on Windows; search, and filters by priority and source |                                                             |
+| Policy     | What the machine allows Console, and the command that changes it                                         |                                                             |
+| Alerts     | This machine's alerts, firing and resolved                                                               |                                                             |
+
+Everyone in the organization can look. Owners and admins can also act, where the machine's policy allows.
+
+## The Actions menu
+
+On a device's page, **Actions** holds what applies to the whole machine:
+
+- **Power**: restart, shut down, sleep or hibernate, each where the policy allows it and the machine supports it. Console shows who's signed in first, and whether the machine will come back on its own.
+- **Agent**: the agent's version, whether a newer one is out, and the commands to update, pause, check or restart it, for its system, ready to copy.
+- **History settings**: how long the machine keeps its history.
+- **Rename**, and **Remove device**. See [Update, move or remove](/docs/console/update-and-remove#remove-a-device).
+
+## Names, kinds and tags
+
+A device starts with its hostname. Rename it, and say what it is, like a server, laptop or mini PC, or let Console go by what the machine reports.
+
+Tags group devices. A tag is lowercase letters, digits and `-_.:/`, up to 32 characters, so `env:prod` and `rack/2` both work. A device takes up to 20. Owners and admins set them on the device's page. On **Devices**, you can filter by tag or group by it, and an alert rule can cover every device with a tag, including ones tagged later.
+
+## History
+
+The charts' history is kept on the machine, not in Console. The agent takes a reading every 10 seconds, whether anyone is watching or not. It keeps a point a minute for 48 hours, then a point every 15 minutes for 90 days, unless you choose otherwise. Each point has the lowest, highest and average reading.
+
+To keep 7, 30, 90 or 365 days, or to clear the history, use **History settings**. It needs the `history.manage` permission, and an owner or admin. On the machine:
+
+```bash
+cntrl history show            # days kept, since when, and the space it takes
+sudo cntrl history keep 30    # 1 to 365 days; fewer deletes the older days now
+sudo cntrl history clear      # starts again from the next minute
+```
+
+## Pausing a device
+
+To take a machine away from Console for a while, during maintenance say, pause it on the machine:
+
+```bash
+sudo cntrl pause --reason "Moving racks"
+```
+
+The agent tells Console who paused it and why, then disconnects and stays away, even across restarts. Console shows the device as paused, and it never alerts. To bring it back:
+
+```bash
+sudo cntrl resume
+```
+
+Console can't pause or resume a machine. Only root on the machine can.
+
+## Live readings on Free
+
+On the Free plan, live readings stop after 30 minutes with no input in the tab, and a bar at the bottom offers to resume them. On Pro and Team they stay live.

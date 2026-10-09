@@ -1,4 +1,4 @@
-import { ConsoleCard } from "@/components/console-card";
+import { ConsoleSidebarCard } from "@/components/console-sidebar-card";
 import { DocsLayout } from "@/components/layout/docs";
 import { SidebarBadge } from "@/components/sidebar-badge";
 import { baseOptions } from "@/lib/layout.shared";
@@ -36,7 +36,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 components: {
                     Item: SidebarBadge,
                 },
-                footer: <ConsoleCard />,
+                footer: <ConsoleSidebarCard />,
             }}
         >
             {children}

@@ -1,0 +1,63 @@
+---
+title: Alerts
+description: Rules that watch your machines and checks, and the channels they tell.
+icon: Bell
+---
+
+An alert rule watches for one kind of problem and tells people when it starts and when it clears. Rules belong to the organization. **Alerts** lists them, with what's firing and what fired lately, and each device has an **Alerts** tab of its own.
+
+Every organization starts with one rule: a device offline for 5 minutes, emailed to its owners and admins.
+
+## Kinds of rule
+
+| Rule                     | Fires when                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| A device is offline      | A device has been disconnected for the rule's minutes                                          |
+| A reading is over a line | CPU, memory, swap, disk use, load, temperature or GPU stays past a line for the rule's minutes |
+| A service isn't running  | A service has been down at every check across the rule's minutes                               |
+| A container isn't running | A container has been down for the rule's minutes                                              |
+| A check is down          | A [check](/docs/console/checks) has been failing for the rule's minutes                        |
+| A certificate expires soon | An https check's certificate has fewer than 7, 14, 21 or 30 days left                        |
+
+Each rule has a severity, warning or critical, and covers every device, chosen devices, or devices with chosen [tags](/docs/console/devices#names-kinds-and-tags). A rule that covers every device, or a tag, covers devices added or tagged later too.
+
+Readings are judged on the machine itself, by each minute's average, so a one-second spike never fires. A reading alert clears after two minutes back under the line. A service is checked every 15 seconds, and one that's stuck starting counts as down, so a crash loop alerts.
+
+## Who hears about it
+
+Notices wait 30 seconds and go out together, so an outage that trips several rules sends one message, not ten. A notice also goes out when the problem clears, to wherever the first one went.
+
+While a device is offline, its other alerts send nothing. A [paused](/docs/console/devices#pausing-a-device) device never alerts.
+
+### Mutes
+
+Mute a rule, a device, or one rule on one device, for an hour up to a week. While it's muted, alerts still open and close in Console, but no one is told.
+
+## Channels
+
+Email is built in. It goes to the people each rule names. Owners and admins can add other channels on **Alerts**, send each a test, and pick channels for each rule. A new rule starts with every channel.
+
+| Channel | What it sends                                                                                       | What you give Console                    |
+| ------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Email   | One email per person per batch                                                                      | Nothing: it's the rule's people          |
+| Discord | A message with an embed for each alert, colored by severity                                         | A channel webhook URL                    |
+| Slack   | A message in a channel                                                                              | An incoming webhook URL                  |
+| ntfy    | A push to phones and desktops subscribed to the topic, with priority 5 when critical, 4 when warning, 3 when resolved | The topic's URL, and an access token for a protected topic |
+| Webhook | Alertmanager's version 4 JSON, so receivers built for it work                                       | Any https URL on a public host           |
+
+Webhooks are signed as [Standard Webhooks](https://www.standardwebhooks.com) specifies, with a `whsec_` secret. Console shows the secret once, when you make the webhook, so copy it then.
+
+A channel's address is a secret: Console keeps it encrypted and shows only a hint of it. Every channel, email included, has an on switch. Turned off, it sends nothing, and rules keep it for when it's back on.
+
+When a channel answers 429 or a 5xx, or doesn't answer within 15 seconds, the message is tried twice more. Any other error stops it, and the channel shows why.
+
+## On each plan
+
+|                     | Free    | Pro and Team        |
+| ------------------- | ------- | ------------------- |
+| Alert rules         | 1       | As many as you like |
+| Channels            | Email   | All                 |
+| Alerts sent a month | 30      | No limit            |
+| Alert history       | 7 days  | 90 days             |
+
+Free's one rule includes the ones Console makes, such as the offline rule every organization starts with. Past 30 alerts sent in a calendar month (UTC), alerts on Free still fire and show in Console, but no email goes out until the 1st. Older history isn't deleted, so upgrading brings it back.

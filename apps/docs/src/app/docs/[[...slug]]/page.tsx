@@ -30,8 +30,12 @@ export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
             tableOfContent={{
                 style: "clerk",
                 single: true,
-                // Only beside headings: a footer alone would show an empty "On this page".
-                footer: page.data.toc.length > 0 ? <ConsoleCard size="toc" /> : undefined,
+                // Only beside headings, since a footer alone would show an empty "On this
+                // page", and not in Console's own docs, whose readers know Console already.
+                footer:
+                    page.data.toc.length > 0 && params.slug?.[0] !== "console" ? (
+                        <ConsoleCard size="toc" />
+                    ) : undefined,
             }}
             toc={page.data.toc}
             full={page.data.full}

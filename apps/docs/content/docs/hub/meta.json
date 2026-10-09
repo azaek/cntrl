@@ -1,7 +1,0 @@
-{
-  "title": "Cntrl Hub",
-  "description": "The dashboard app",
-  "icon": "MonitorDot",
-  "pages": ["index"],
-  "root": true
-}

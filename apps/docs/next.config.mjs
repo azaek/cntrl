@@ -22,6 +22,12 @@ const config = {
         return [
             { source: "/privacy", destination: "/docs/legal/privacy", permanent: false },
             { source: "/terms", destination: "/docs/legal/terms", permanent: false },
+            // The Console docs were the "Cntrl Hub" section before Console launched.
+            {
+                source: "/docs/hub/:path*",
+                destination: "/docs/console/:path*",
+                permanent: true,
+            },
         ];
     },
     async rewrites() {

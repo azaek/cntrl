@@ -1,0 +1,84 @@
+---
+title: Checks
+description: Watch websites, ports and cron jobs, from cntrl's network or from one of your machines.
+icon: Activity
+---
+
+A check watches something from the outside: a website, a port, or a job that should run on a schedule. **Checks** sits beside **Devices** and shows each check's last 24 hours. A check's own page has its response times for up to 90 days, its changes, its pings and its alerts.
+
+## Kinds of check
+
+| Check       | Up when                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| A website   | It answers with 2xx or 3xx within 10 seconds, after up to 10 redirects. HTTP or HTTPS.    |
+| A port      | It takes a TCP connection within 10 seconds: a database, a mail server, a game server.    |
+| A heartbeat | Your job pings its URL on time and doesn't say it failed.                                  |
+
+Websites and ports run every 30 seconds, or every 1, 5 or 15 minutes. A check goes down after 1, 2, 3 or 5 failures in a row, 2 unless you choose otherwise, so one slow answer doesn't alert. It's up again on the first success. Console tries a new check once before saving it.
+
+## Where it runs from
+
+### cntrl's network
+
+By default a check runs from Cloudflare's network, so the address must be public.
+
+### From one of your machines
+
+A website or port check can run from one of your devices instead. That reaches what the internet can't: private addresses, services on the device itself, and port 25. The device runs the check at its interval while it's connected, and sends Console the results.
+
+The device's policy has to allow `checks.run`, which is off out of the box:
+
+```bash
+sudo cntrl policy allow checks.run
+```
+
+A check from a device trusts the system's certificates as well as the usual public ones. For a service with a self-signed certificate, you can tell the check to ignore certificate errors.
+
+### Certificates
+
+An https check from a device also reads the site's certificate: when it expires, who it's for and who issued it. A "certificate expires soon" [alert](/docs/console/alerts) fires 7, 14, 21 or 30 days ahead, and clears once the certificate is renewed. Your first https check from a device adds a 14-day rule for every check.
+
+## Heartbeats
+
+A heartbeat is for a job that runs on a schedule, like a cron job or a backup. Each check gets its own URL, and the job requests it every time it runs:
+
+```text
+https://gw.cntrl.pw/ping/<token>
+```
+
+You set how often the job runs, and a grace period on top. If no ping arrives in time, the check is down, and it counts another missed run each period it stays quiet. HEAD, GET and POST all work.
+
+```bash
+# After the backup, if it succeeded
+0 3 * * * /usr/local/bin/backup.sh && curl -fsS -m 10 --retry 3 https://gw.cntrl.pw/ping/<token>
+```
+
+The URL takes more, in the same shape as Healthchecks.io:
+
+| Ping                   | Means                                                         |
+| ---------------------- | ------------------------------------------------------------- |
+| `/ping/<token>`        | The job ran                                                   |
+| `/ping/<token>/start`  | The job started; it has the grace period to finish           |
+| `/ping/<token>/fail`   | The job failed: the check goes down now                      |
+| `/ping/<token>/<code>` | The job ended with this exit code: 0 is up, anything else down |
+
+```bash
+# Report the job's exit code, whatever it is
+0 3 * * * /usr/local/bin/backup.sh; curl -fsS -m 10 --retry 3 https://gw.cntrl.pw/ping/<token>/$?
+```
+
+The token is the only secret in the URL, so keep it out of public repositories.
+
+## Alerts
+
+Your organization's first check adds a "check is down" rule for every check, to its owners and admins. Change it on **Alerts**. A paused check neither runs nor alerts.
+
+## On each plan
+
+|                    | Free                  | Pro    | Team   |
+| ------------------ | --------------------- | ------ | ------ |
+| Checks             | 2                     | 20     | 50     |
+| Fastest interval   | Every 5 minutes       | Every 30 seconds | Every 30 seconds |
+| Heartbeats         | No                    | Yes    | Yes    |
+
+Free has room for one rule, and the offline rule takes it, so on Free a check alerts no one until you change that rule to "A check is down" or replace it. Checks past a plan's limit keep running, and can be deleted but not changed.

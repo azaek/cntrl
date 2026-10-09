@@ -1,0 +1,115 @@
+---
+title: Add a device
+description: Run one command on the machine. It installs the agent and adds the machine to your organization.
+icon: Plus
+---
+
+Adding a machine takes one command, run on the machine itself. The command installs the cntrl agent, and the agent joins your organization and connects out to Console. The machine shows up a few seconds later.
+
+<Steps>
+<Step>
+
+### Open Add device
+
+Sign in at [console.cntrl.pw](https://console.cntrl.pw), go to **Devices** and press **Add device**. Only owners and admins can add devices.
+
+</Step>
+<Step>
+
+### Pick the machine's system
+
+Linux, macOS or Windows. Console makes a command for it, with an install link of its own.
+
+</Step>
+<Step>
+
+### Run the command on the machine
+
+Usually over SSH. On Windows, in PowerShell opened as administrator. Console shows the machine as soon as it connects.
+
+</Step>
+<Step>
+
+### Choose what Console may do
+
+A new machine only reports. To let Console restart services, stop processes or power the machine off, pick those permissions, and Console shows the command that allows them. Run it on the machine. You can do this later from the device's **Policy** tab. See [Permissions](/docs/console/permissions).
+
+</Step>
+</Steps>
+
+The install link works once and expires after 30 minutes. If it has expired, close Add device and open it again for a new one.
+
+## The command for each system
+
+<Tabs items={["Linux", "macOS", "Windows"]}>
+<Tab value="Linux">
+
+```bash
+curl -fsSL https://gw.cntrl.pw/install/<token> | sudo sh
+```
+
+Needs systemd, on x86_64 or aarch64. The agent is one static binary, so it runs on any distribution.
+
+The installer:
+
+- creates a system user and group, `cntrl`, with no login shell
+- installs the agent as `/usr/local/bin/cntrl-agent`, with `cntrl` linked to it
+- adds three systemd units, `cntrl-agent.service`, `cntrl-privd.service` and `cntrl-privd.socket`, and starts them
+- writes its config to `/etc/cntrl/agent.toml` when there's none yet
+
+</Tab>
+<Tab value="macOS">
+
+```bash
+curl -fsSL https://gw.cntrl.pw/install/<token> | sudo sh
+```
+
+Runs on Apple silicon and Intel Macs.
+
+The installer:
+
+- creates a hidden service user and group, `_cntrl`
+- installs the agent in `/Library/Application Support/cntrl/bin`, with `/usr/local/bin/cntrl` linked to it
+- adds two launchd daemons, `pw.cntrl.agent` and `pw.cntrl.privd`, and starts them
+- writes its config to `/etc/cntrl/agent.toml` when there's none yet
+
+</Tab>
+<Tab value="Windows">
+
+Open PowerShell as administrator, then:
+
+```powershell
+irm https://gw.cntrl.pw/install/<token>.ps1 | iex
+```
+
+Runs on Windows 10, 11 and Server, on x64 or ARM64.
+
+<Callout type="warn" title="Windows is in beta">
+  Readings, services, logs, network, storage and power all work. It's newer than Linux
+  and macOS, so there may be rough edges, and a process can only be ended, not stopped.
+</Callout>
+
+The agent isn't signed yet, so Windows may block it:
+
+- If Smart App Control is on, turn it off in Windows Security, under **App & browser control**, before you run the command. Leave it off until the agent is signed.
+- If Microsoft Defender removes `cntrl-agent.exe`, allow it from **Protection history** in Windows Security, then run the command again.
+
+The installer:
+
+- installs `cntrl-agent.exe` and `cntrl.exe` under `C:\Program Files\cntrl`, and puts that folder on the PATH
+- adds two services, `cntrl-agent` and `cntrl-privd`, and starts them
+- keeps its config, policy, state and logs in `%ProgramData%\cntrl`, which only administrators can change and the agent can only read
+- adds **cntrl agent** to Apps & features, to uninstall it from there
+
+</Tab>
+</Tabs>
+
+## What the installer checks
+
+The command fetches cntrl's open installer, [install.sh](https://github.com/azaek/cntrl/blob/main/packaging/install.sh) or [install.ps1](https://github.com/azaek/cntrl/blob/main/packaging/windows/install.ps1), with your install link and the newest release's downloads set at the top. Before it installs anything, it checks the download's SHA-256 against the one Console took from the release's signed manifest. A download cut short runs nothing, since the script only starts once it has arrived whole.
+
+## Running it again
+
+On a machine that's already in your organization, a new command from Add device updates the agent when the release is newer, and otherwise makes sure it's running. Either way the machine keeps its place in Console, with its name, tags and alerts. To update without a new link, see [Update, move or remove](/docs/console/update-and-remove).
+
+On a machine that's in another organization, the command asks before moving it. See [Move a device](/docs/console/update-and-remove#move-a-device-to-another-organization).

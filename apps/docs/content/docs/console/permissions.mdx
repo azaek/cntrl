@@ -1,0 +1,92 @@
+---
+title: Permissions
+description: Each machine decides what Console may do, and only someone on the machine can change it.
+icon: ShieldCheck
+---
+
+Every machine has a device policy: the list of permissions it gives Console. The policy is a file on the machine that only root can change, or an administrator on Windows. Console can show it and write the command that changes it, but can't change it itself.
+
+## Out of the box: read only
+
+A machine with no policy file allows only reading:
+
+`system.read`, `processes.read`, `services.read`, `containers.read`, `network.read`, `logs.read` and `power.read`.
+
+Console sees the machine, but can't restart, stop or change anything on it.
+
+## Every permission
+
+Console groups them by part of the machine. Each part is off, or at one of its levels, and a level includes the ones before it. Power's actions are separate switches, since allowing a restart isn't allowing a shutdown.
+
+| Part       | Level or action | Permission          | Console can                                                    | Out of the box |
+| ---------- | --------------- | ------------------- | -------------------------------------------------------------- | -------------- |
+| System     | See             | `system.read`       | See the system, live stats and charts, interfaces and disks    | Yes            |
+| System     | Manage          | `history.manage`    | Choose how many days of history the machine keeps, and clear it | No             |
+| Services   | See             | `services.read`     | List the services and their state                              | Yes            |
+| Services   | Manage          | `services.manage`   | Start, stop and restart services, and pick which start at boot | No             |
+| Containers | See             | `containers.read`   | List the containers, what each uses, and their logs            | Yes            |
+| Containers | Manage          | `containers.manage` | Start, stop and restart containers                             | No             |
+| Processes  | See             | `processes.read`    | List the processes with their CPU, memory and user             | Yes            |
+| Processes  | Stop            | `processes.signal`  | Stop processes and quit open apps                              | No             |
+| Network    | See             | `network.read`      | List the ports the machine listens on, and who's behind each   | Yes            |
+| Logs       | Read            | `logs.read`         | Read the system's log and each service's                       | Yes            |
+| Power      | See             | `power.read`        | See which power actions the machine has, and who's signed in   | Yes            |
+| Power      | Restart         | `power.reboot`      | Restart the machine                                            | No             |
+| Power      | Shut down       | `power.poweroff`    | Shut the machine down                                          | No             |
+| Power      | Sleep           | `power.suspend`     | Put the machine to sleep                                       | No             |
+| Power      | Hibernate       | `power.hibernate`   | Hibernate the machine                                          | No             |
+| Checks     | Run             | `checks.run`        | Check websites and ports from this machine's network           | No             |
+
+`checks.run` is off out of the box because checking addresses from a machine can map the network it's on. See [Checks](/docs/console/checks#from-one-of-your-machines).
+
+## Change what Console may do
+
+### From Console
+
+Open the device and go to its **Policy** tab. Pick a level for each part, and Console writes the one command that applies them. Run it on the machine. Add device offers the same step for a new machine.
+
+### On the machine
+
+```bash
+# What Console may do now
+cntrl policy show
+
+# Allow, or stop allowing, one or more permissions
+sudo cntrl policy allow services.manage containers.manage
+sudo cntrl policy deny power.poweroff
+
+# Both at once, as Console writes it
+sudo cntrl policy modify --allow services.manage,power.reboot --deny processes.signal
+```
+
+Each change rewrites the policy file and reconnects the agent, so Console sees the new permissions at once. A name that isn't a permission changes nothing. On Windows, run the same commands in PowerShell opened as administrator, without `sudo`.
+
+## Protected services
+
+Some services are never stopped or restarted through Console, whatever the policy allows. Console can still start them.
+
+- **SSH**, so a mistake can't lock you out: `ssh.service` and `sshd.service` on Linux, `com.openssh.sshd` on macOS, and `sshd`, `TermService` (Remote Desktop) and `WinRM` (remote PowerShell) on Windows.
+- **The agent's own services**, always: `cntrl-agent` and `cntrl-privd`. Restarting them through the agent would cut off the request that asked for it.
+
+Stopping a process that belongs to a protected service is refused too, as is stopping the operating system's own processes.
+
+To protect more services, add them to `protect` under `[services]` in the policy file. Once that list is in the file, it replaces the default one, so keep SSH in it. The agent's own services stay protected either way.
+
+## The policy file
+
+It's `/etc/cntrl/policy.toml` on Linux and macOS, and `%ProgramData%\cntrl\policy.toml` on Windows. There's none until you first change the policy. On Linux, the `cntrl policy` commands write it like this, with a comment above:
+
+```toml title="/etc/cntrl/policy.toml"
+version = 1
+allow = ["containers.read", "logs.read", "network.read", "power.read", "power.reboot", "processes.read", "services.manage", "services.read", "system.read"]
+
+[services]
+protect = ["cntrl-agent.service", "cntrl-privd.service", "cntrl-privd.socket", "ssh.service", "sshd.service"]
+
+[update]
+mode = "notify"
+```
+
+The agent only trusts a file that belongs to root (Administrators or SYSTEM on Windows) and that nobody else can write. If the file is invalid, or someone else can write it, the agent allows Console nothing, not even reading, until it's fixed. `cntrl policy check` says whether the file is valid.
+
+Leave `[update]` as it is. It's for agent updates that Console starts, which aren't built yet.

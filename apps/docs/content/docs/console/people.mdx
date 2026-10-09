@@ -1,0 +1,49 @@
+---
+title: People and plans
+description: Roles in an organization, inviting people, and what each plan includes.
+icon: Users
+---
+
+Devices, checks and alerts belong to an organization. **Organization** has its name, its people, its invitations and its plan.
+
+## Roles
+
+| Role   | Can                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Member | See devices, their stats, services, processes and logs, and change nothing                                                 |
+| Admin  | Act on devices where their policy allows, add and remove them, make checks and alerts, and invite people and change their roles |
+| Owner  | Everything an admin can. Pays for the organization on their plan, and can hand it to someone else                          |
+
+A role never goes past a machine's [permissions](/docs/console/permissions). An admin can restart a service only where the machine allows `services.manage`.
+
+## Invite people
+
+Owners and admins invite people by email, with a role. An invitation lasts a week. The person signs in with the address it went to, and can accept or decline it. If Console couldn't send the email, it says so, and you can copy the link and send it yourself.
+
+Removing someone ends their access to the organization's devices at once. They keep their account, and anyone can invite them back.
+
+## Plans
+
+|                     | Free                   | Pro                 | Team                |
+| ------------------- | ---------------------- | ------------------- | ------------------- |
+| Organizations       | 1                      | 2                   | 5                   |
+| Devices             | 3                      | 25                  | 100                 |
+| People              | Just you               | 3 in each           | 25 in each          |
+| Alert rules         | 1, by email            | As many as you like | As many as you like |
+| Alerts sent a month | 30                     | No limit            | No limit            |
+| Alert history       | 7 days                 | 90 days             | 90 days             |
+| Checks              | 2, every 5 or 15 min   | 20, from every 30 s | 50, from every 30 s |
+| Heartbeats          | No                     | Yes                 | Yes                 |
+| Live readings       | Pause after 30 min idle | Stay live          | Stay live           |
+
+A plan belongs to the owner's account and covers the organizations they own. Devices and checks count together across them. Every tab and action, the charts, and each machine's policy, pause and audit log are the same on every plan.
+
+Prices are in US dollars on [console.cntrl.pw](https://console.cntrl.pw/#pricing). You can upgrade or cancel from Console at any time.
+
+### Past a plan's limits
+
+After a downgrade, an organization can have more than its new plan covers:
+
+- **People**: its owners choose who stays, and the rest are removed.
+- **Devices**: its owners choose which to keep. The rest stay listed but disabled: they can't be opened, and their machines go quiet until an upgrade brings them back.
+- **Checks, rules and channels**: the ones past the plan keep running, and can be deleted, but not changed or paused.

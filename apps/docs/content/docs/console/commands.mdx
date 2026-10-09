@@ -1,0 +1,133 @@
+---
+title: Agent commands
+description: Everything the cntrl command does on the machine, and where the agent keeps its files.
+icon: SquareTerminal
+---
+
+The agent installs one program under two names, `cntrl` and `cntrl-agent`. Commands that change something need root: run them with `sudo` on Linux and macOS, or in PowerShell opened as administrator on Windows, without `sudo`.
+
+A device's **Actions** menu in Console, under **Agent**, lists these commands for that machine's system, ready to copy.
+
+## Status
+
+```bash
+sudo cntrl status          # version, connection, device ID and policy
+sudo cntrl status --json   # the same, as JSON
+```
+
+## Updates
+
+```bash
+sudo cntrl update          # install the release Console offers
+cntrl update --check       # only say whether a newer release is out
+sudo cntrl update --force  # install the release again, even when it's this one
+```
+
+`update` checks the release's signature with the key built into the agent, then the download's size and SHA-256, and refuses anything older than what's installed. The machine stays enrolled. See [Update, move or remove](/docs/console/update-and-remove).
+
+## Pause and resume
+
+```bash
+sudo cntrl pause --reason "Moving racks"   # disconnect from Console until resumed
+sudo cntrl resume                          # reconnect
+```
+
+A paused machine tells Console who paused it and why, then stays away, even across restarts. It never alerts. See [Pausing a device](/docs/console/devices#pausing-a-device).
+
+## Policy
+
+```bash
+cntrl policy show                       # what Console may do now
+cntrl policy check                      # exit 0 if the policy file is valid, 1 if not
+sudo cntrl policy allow <permission>…   # allow one or more
+sudo cntrl policy deny <permission>…    # stop allowing one or more
+sudo cntrl policy modify --allow a,b --deny c
+```
+
+Each change rewrites the policy file and reconnects the agent once. See [Permissions](/docs/console/permissions) for every permission.
+
+## History
+
+```bash
+cntrl history show              # days kept, since when, and the space it takes
+sudo cntrl history keep <days>  # 1 to 365; fewer deletes the older days now
+sudo cntrl history clear        # delete it all; add --yes to skip the question
+```
+
+## Audit log
+
+```bash
+sudo cntrl audit verify   # exit 0 if the log's hash chain is intact, 1 if not
+```
+
+Every action Console asks for is written to the audit log before it runs. See [Security](/docs/console/security#the-audit-log).
+
+## Config
+
+```bash
+sudo cntrl config check   # exit 0 if the config file is valid, 78 if not
+```
+
+Every command takes `--config <path>`, or the `CNTRL_CONFIG` variable, to use another config file.
+
+## Enroll
+
+```bash
+sudo cntrl enroll < token.txt
+sudo cntrl enroll --token-file token.txt
+sudo cntrl enroll --token-file token.txt --move
+```
+
+Joins the machine to an organization with a single-use token. Add device's command does this for you, so you rarely need it. On a machine that's in another organization already, it asks first; `--move` moves it without asking.
+
+## Uninstall
+
+```bash
+sudo cntrl uninstall           # remove the agent; keep its identity, config, policy, audit log and logs
+sudo cntrl uninstall --purge   # remove those too, and the agent's user
+```
+
+See [Uninstall](/docs/console/update-and-remove#uninstall).
+
+## The service
+
+<Tabs items={["Linux", "macOS", "Windows"]}>
+<Tab value="Linux">
+
+```bash
+sudo systemctl restart cntrl-agent   # restart the agent
+sudo journalctl -u cntrl-agent -f    # its log, live
+```
+
+</Tab>
+<Tab value="macOS">
+
+```bash
+sudo launchctl kickstart -k system/pw.cntrl.agent   # restart the agent
+sudo tail -f /var/log/cntrl/agent.log               # its log, live
+```
+
+</Tab>
+<Tab value="Windows">
+
+In PowerShell opened as administrator:
+
+```powershell
+Restart-Service cntrl-agent
+Get-ChildItem "$env:ProgramData\cntrl\logs\agent.*.log" | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 50 -Wait
+```
+
+</Tab>
+</Tabs>
+
+## Where it keeps its files
+
+|                | Linux                     | macOS                                         | Windows                           |
+| -------------- | ------------------------- | --------------------------------------------- | --------------------------------- |
+| Program        | `/usr/local/bin/cntrl-agent` | `/Library/Application Support/cntrl/bin/cntrl-agent` | `C:\Program Files\cntrl\cntrl-agent.exe` |
+| `cntrl` command | `/usr/local/bin/cntrl`    | `/usr/local/bin/cntrl`                        | `C:\Program Files\cntrl\cntrl.exe` |
+| Config         | `/etc/cntrl/agent.toml`   | `/etc/cntrl/agent.toml`                       | `%ProgramData%\cntrl\agent.toml`  |
+| Policy         | `/etc/cntrl/policy.toml`  | `/etc/cntrl/policy.toml`                      | `%ProgramData%\cntrl\policy.toml` |
+| State and history | `/var/lib/cntrl`       | `/Library/Application Support/cntrl/agent`    | `%ProgramData%\cntrl\agent`       |
+| Audit log      | `/var/log/cntrl/audit`    | `/var/log/cntrl/audit`                        | `%ProgramData%\cntrl\audit`       |
+| Logs           | the journal (`journalctl -u cntrl-agent`) | `/var/log/cntrl`                              | `%ProgramData%\cntrl\logs`        |

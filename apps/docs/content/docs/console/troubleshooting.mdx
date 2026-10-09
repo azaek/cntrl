@@ -1,0 +1,48 @@
+---
+title: Troubleshooting
+description: What to do when a machine won't install, won't show up, or won't do what you ask.
+icon: LifeBuoy
+---
+
+## The install command stops
+
+The installer says what went wrong on a line that starts with `cntrl:`.
+
+| It says                                                     | Do this                                                                     |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| This install link has expired, or has already been used     | Open **Add device** again for a new command. A link works once, for 30 minutes. |
+| run it as root, with sudo                                   | Pipe it to `sudo sh`, as Console's command does.                            |
+| this needs systemd                                          | The Linux agent runs as a systemd service, so it needs a distribution with systemd. |
+| this CPU, or this OS, isn't supported yet                  | The agent runs on x86_64 and aarch64, on Linux, macOS and Windows.           |
+| the download doesn't match the release's SHA-256            | Something changed the download on the way. Run the command again, from a new link if it has expired. |
+| /usr/local/bin/cntrl is something else; move it first       | Another program is called `cntrl`. Rename or remove it, then run the command again. |
+| the agent didn't start; see its log                         | Read its log: `sudo journalctl -u cntrl-agent` on Linux, `/var/log/cntrl/agent.log` on a Mac. |
+
+On Windows, the agent isn't signed yet. If Smart App Control is on, turn it off in Windows Security, under **App & browser control**, and leave it off until the agent is signed. If Microsoft Defender removes `cntrl-agent.exe`, allow it from **Protection history**, then run the command again.
+
+## The machine doesn't show up, or shows offline
+
+Start on the machine:
+
+```bash
+sudo cntrl status
+```
+
+It shows the agent's version, its connection to Console, its device ID and its policy. If it doesn't answer, the agent isn't running.
+
+- **It can't reach Console.** The machine needs outbound HTTPS, port 443, to `gw.cntrl.pw`, and to `github.com`, where the agent's releases download from. Nothing needs to reach the machine.
+- **It's paused.** Someone ran `cntrl pause`. Console shows who and why. Run `sudo cntrl resume`.
+- **It was removed from Console.** The agent stops until the machine is added again. Run a new command from **Add device** on it.
+- **The agent isn't running.** Restart it: `sudo systemctl restart cntrl-agent` on Linux, `sudo launchctl kickstart -k system/pw.cntrl.agent` on a Mac, `Restart-Service cntrl-agent` as administrator on Windows. Then read its log, as above.
+
+## An action is refused or missing
+
+- **The machine doesn't allow it.** Its policy decides what Console may do, and a new machine only reports. See what it allows with `cntrl policy show`, or on the device's **Policy** tab, and allow more with `sudo cntrl policy allow`. See [Permissions](/docs/console/permissions).
+- **The service is protected.** SSH and the agent's own services can't be stopped or restarted through Console, whatever the policy allows.
+- **The policy file is broken.** If `/etc/cntrl/policy.toml` is invalid, or someone other than root can write it, the agent allows Console nothing. `cntrl policy check` says what's wrong.
+- **Your role doesn't allow it.** Members can look, but only owners and admins can act. See [Roles](/docs/console/people#roles).
+- **The machine doesn't support it.** Power actions show only where the machine has them; many servers can't sleep or hibernate, for example.
+
+## Still stuck
+
+Email [support@cntrl.pw](mailto:support@cntrl.pw) with what `sudo cntrl status` says, and the last lines of the agent's log.

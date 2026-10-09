@@ -1,0 +1,72 @@
+---
+title: Introduction
+description: Reach your servers and devices from anywhere, with no VPN and no open ports.
+icon: Album
+---
+
+<img
+  src="/console-banner-dark.svg"
+  alt="Cntrl Console"
+  className="hidden dark:block"
+/>
+<img
+  src="/console-banner-light.svg"
+  alt="Cntrl Console"
+  className="mt-0 block dark:hidden"
+/>
+
+Cntrl Console is a web app for the machines you run: servers, VPSes, a Raspberry Pi, the Mac mini in the closet. Each machine runs the cntrl agent, which is open source, and Console shows them all, live, at [console.cntrl.pw](https://console.cntrl.pw).
+
+## How it works
+
+The agent opens one encrypted connection out to Console, the way a browser opens a website. Nothing on the machine listens on a network port, so there's no port to forward and no VPN to run, behind NAT or not.
+
+The machine decides what Console may do. A new machine only reports: its readings, processes, services, containers, network and logs. To let Console restart a service or power the machine off, you allow it on the machine itself. See [Permissions](/docs/console/permissions).
+
+## What you can do
+
+- Watch CPU, memory, disks, network and GPUs live, with charts that go back as far as the machine keeps them, up to a year.
+- Look at its processes, services, containers, disks, listening ports and logs as they're written.
+- Restart a service or container, stop a process, or restart or shut down the machine, where its permissions allow.
+- Get alerts by email, Discord, Slack, ntfy or webhook when a machine goes offline, a reading stays over a line, or a service stops.
+- Check websites, ports and cron jobs, from cntrl's network or from one of your machines.
+- Invite people to your organization, as admins or members.
+
+## Runs on
+
+- Linux with systemd, on x86_64 or aarch64
+- macOS, on Apple silicon or Intel
+- Windows 10, 11 or Server, on x64 or ARM64, in beta
+
+## Plans
+
+Free covers 3 devices and 2 checks for one person, with alerts by email. Pro and Team add devices, people, every alert channel and checks every 30 seconds. See [People and plans](/docs/console/people#plans) for the details, and [console.cntrl.pw](https://console.cntrl.pw/#pricing) for prices.
+
+## Next steps
+
+<Cards>
+  <Card
+    title="Add a device"
+    href="/docs/console/add-a-device"
+    description="One command on the machine, and it shows up in Console."
+    icon={<Icon name="Plus" />}
+  />
+  <Card
+    title="Permissions"
+    href="/docs/console/permissions"
+    description="What Console may do on each machine, and how to change it."
+    icon={<Icon name="ShieldCheck" />}
+  />
+  <Card
+    title="Agent commands"
+    href="/docs/console/commands"
+    description="Everything the cntrl command does on the machine."
+    icon={<Icon name="SquareTerminal" />}
+  />
+  <Card
+    title="Security"
+    href="/docs/console/security"
+    description="How the connection works, and what Console can never do."
+    icon={<Icon name="Lock" />}
+  />
+</Cards>

@@ -1,0 +1,61 @@
+---
+title: Security
+description: How the agent connects, what Console can and can't do on a machine, and how to check what you install.
+icon: Lock
+---
+
+The agent is open source, under the MIT licence, so everything that protects a machine is in code you can read: [github.com/azaek/cntrl](https://github.com/azaek/cntrl). Console, the web app, is the part we run for you.
+
+## The connection
+
+The agent opens one WebSocket out to the gateway, `gw.cntrl.pw`, over TLS. The gateway sends a challenge, and the agent answers with a hello signed by its device key. Nothing on the machine listens on a network port: the `cntrl` command talks to the agent over a local socket, or a named pipe on Windows.
+
+The device key is made on the machine when it joins, and its private half never leaves it. It's readable only by the agent's own user. The install link that brought the machine in works once, and expires after 30 minutes.
+
+## Two parts, split by privilege
+
+The agent runs as two processes:
+
+- **The agent** runs as its own unprivileged user (`cntrl` on Linux, `_cntrl` on macOS, `NT SERVICE\cntrl-agent` on Windows). It holds the connection to Console, but can't change anything on the machine.
+- **privd** runs as root, or LocalSystem on Windows, with no network. It's the only part that reads the policy, acts on the machine and writes the audit log. It only accepts requests from root, the agent's user and itself. On Linux and macOS it starts only when needed, and exits after a minute idle.
+
+## What Console can do
+
+Console can only ask for the operations in one list, [`ops.rs`](https://github.com/azaek/cntrl/blob/main/crates/cntrl-protocol/src/ops.rs), and each needs a [permission](/docs/console/permissions) the machine has allowed. There's no shell in that list, no file access and no way to run a command of Console's choosing.
+
+- A new machine only reports. Anything that changes the machine needs a permission someone allowed on the machine.
+- Only root on the machine changes its policy. Console can't.
+- SSH and the agent's own services can't be stopped or restarted through Console.
+- Console can't pause a machine, or resume one that someone paused.
+
+## The audit log
+
+privd writes every action Console asks for to the audit log before it runs it, and syncs it to disk. Each line carries the SHA-256 of the line before it, so an edited or deleted line breaks the chain. The agent checks the chain whenever it opens the log, and you can check it any time:
+
+```bash
+sudo cntrl audit verify
+```
+
+The log is `/var/log/cntrl/audit` on Linux and macOS, and `%ProgramData%\cntrl\audit` on Windows. It belongs to root.
+
+## Checking what you install
+
+- Every release is built by GitHub Actions from a tagged commit, and attested. Check where an archive came from with:
+
+  ```bash
+  gh attestation verify <archive> --repo azaek/cntrl
+  ```
+
+- Each release has a manifest of its archives' sizes and SHA-256s, signed with cntrl's release key, [`release-key.pub.pem`](https://github.com/azaek/cntrl/blob/main/packaging/release-key.pub.pem). Console only offers a release whose signature checks out.
+- The installer checks the download's SHA-256 before it installs anything.
+- `cntrl update` checks the manifest's signature itself, with the release key built into the agent.
+
+## What Console keeps
+
+Your account, your organization and its people, your devices' details, your checks, rules and channels, and alerts and check results for 90 days. A channel's address is kept encrypted.
+
+Live readings pass through to your browser and aren't stored. The charts' history stays on the machine itself. The [privacy policy](/docs/legal/privacy) has the details.
+
+## Reporting a vulnerability
+
+Email [security@cntrl.pw](mailto:security@cntrl.pw). Please don't open a public issue for it.

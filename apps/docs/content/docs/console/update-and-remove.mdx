@@ -1,0 +1,82 @@
+---
+title: Update, move or remove
+description: Keep the agent current, move a machine to another organization, remove it from Console, or uninstall the agent.
+icon: RefreshCw
+---
+
+## Update the agent
+
+A device's **Actions** menu, under **Agent**, shows its version and says when a newer release is out. To update, run this on the machine:
+
+```bash
+sudo cntrl update
+```
+
+On Windows, run `cntrl update` in PowerShell opened as administrator.
+
+The agent asks Console which release is current, then checks that release's signature with the release key built into the agent, and the download's size and SHA-256. It won't install anything older than itself. The machine keeps its place in Console: same device, name, tags and alerts.
+
+`cntrl update --check` only says whether a newer release is out.
+
+You can also run a new command from **Add device** on the machine. On a machine that's already in your organization, it updates the agent when the release is newer, and otherwise makes sure it's running.
+
+## Move a device to another organization
+
+A machine moves from the machine itself, never from Console. Run the other organization's **Add device** command on it. The installer sees the machine is in another organization and asks on the terminal before moving it.
+
+To move it without the question, for a script:
+
+<Tabs items={["Linux and macOS", "Windows"]}>
+<Tab value="Linux and macOS">
+
+```bash
+curl -fsSL https://gw.cntrl.pw/install/<token> | sudo sh -s -- --move
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:CNTRL_MOVE = 1
+irm https://gw.cntrl.pw/install/<token>.ps1 | iex
+```
+
+</Tab>
+</Tabs>
+
+The machine joins the new organization as a new device, and its device in the old organization is revoked. Nothing from the old organization comes with it.
+
+## Remove a device
+
+Owners and admins can remove a device from its page, under **Actions**, **Remove device**. Console revokes it at once: the machine disconnects and Console refuses it from then on. The agent stays installed on the machine, but stops until the machine is added again.
+
+To add it again, run a new command from **Add device** on the machine. A removed machine joins again without asking.
+
+## Uninstall
+
+Uninstalling tells Console first, then removes the agent's services, its program and the `cntrl` command. Console shows the device as uninstalled until someone removes it there.
+
+<Tabs items={["Linux and macOS", "Windows"]}>
+<Tab value="Linux and macOS">
+
+```bash
+sudo cntrl uninstall
+```
+
+</Tab>
+<Tab value="Windows">
+
+Uninstall **cntrl agent** from **Apps & features**, or in PowerShell opened as administrator:
+
+```powershell
+cntrl uninstall
+```
+
+</Tab>
+</Tabs>
+
+The machine's identity, config, policy, audit log and logs stay behind. To remove them as well, and the agent's user, add `--purge` (on Windows too):
+
+```bash
+sudo cntrl uninstall --purge
+```
