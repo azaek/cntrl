@@ -22,6 +22,8 @@ futures-util = { version = "0.3", features = ["sink"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+# Secrets in log lines, redacted before they leave the device (D102).
+regex = "1"
 # A device check trusts the system's roots besides Mozilla's (D56).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
 ring = "0.17"

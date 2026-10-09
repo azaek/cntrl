@@ -31,6 +31,7 @@ mod paused;
 mod policy;
 mod privd;
 mod processes;
+mod redact;
 mod say;
 mod service;
 mod stats;

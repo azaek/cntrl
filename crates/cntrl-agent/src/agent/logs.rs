@@ -14,6 +14,8 @@ use cntrl_protocol::logs::{LogEntry, LogsBatch, LogsParams};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
+use super::redact::{KeyBlocks, redact_entry};
+
 /// How many `logs` subscriptions a session holds open at once. A new one past
 /// it closes the oldest, whose viewer may have gone without the gateway
 /// noticing yet (D36).
@@ -78,9 +80,12 @@ pub fn start(id: String, params: LogsParams, privd: PathBuf, out: Batches) -> Re
 /// Gathers a reader's lines into batches: one goes out when it's full, the
 /// rest on each [`FLUSH`] tick. A search and the sources asked for are matched
 /// here, as plain text. New lines are counted by source, and past [`RATE`] a
-/// second they're sampled.
+/// second they're sampled. Every line that goes has its secrets redacted
+/// (D102): before a search, so a search can't probe for one; otherwise after
+/// the sources and the sampling, so a flood's dropped lines cost nothing.
 pub struct Batcher {
     batch: LogsBatch,
+    keys: KeyBlocks,
     bytes: usize,
     needle: Option<String>,
     only: Vec<String>,
@@ -93,6 +98,7 @@ impl Batcher {
     pub fn new(params: &LogsParams) -> Self {
         Self {
             batch: LogsBatch::default(),
+            keys: KeyBlocks::default(),
             bytes: 0,
             needle: params
                 .grep
@@ -112,7 +118,13 @@ impl Batcher {
         self.push_at(entry, live, Instant::now())
     }
 
-    fn push_at(&mut self, entry: LogEntry, live: bool, now: Instant) -> Option<LogsBatch> {
+    fn push_at(&mut self, mut entry: LogEntry, live: bool, now: Instant) -> Option<LogsBatch> {
+        // Every line, kept or not, so a dropped line can't leave a key open.
+        self.keys.hide(&mut entry);
+        let searched = self.needle.is_some();
+        if searched {
+            redact_entry(&mut entry);
+        }
         if !self.wanted(&entry) {
             return None;
         }
@@ -125,6 +137,9 @@ impl Batcher {
                 self.batch.skipped += 1;
                 return None;
             }
+        }
+        if !searched {
+            redact_entry(&mut entry);
         }
         self.bytes += entry.message.len() + 128;
         self.batch.entries.push(entry);

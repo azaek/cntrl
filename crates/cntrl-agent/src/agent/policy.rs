@@ -125,12 +125,14 @@ impl PolicyState {
                 .collect()
         };
         // Running checks isn't an operation or a topic: the hub sends them in
-        // a frame, so the hello says the device takes them (D56).
-        let features = if self.allows("checks.run") {
-            vec![cntrl_protocol::checks::FEATURE.to_owned()]
-        } else {
-            Vec::new()
-        };
+        // a frame, so the hello says the device takes them (D56). Its logs
+        // come with their secrets redacted (D102), whatever the policy, which
+        // Console tells apart from agents before it.
+        let mut features = Vec::new();
+        if self.allows("checks.run") {
+            features.push(cntrl_protocol::checks::FEATURE.to_owned());
+        }
+        features.push(cntrl_protocol::logs::REDACTED_FEATURE.to_owned());
         Caps {
             ops: allowed(OPS),
             topics: allowed(TOPICS),
@@ -627,7 +629,7 @@ mod tests {
         assert_eq!(caps.ops.get("system.info"), Some(&1));
         assert!(!caps.ops.contains_key("service.restart"));
         assert_eq!(caps.topics.get("stats"), Some(&1));
-        assert!(caps.features.is_empty());
+        assert_eq!(caps.features, vec!["logs.redacted".to_owned()]);
         assert!(state.summary().error.is_none());
 
         // Checks come in a frame, so the hello names them as a feature (D56).
@@ -637,7 +639,10 @@ mod tests {
             0o644,
         );
         let checks = load(&path, own_uid(&path)).caps();
-        assert_eq!(checks.features, vec!["checks".to_owned()]);
+        assert_eq!(
+            checks.features,
+            vec!["checks".to_owned(), "logs.redacted".to_owned()]
+        );
 
         let denied = PolicyState::Invalid {
             reason: "broken".to_owned(),

@@ -47,6 +47,10 @@ pub struct LogsParams {
     pub hide: Vec<String>,
 }
 
+/// The hello's feature for an agent that redacts secrets in log lines before
+/// they leave the device (D102); agents before it send lines as they are.
+pub const REDACTED_FEATURE: &str = "logs.redacted";
+
 /// Log lines, in the order they were logged. From agent 0.1.18 the first
 /// batch comes once the earlier lines are all read, with none in it when
 /// there weren't any, so a viewer can tell an empty log from one whose lines
