@@ -50,3 +50,12 @@ After a downgrade, an organization can have more than its new plan covers:
 - **People**: the owner chooses who stays, and the rest are removed.
 - **Devices**: the owner chooses which to keep. The rest stay listed but disabled: they can't be opened, show nothing and don't alert, until a plan covers them again.
 - **Checks, rules and channels**: the ones past the plan keep running, and can be deleted, but not changed or paused.
+
+## Delete an organization or your account
+
+Both are at the bottom of **Organization**. Console emails you a code to confirm, and with it the deletion happens at once. It can't be undone.
+
+- **An organization** can be deleted by its owner. Its devices are disconnected, and its checks, alert rules, channels and alert history are deleted. Everyone in it loses access. The agents stay installed until you run `sudo cntrl uninstall` on each machine.
+- **Your account** can be deleted once no organization you own has anyone else in it: transfer each one, or remove everyone else, first. Organizations you own alone are deleted with it, and you leave every organization you're in.
+
+A paid plan ends at once when its organization is deleted, and the rest of the period isn't refunded automatically. Write to [support@cntrl.pw](mailto:support@cntrl.pw) if you'd like it back.
