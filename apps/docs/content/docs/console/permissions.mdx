@@ -106,6 +106,16 @@ A machine can also require that every change is signed by a browser its organiza
 
 From then on, the machine acts on these only when a trusted browser signed them: `services.manage`, `containers.manage`, `processes.signal`, the power actions and `history.manage`. Reading anything needs no signature. A signature is good once, for this machine only, and within 5 minutes of its clock.
 
+### Keeping a browser's key
+
+A browser can clear its key along with Console's site data, and some clear it on their own. Console asks each browser to keep it when the key is made, and says on the Organization page when it might not be kept:
+
+- **Chrome and Edge** decide by themselves, without asking you, and may clear it when the disk runs low. Installing Console as an app makes them keep it.
+- **Firefox** asks whether Console may keep data on this computer. Allow it.
+- **Safari** deletes it if Console isn't opened in 7 days of using Safari. Add Console to the Dock (File › Add to Dock) or the Home Screen (Share › Add to Home Screen), and sign from there. That app keeps its own key, so press **Ask to be trusted** there once.
+
+A lost key means asking to be trusted again. Keep a second signer, so a lost key never means starting over.
+
 To stop requiring signatures, run `sudo cntrl policy allow-unsigned`. If every signer's browser is lost, the owner presses **Start over** in Console. Then run `sudo cntrl policy require-signatures` on each machine again: it shows the signers it trusts now and the new ones, and asks before replacing them.
 
 It needs an agent released after 0.1.19. See [Security](/docs/console/security#signed-commands) for what it protects against, and what it doesn't.
