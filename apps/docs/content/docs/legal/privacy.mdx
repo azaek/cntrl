@@ -4,7 +4,7 @@ description: What cntrl collects, why, who handles it for us, and what you can a
 icon: ShieldCheck
 ---
 
-_Last updated: 9 October 2026._
+_Last updated: 10 October 2026._
 
 This policy covers Cntrl Console (console.cntrl.pw), the cntrl agent you install on your machines, the gateway they connect to (gw.cntrl.pw), and this website (cntrl.pw). Cntrl Bridge, the desktop app, runs on your own network and sends us nothing.
 
@@ -50,6 +50,10 @@ Polar (polar.sh) is the merchant of record for paid plans: it takes the payment,
 
 We send sign-in codes, invitations and alerts through Resend, which handles the recipient's address and the message.
 
+### Checking for bots
+
+When you ask for a sign-in code, or sign in or make an account with a password, Cloudflare Turnstile checks that a person is using the browser. It looks at the browser and the request, not your Console data, and tells Console only whether the check passed.
+
 ### Product analytics, only if you say yes
 
 If you accept analytics, Console sends PostHog which pages you visit (by path only, without page titles or anything after a `?`), your account's ID, your plan and role, and a few steps such as adding a check or opening the plans. It never sends a device's data, names, addresses or log lines, and doesn't pass on your IP address. If you decline, PostHog isn't loaded at all. You can change your choice any time on your own card on the Organization page.
@@ -62,6 +66,7 @@ This website asks separately, since each site keeps its own choice. If you accep
 
 - Cookies Console needs to work: your session, your theme, and how you've laid out your device list and sidebar. They aren't used for tracking, so they don't need consent.
 - Your analytics choice, in the browser's local storage.
+- If your organization uses signed commands, this browser's signing key, in the browser's own database. Its private half can't be read out, not even by Console, which keeps only the public half.
 - Readings history for agents older than 0.1.12, which keep none themselves, in your browser's own database. It's cleared when you sign out.
 
 ### Server logs
@@ -88,7 +93,7 @@ We don't sell your data, use it for advertising, or train AI models on it.
 
 | Service | What it does | Where |
 | --- | --- | --- |
-| Cloudflare | Hosts Console and the gateway; relays live readings | Its global network |
+| Cloudflare | Hosts Console and the gateway; relays live readings; checks sign-in for bots | Its global network |
 | Neon | Console's database | United States (AWS, Ohio) |
 | Resend | Sends email | United States |
 | Polar | Payments, tax and invoices, as merchant of record | United States and Europe |
