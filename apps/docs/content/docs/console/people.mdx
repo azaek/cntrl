@@ -12,7 +12,9 @@ Devices, checks and alerts belong to an organization. **Organization** has its n
 | ------ | -------------------------------------------------------------------------------------------------------------------------- |
 | Member | See devices, their stats, services, processes and logs, and change nothing                                                 |
 | Admin  | Act on devices where their policy allows, add and remove them, make checks and alerts, and invite people and change their roles |
-| Owner  | Everything an admin can. Pays for the organization on their plan, and can hand it to someone else                          |
+| Owner  | Everything an admin can. Manages and pays for the organization's plan, and can hand the organization to someone else      |
+
+An organization has exactly one owner. Ownership moves only when the owner hands it on, confirmed with a code sent to their email.
 
 A role never goes past a machine's [permissions](/docs/console/permissions). An admin can restart a service only where the machine allows `services.manage`.
 
@@ -26,9 +28,8 @@ Removing someone ends their access to the organization's devices at once. They k
 
 |                     | Free                   | Pro                 | Team                |
 | ------------------- | ---------------------- | ------------------- | ------------------- |
-| Organizations       | 1                      | 2                   | 5                   |
 | Devices             | 3                      | 25                  | 100                 |
-| People              | Just you               | 3 in each           | 25 in each          |
+| People              | Just you               | 3                   | 25                  |
 | Alert rules         | 1, by email            | As many as you like | As many as you like |
 | Alerts sent a month | 30                     | No limit            | No limit            |
 | Alert history       | 7 days                 | 90 days             | 90 days             |
@@ -36,7 +37,9 @@ Removing someone ends their access to the organization's devices at once. They k
 | Heartbeats          | No                     | Yes                 | Yes                 |
 | Live readings       | Pause after 30 min idle | Stay live          | Stay live           |
 
-A plan belongs to the owner's account and covers the organizations they own. Devices and checks count together across them. Every tab and action, the charts, and each machine's policy, pause and audit log are the same on every plan.
+Each organization has its own plan, which its owner manages, and the limits above are each organization's own. You can own one Free organization. Another one without a paid plan is paused: its devices are off and no one can use it until it has one.
+
+Every tab and action, the charts, and each machine's policy, pause and audit log are the same on every plan.
 
 Prices are in US dollars on [console.cntrl.pw](https://console.cntrl.pw/#pricing). You can upgrade or cancel from Console at any time.
 
@@ -44,6 +47,6 @@ Prices are in US dollars on [console.cntrl.pw](https://console.cntrl.pw/#pricing
 
 After a downgrade, an organization can have more than its new plan covers:
 
-- **People**: its owners choose who stays, and the rest are removed.
-- **Devices**: its owners choose which to keep. The rest stay listed but disabled: they can't be opened, and their machines go quiet until an upgrade brings them back.
+- **People**: the owner chooses who stays, and the rest are removed.
+- **Devices**: the owner chooses which to keep. The rest stay listed but disabled: they can't be opened, show nothing and don't alert, until a plan covers them again.
 - **Checks, rules and channels**: the ones past the plan keep running, and can be deleted, but not changed or paused.

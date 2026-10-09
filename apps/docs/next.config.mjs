@@ -26,7 +26,7 @@ const config = {
             {
                 source: "/docs/hub/:path*",
                 destination: "/docs/console/:path*",
-                permanent: true,
+                permanent: false,
             },
         ];
     },
