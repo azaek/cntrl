@@ -19,6 +19,7 @@ export function proxy(request: NextRequest): NextResponse | undefined {
 }
 
 export const config = {
-    // Not Next's own files, which never end in a slash.
-    matcher: ["/((?!_next/).*)"],
+    // Pages only: not Next's own files, the API, images, PostHog's /ingest,
+    // or anything with a file extension.
+    matcher: ["/((?!_next/|api/|og/|ingest/|.*\\.[A-Za-z0-9]+$).*)"],
 };
