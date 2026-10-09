@@ -5,6 +5,9 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
     reactStrictMode: true,
+    // PostHog posts to /ingest/e/, which Next would redirect, losing the
+    // event; src/proxy.ts drops other paths' trailing slashes instead.
+    skipTrailingSlashRedirect: true,
     images: {
         remotePatterns: [
             {
