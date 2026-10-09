@@ -77,14 +77,30 @@ To protect more services, add them to `protect` under `[services]` in the policy
 A machine can also require that every change is signed by a browser its organization trusts. Then a breach of Console or its gateway, or a stolen session, can't restart, stop or power off anything, even where the policy allows it.
 
 1. The owner turns it on in Console, under **Organization**, **Signed commands**. Their browser becomes the first signer.
-2. Other owners and admins press **Ask to be trusted** in their own browser. A signer approves each one after checking that the code on both screens matches.
+2. Other owners and admins press **Ask to be trusted** in their own browser. A signer reviews each request in place: Console shows the code that browser worked out from its key, with its picture, and asks whether their screen shows the same. **They match** approves it.
 3. On each machine that should require it:
 
    ```bash
    sudo cntrl policy require-signatures
    ```
 
-   It lists the signers' names and fingerprints. Check each with its signer: their own browser shows its code under **Signed commands** as "This browser's code". Then confirm.
+   It lists each signer's name and fingerprint, with a picture of the fingerprint under it:
+
+   ```text
+   These keys may sign commands for this machine, for org_01m4gz6xpcx3m2erbk9tx4t3gm:
+     Olu Owner, Chrome on Mac  37d9 60d7 fb62 93c2
+       +-----------+
+       |          .|
+       |       o ..|
+       |      . = .|
+       |     S + o |
+       |     .. ...|
+       |      E = .|
+       |       o o |
+       +-----------+
+   ```
+
+   Check each with its signer: their own browser shows the same code and picture under **Signed commands** as "This browser's code". The digits are what to check; the picture makes a changed key easy to notice. Then confirm.
 
    Compare with each signer's own browser, not with Console's list of signers: that list comes from Console's servers, which are what signing protects against.
 

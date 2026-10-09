@@ -7,8 +7,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use cntrl_protocol::signers::{
-    CommandSignature, SignerEntry, canonical_json, command_signing_string, data_hash, entry_hash,
-    entry_signing_string, fingerprint, key_id, name_is_clean,
+    CommandSignature, PICTURE_HEIGHT, PICTURE_WIDTH, SignerEntry, canonical_json,
+    command_signing_string, data_hash, entry_hash, entry_signing_string, fingerprint, key_id,
+    name_is_clean, picture,
 };
 use serde_json::Value;
 
@@ -78,4 +79,29 @@ fn names_with_control_characters_are_refused() {
     assert!(!name_is_clean("Ana\u{1b}[2K"));
     assert!(!name_is_clean("   "));
     assert!(!name_is_clean(&"x".repeat(81)));
+}
+
+/// Console draws the same picture of a fingerprint (D108), on the same board.
+#[test]
+fn pictures_match_consoles() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/protocol/v1/signers/pictures.json");
+    let fixture: Value =
+        serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("parse");
+    assert_eq!(fixture["board"]["width"], PICTURE_WIDTH);
+    assert_eq!(fixture["board"]["height"], PICTURE_HEIGHT);
+    for each in fixture["pictures"].as_array().expect("pictures") {
+        let rows: Vec<String> = each["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row.as_str().expect("row").to_owned())
+            .collect();
+        assert_eq!(
+            picture(each["fingerprint"].as_str().expect("fingerprint")),
+            Some(rows)
+        );
+    }
+    assert_eq!(picture("4b3b 5a12 d603"), None);
+    assert_eq!(picture("zzzz 5a12 d603 5ff9"), None);
 }

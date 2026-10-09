@@ -1,0 +1,81 @@
+{
+  "note": "A fingerprint's picture on the 11 by 7 board (D108): OpenSSH's randomart over the fingerprint's 8 bytes. Console (codeWalk) and the agent (signers::picture) must both draw these rows.",
+  "board": {
+    "width": 11,
+    "height": 7
+  },
+  "pictures": [
+    {
+      "fingerprint": "4b3b 5a12 d603 5ff9",
+      "rows": [
+        "   .   ..  ",
+        "    + ..   ",
+        "   o +  .  ",
+        "  . .S.  E ",
+        "   ...o    ",
+        "    o+     ",
+        "   .. .    "
+      ]
+    },
+    {
+      "fingerprint": "123b d30b 552c 64c4",
+      "rows": [
+        "    ++o.   ",
+        "   ..E .   ",
+        "    = .    ",
+        "   * S     ",
+        "    = .    ",
+        "     .     ",
+        "           "
+      ]
+    },
+    {
+      "fingerprint": "0000 0000 0000 0000",
+      "rows": [
+        "E..        ",
+        "   .       ",
+        "    .      ",
+        "     S     ",
+        "           ",
+        "           ",
+        "           "
+      ]
+    },
+    {
+      "fingerprint": "ffff ffff ffff ffff",
+      "rows": [
+        "           ",
+        "           ",
+        "           ",
+        "     S     ",
+        "      .    ",
+        "       .   ",
+        "        ..E"
+      ]
+    },
+    {
+      "fingerprint": "96d5 debf 8d07 09b2",
+      "rows": [
+        "        .  ",
+        "    . .. . ",
+        "     oo....",
+        "    ES  o..",
+        "    .    ..",
+        "         .+",
+        "        .oo"
+      ]
+    },
+    {
+      "fingerprint": "0f11 58c0 6832 b233",
+      "rows": [
+        "  o.+o.    ",
+        "+o o .     ",
+        "+o    .    ",
+        "E    S     ",
+        " o    o    ",
+        "       .   ",
+        "           "
+      ]
+    }
+  ]
+}

@@ -687,7 +687,8 @@ fn print_pin(pin: &Pin) {
     }
 }
 
-/// Each signer's name and fingerprint, to compare with Console's.
+/// Each signer's name and fingerprint, and its picture under it, to compare
+/// with what that signer's own browser shows as "This browser's code".
 fn print_signers(trust: &Trust) {
     let width = trust
         .signers
@@ -695,8 +696,16 @@ fn print_signers(trust: &Trust) {
         .map(|signer| signer.name.chars().count())
         .max()
         .unwrap_or(0);
+    let edge = "-".repeat(cntrl_protocol::signers::PICTURE_WIDTH);
     for signer in trust.signers.values() {
         say!("  {:width$}  {}", signer.name, signer.fingerprint);
+        if let Some(rows) = cntrl_protocol::signers::picture(&signer.fingerprint) {
+            say!("    +{edge}+");
+            for row in rows {
+                say!("    |{row}|");
+            }
+            say!("    +{edge}+");
+        }
     }
 }
 

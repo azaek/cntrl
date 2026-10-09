@@ -169,6 +169,65 @@ pub fn fingerprint(public: &str) -> Option<String> {
     ))
 }
 
+/// The board a fingerprint's picture walks on: 11 squares by 7, as Console
+/// draws it (D108). Console's `codeWalk` and this must agree square for square;
+/// `testdata/protocol/v1/signers/pictures.json` holds both to it.
+pub const PICTURE_WIDTH: usize = 11;
+/// See [`PICTURE_WIDTH`].
+pub const PICTURE_HEIGHT: usize = 7;
+
+/// OpenSSH's characters for how often the walk landed on a square, then the
+/// start and the end.
+const ART: &[u8] = b" .o+=*BOX@%&#/^SE";
+
+/// A fingerprint's picture, for noticing a changed key at a glance beside its
+/// digits: OpenSSH's randomart (the drunken bishop) over the fingerprint's 8
+/// bytes, first byte first. From the board's middle, each byte's four bit
+/// pairs, lowest pair first, move one square diagonally (the pair's low bit
+/// right or left, its high bit down or up), held at the edges. Each square
+/// shows how often the walk landed on it, up to 14, then `S` and `E` where it
+/// started and ended. One string a row, unframed. `None` when `fingerprint`
+/// isn't 16 hex digits.
+pub fn picture(fingerprint: &str) -> Option<Vec<String>> {
+    let hex: String = fingerprint.chars().filter(|c| *c != ' ').collect();
+    if hex.len() != 16 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes = (0..8)
+        .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16))
+        .collect::<Result<Vec<u8>, _>>()
+        .ok()?;
+    let mut field = [[0usize; PICTURE_WIDTH]; PICTURE_HEIGHT];
+    let (mut x, mut y) = (PICTURE_WIDTH / 2, PICTURE_HEIGHT / 2);
+    let start = (x, y);
+    for mut byte in bytes {
+        for _ in 0..4 {
+            x = if byte & 1 == 1 {
+                (x + 1).min(PICTURE_WIDTH - 1)
+            } else {
+                x.saturating_sub(1)
+            };
+            y = if byte & 2 == 2 {
+                (y + 1).min(PICTURE_HEIGHT - 1)
+            } else {
+                y.saturating_sub(1)
+            };
+            if field[y][x] < ART.len() - 3 {
+                field[y][x] += 1;
+            }
+            byte >>= 2;
+        }
+    }
+    field[start.1][start.0] = ART.len() - 2;
+    field[y][x] = ART.len() - 1;
+    Some(
+        field
+            .iter()
+            .map(|row| row.iter().map(|&count| char::from(ART[count])).collect())
+            .collect(),
+    )
+}
+
 /// The string a signer's key signs for an entry.
 pub fn entry_signing_string(entry: &SignerEntry) -> String {
     let (kind, key_id, public, name) = match &entry.change {
