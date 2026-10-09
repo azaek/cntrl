@@ -1,3 +1,10 @@
+<a href="https://console.cntrl.pw">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/docs/public/console-banner-dark.svg">
+    <img src="apps/docs/public/console-banner-light.svg" width="720" alt="Cntrl Console: manage your servers and devices from anywhere. No VPN, no open ports. Explore Console.">
+  </picture>
+</a>
+
 ![Cover](https://github.com/azaek/cntrl/blob/main/github.png)
 
 ![License](https://img.shields.io/github/license/azaek/cntrl)
