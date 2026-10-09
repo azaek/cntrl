@@ -1,0 +1,115 @@
+---
+title: Signed commands
+description: Have machines act on a change only when a browser your organization trusts signed it.
+icon: LockKeyhole
+---
+
+With signed commands, a machine acts on a change only when a browser your organization trusts signed it. A breach of Console's servers, its database or its gateway, or a stolen session, then can't restart, stop or power off anything, even where the machine's [policy](/docs/console/permissions) allows it.
+
+It takes three steps. The owner turns it on, other owners and admins have their browsers trusted, and each machine is told to require it. It needs agent 0.1.20 or later.
+
+## Turn it on
+
+The owner opens **Organization** and presses **Turn on** under **Signed commands**. Their browser makes a signing key and becomes the first signer.
+
+The key never leaves that browser. Console only ever gets its public half, so it can't sign anything itself.
+
+Each browser has its own code, shown large on the Organization page with a small picture beside it. The code is 64 bits of the key's hash, worked out in the browser from the key, never sent by Console. The picture is drawn from the same 64 bits, so a changed key stands out at a glance.
+
+## Trust more browsers
+
+Each owner or admin who acts on machines needs a trusted browser, and so does each extra browser they use:
+
+1. In that browser, press **Ask to be trusted** under **Organization**, **Signed commands**. The browser makes its own key and shows its code.
+2. A signer presses **Review** on the request. Console shows the code that browser worked out, and asks: "Does their screen show this?"
+3. The signer asks the person to read out their code, by phone or in person, and compares it, digits and picture.
+4. **They match** trusts the browser. **They don't match** declines it: the request may not have come from their browser, so ask them to ask again, and compare once more.
+
+Trust a second browser even if you work alone: a lost key then means asking again, not starting over.
+
+## Require it on a machine
+
+Turning it on doesn't change any machine yet. On each machine that should require signatures, run:
+
+```bash
+sudo cntrl policy require-signatures
+```
+
+On Windows, run `cntrl policy require-signatures` in PowerShell opened as administrator.
+
+It lists each signer's name and code, with the picture under it, and asks before trusting them:
+
+```text
+These keys may sign commands for this machine, for org_01m4gz6xpcx3m2erbk9tx4t3gm:
+  Olu Owner, Chrome on Mac  37d9 60d7 fb62 93c2
+    +-----------+
+    |          .|
+    |       o ..|
+    |      . = .|
+    |     S + o |
+    |     .. ...|
+    |      E = .|
+    |       o o |
+    +-----------+
+Check each with its signer: their own browser shows its code under Organization, Signed commands, as "This browser's code".
+Act on commands that change this machine only when one of them signed it? [y/N]
+```
+
+Check each line with its signer: their own browser shows the same code and picture as **This browser's code**. The digits are what to check. Compare with each signer's own browser, not with Console's list of signers: that list comes from Console's servers, which are what signing protects against.
+
+`--yes` skips the question, for scripts. The device's **Policy** tab then says **Signed commands: required**.
+
+A machine that requires signatures takes later changes to the signers on its own, as soon as it hears of them: a browser trusted or removed in Console is trusted or refused there within seconds.
+
+## What's signed
+
+Every change to a machine is signed: starting, stopping and restarting services and containers, stopping processes, quitting apps, the power actions, and changing or clearing its history. Reading anything needs no signature.
+
+In Console, an action this browser signs ends with a lock. Hover it to see whether this browser signs it, or can't yet.
+
+A signature covers one request, for one machine, in one organization. The machine refuses it if it's more than 5 minutes from its own clock, or if it was used before.
+
+## When a machine refuses
+
+The refusal shows the machine's own words, and what to do:
+
+| What Console says                                | What to do                                                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| This browser can't sign yet                      | Press **Ask to be trusted**, and have a signer review it.                                                                                  |
+| Asked to be trusted                              | Wait for a signer: read them the code it shows.                                                                                            |
+| The machine doesn't know this browser's key yet  | It hears of new signers when it connects. If the owner started over, run `require-signatures` on it.                                       |
+| The machine's clock is off                       | Set the clock on the machine, or on this computer, then try again.                                                                          |
+| The machine refused the signature                | Try again. If it's refused twice, tell a signer: something changed the command on its way.                                                 |
+| The machine can't read whom it trusts            | It refuses every change until it does. Run `require-signatures` on it.                                                                     |
+
+## Keep a browser's key
+
+A browser can clear its key along with Console's site data, and some clear it on their own. Console asks each browser to keep it when the key is made, and says on the Organization page when it might not be kept:
+
+- **Chrome and Edge** decide by themselves, without asking you, and may clear it when the disk runs low. Installing Console as an app makes them keep it.
+- **Firefox** asks whether Console may keep data on this computer. Allow it.
+- **Safari** deletes it if Console isn't opened in 7 days of using Safari. Add Console to the Dock (**File › Add to Dock**) or the Home Screen (**Share › Add to Home Screen**), and sign from there. That app keeps its own key, so press **Ask to be trusted** there once.
+
+A lost key means asking to be trusted again from that browser, and removing its old key.
+
+## Remove a signer
+
+A signer can remove another signer's key with **Remove** beside it. Machines stop trusting it as soon as they hear of it. Someone who leaves the organization stays a signer until a signer removes their key, and Console marks it **Not in the organization**. The last signer can't be removed.
+
+## Start over
+
+If every signer's browser is lost, the owner opens **Organization** in a new browser and presses **Lost every signer's browser? Start over with this one**. That browser becomes the only signer.
+
+Machines keep trusting the old signers until someone runs `require-signatures` on each. It shows the signers it trusts now and the new ones, and asks before replacing them.
+
+## Stop requiring it
+
+On a machine, run:
+
+```bash
+sudo cntrl policy allow-unsigned
+```
+
+The machine forgets its signers and acts on changes its policy allows, signed or not. Run `require-signatures` to require them again.
+
+See [Security](/docs/console/security#signed-commands) for how it works and what it doesn't cover.

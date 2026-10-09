@@ -31,6 +31,7 @@ The machine decides what Console may do. A new machine only reports: its reading
 - Get alerts by email, Discord, Slack, ntfy or webhook when a machine goes offline, a reading stays over a line, or a service stops.
 - Check websites, ports and cron jobs, from cntrl's network or from one of your machines.
 - Invite people to your organization, as admins or members.
+- Require that every change to a machine is signed by a browser you trust, so not even a breach of Console can act on it.
 
 ## Runs on
 
@@ -62,6 +63,12 @@ Free covers 3 devices and 2 checks for one person, with alerts by email. Pro and
     href="/docs/console/commands"
     description="Everything the cntrl command does on the machine."
     icon={<Icon name="SquareTerminal" />}
+  />
+  <Card
+    title="Signed commands"
+    href="/docs/console/signed-commands"
+    description="Machines act only on changes a browser you trust signed."
+    icon={<Icon name="LockKeyhole" />}
   />
   <Card
     title="Security"

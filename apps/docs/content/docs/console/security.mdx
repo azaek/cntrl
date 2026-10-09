@@ -30,7 +30,7 @@ Console can only ask for the operations in one list, [`ops.rs`](https://github.c
 
 ## Signed commands
 
-An organization can turn on signed commands, and each machine can require them (see [Permissions](/docs/console/permissions#signed-commands)). Then a change runs only when a browser the organization trusts signed it, so a breach of Console's servers, its database or its gateway, or a stolen session cookie, can't restart, stop or power off a machine.
+An organization can turn on signed commands, and each machine can require them (see [Signed commands](/docs/console/signed-commands)). Then a change runs only when a browser the organization trusts signed it, so a breach of Console's servers, its database or its gateway, or a stolen session cookie, can't restart, stop or power off a machine.
 
 - **The keys.** Each browser makes its own P-256 key and keeps it in its own storage. The private half can be used to sign, but not read out, not even by Console's code.
 - **Whom a machine trusts.** The organization's signers are an append-only log, like [Tailscale's Tailnet Lock](https://tailscale.com/kb/1226/tailnet-lock). The first entry adds the owner's key. Each later entry adds or removes a key, names the hash of the entry before it, and is signed by a key already trusted. Console stores the log and the gateway relays it, but every machine checks each entry itself, so neither can add a key or bring a removed one back. A machine trusts the log it was shown when someone at it ran `require-signatures`, after checking each fingerprint with the code that signer's own browser shows for its key.

@@ -13,6 +13,7 @@
         "alerts",
         "checks",
         "people",
+        "signed-commands",
         "---The agent---",
         "commands",
         "update-and-remove",
