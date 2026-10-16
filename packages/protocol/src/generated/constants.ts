@@ -158,3 +158,6 @@ export const FOLLOWUP_LAUNCHERS: readonly string[] = [
     "kwin_wayland",
     "kwin_x11",
 ];
+
+/** The hello feature of an agent whose policy lets a follow-up keep the machine awake (power.inhibit). */
+export const FOLLOWUP_KEEP_AWAKE_FEATURE = "followups.keep_awake";

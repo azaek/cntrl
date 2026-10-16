@@ -132,6 +132,11 @@ impl PolicyState {
         if self.allows("checks.run") {
             features.push(cntrl_protocol::checks::FEATURE.to_owned());
         }
+        // Keeping the machine awake for a follow-up isn't an operation either
+        // (D121), so Console learns from here whether it may offer it.
+        if self.allows("power.inhibit") {
+            features.push(cntrl_protocol::followup::KEEP_AWAKE_FEATURE.to_owned());
+        }
         features.push(cntrl_protocol::logs::REDACTED_FEATURE.to_owned());
         // It checks signed commands (D108), so Console signs for it, and the
         // gateway sends it the signer log to pin.
@@ -655,6 +660,16 @@ mod tests {
                 "signed_commands".to_owned()
             ]
         );
+
+        // So is keeping the machine awake for a follow-up (D121).
+        let path = write_policy(
+            dir.path(),
+            "version = 1\nallow = [\"processes.read\", \"power.inhibit\"]\n",
+            0o644,
+        );
+        let awake = load(&path, own_uid(&path)).caps();
+        assert!(awake.features.contains(&"followups.keep_awake".to_owned()));
+        assert_eq!(awake.ops.get("followup.start"), Some(&1));
 
         let denied = PolicyState::Invalid {
             reason: "broken".to_owned(),

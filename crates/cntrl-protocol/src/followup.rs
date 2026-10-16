@@ -34,6 +34,9 @@ pub const MAX_FOLLOWUPS: usize = 10;
 pub const REACH_TRIES: u32 = 3;
 /// The longest a follow-up's ID may be.
 pub const ID_MAX: usize = 64;
+/// In the hello's features when the machine's policy lets a follow-up keep
+/// it awake (`power.inhibit`), which no operation or topic shows.
+pub const KEEP_AWAKE_FEATURE: &str = "followups.keep_awake";
 
 /// `followup.start`: what to watch, when it's done, what then.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

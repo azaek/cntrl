@@ -232,6 +232,10 @@ pub fn constants() -> String {
             "export const FOLLOWUP_LAUNCHERS: readonly string[] = {};\n",
             string_array(followup::LAUNCHERS)
         ));
+        out.push_str(&format!(
+            "\n/** The hello feature of an agent whose policy lets a follow-up keep the machine awake (power.inhibit). */\nexport const FOLLOWUP_KEEP_AWAKE_FEATURE = \"{}\";\n",
+            followup::KEEP_AWAKE_FEATURE
+        ));
     }
     out
 }
