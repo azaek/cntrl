@@ -1188,6 +1188,19 @@ fn woke(kept: &mut Kept, now: u64) -> Vec<Effect> {
     }
 }
 
+/// At the agent's start: a countdown that ran out while the agent was down,
+/// for an update or because the machine slept before it started again, is
+/// one nobody could stop, so it's taken as slept through.
+fn missed(kept: &mut Kept, now: u64) -> Vec<Effect> {
+    match kept.phase {
+        Phase::Stepping {
+            pending: Pending::CountingDown { until, .. },
+            ..
+        } if now >= until => woke(kept, now),
+        _ => Vec::new(),
+    }
+}
+
 /// A step ran: its outcome on the record, then on to the next.
 fn finish_step(
     kept: &mut Kept,
@@ -1267,6 +1280,25 @@ pub async fn run(
     token: CancellationToken,
 ) -> Result<(), String> {
     end_other_boots(&followups).await;
+    let effects = {
+        let mut saved = followups.saved.lock().await;
+        let now = now_ms();
+        let effects: Vec<(String, Effect)> = saved
+            .followups
+            .iter_mut()
+            .flat_map(|kept| {
+                let id = kept.plan.id.clone();
+                missed(kept, now)
+                    .into_iter()
+                    .map(move |effect| (id.clone(), effect))
+            })
+            .collect();
+        if !effects.is_empty() {
+            save(&followups.path, &saved).await;
+        }
+        effects
+    };
+    carry_out(&followups, effects, uplink.heard_ms()).await;
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + TICK, TICK);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut ticks: u32 = 0;
@@ -2491,6 +2523,24 @@ mod tests {
             }]
         );
         assert_eq!(kept.phase, Phase::Over);
+    }
+
+    #[test]
+    fn a_countdown_that_ran_out_while_the_agent_was_down_waits_too() {
+        let mut kept = kept(vec![step(StepAction::Stop, false)], quiet(5));
+        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        // Back before its end: it carries on.
+        assert!(missed(&mut kept, 30_000).is_empty());
+        assert!(matches!(
+            stage_of(&kept, &[]),
+            Stage::CountingDown { until: 60_000, .. }
+        ));
+        // Back after it: nobody could have stopped it, so it waits for Console.
+        assert_eq!(
+            records(&missed(&mut kept, 90_000)),
+            vec![Event::Slept { step: 0 }]
+        );
+        assert!(advance(&mut kept, 95_000, ALONE).is_empty());
     }
 
     #[test]
