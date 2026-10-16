@@ -25,6 +25,7 @@ pub mod system;
 #[cfg(target_os = "linux")]
 pub mod systemd;
 pub mod usage;
+pub mod wake;
 #[cfg(windows)]
 pub mod windows;
 

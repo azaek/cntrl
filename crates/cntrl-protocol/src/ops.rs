@@ -109,6 +109,15 @@ define_ops! {
         capability: "power.hibernate",
         since: 1,
     },
+    /// Wakes another machine on a network this one is on (D123): a
+    /// Wake-on-LAN magic packet, and only that, to the broadcast address of
+    /// this machine's own networks that hold the other's address.
+    PowerWake = "power.wake" {
+        params: crate::power::Wake,
+        result: crate::power::WakeSent,
+        capability: "power.wake",
+        since: 1,
+    },
     /// The ports the machine listens on, each with the process and service
     /// behind it where privd can find them (angle 13).
     NetworkListeners = "network.listeners" {

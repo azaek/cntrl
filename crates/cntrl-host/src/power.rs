@@ -137,6 +137,7 @@ pub(crate) fn linux_wake_on_lan(sys: &Path) -> Option<WakeOnLan> {
             Some("disabled") => Some(false),
             _ => None,
         },
+        reach: Vec::new(),
     })
 }
 
@@ -326,6 +327,7 @@ mod linux {
                 .then_some(DiskUnlock::EncryptedRoot),
             restarts_after_power_loss: None,
             wake_on_lan: linux_wake_on_lan(Path::new("/sys")),
+            lan: Vec::new(),
         })
     }
 
@@ -497,7 +499,9 @@ mod macos {
                         interface,
                         mac,
                         enabled: if can_womp { womp } else { Some(false) },
+                        reach: Vec::new(),
                     }),
+                lan: Vec::new(),
             }
         })
         .await
@@ -651,7 +655,8 @@ mod tests {
             Some(WakeOnLan {
                 interface: "eno1".to_owned(),
                 mac: "a8:a1:59:12:34:56".to_owned(),
-                enabled: Some(true)
+                enabled: Some(true),
+                reach: Vec::new(),
             })
         );
         // Root on LVM (dm-1) on LUKS (dm-0).

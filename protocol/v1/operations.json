@@ -171,6 +171,18 @@
       }
     },
     {
+      "name": "power.wake",
+      "capability": "power.wake",
+      "since": 1,
+      "signed": true,
+      "params": {
+        "$ref": "#/$defs/Wake"
+      },
+      "result": {
+        "$ref": "#/$defs/WakeSent"
+      }
+    },
+    {
       "name": "network.listeners",
       "capability": "network.read",
       "since": 1,

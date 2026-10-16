@@ -46,6 +46,7 @@ pub const SIGNED_CAPABILITIES: &[&str] = &[
     "power.suspend",
     "power.hibernate",
     "history.manage",
+    "power.wake",
 ];
 
 /// Whether an operation needing `capability` must be signed.

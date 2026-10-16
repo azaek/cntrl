@@ -50,7 +50,9 @@ pub async fn info() -> Result<PowerInfo, HostError> {
         inhibitors: Vec::new(),
         unlock_after_restart: None,
         restarts_after_power_loss: None,
+        // The network reading names the wired adapter (cntrl-host's `wake::describe`).
         wake_on_lan: None,
+        lan: Vec::new(),
     })
     .await
     .map_err(|e| HostError::Failed(e.to_string()))

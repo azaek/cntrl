@@ -2099,6 +2099,13 @@
             }
           ],
           "description": "The wired interface a magic packet would wake, where there is one."
+        },
+        "lan": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "The machine's IPv4 addresses on its local networks, from interfaces\nthat are up, leaving out loopback, tunnels and containers' links: the\nnetworks it can send a magic packet on, to wake another machine (D123).\nAgents before 0.1.21 leave it out."
         }
       },
       "required": [
@@ -2201,6 +2208,13 @@
             "null"
           ],
           "description": "Whether it's set to wake the machine; absent where the agent can't\ntell."
+        },
+        "reach": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "Where a magic packet reaches the machine (D123): this interface's IPv4\naddresses, or where it has none, as when it's a bridge's port, those\nof the interface the default route leaves by. Agents before 0.1.21\nleave it out."
         }
       },
       "required": [
@@ -2208,6 +2222,32 @@
         "mac"
       ],
       "description": "Wake-on-LAN on a wired interface."
+    },
+    "LanAddress": {
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": "string",
+          "description": "Such as `eno1`, `vmbr0` or `en0`."
+        },
+        "address": {
+          "type": "string",
+          "description": "Such as `192.168.1.20`."
+        },
+        "prefix": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The prefix length: 24 for a /24."
+        }
+      },
+      "required": [
+        "interface",
+        "address",
+        "prefix"
+      ],
+      "description": "An IPv4 address on a local network."
     },
     "PowerStarted": {
       "type": "object",
@@ -2220,6 +2260,41 @@
         "action"
       ],
       "description": "What a power action returns: that it has started."
+    },
+    "Wake": {
+      "type": "object",
+      "properties": {
+        "mac": {
+          "type": "string",
+          "description": "The machine to wake, by its wired interface's hardware address, such\nas `d0:11:e5:73:0e:f0`."
+        },
+        "reach": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "Where it was last reached, from its own `power.info`: the packet goes\nout only on this machine's networks that hold one of these addresses.\nWith none, on all of them."
+        }
+      },
+      "required": [
+        "mac"
+      ],
+      "description": "`power.wake`: wakes another machine with a Wake-on-LAN magic packet, sent\nfrom this one to the broadcast address of a network both are on (D123)."
+    },
+    "WakeSent": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          }
+        }
+      },
+      "required": [
+        "sent"
+      ],
+      "description": "What `power.wake` returns: this machine's addresses the packet went out\nfrom. It's sent, not received: nothing answers a magic packet."
     },
     "Listeners": {
       "type": "object",

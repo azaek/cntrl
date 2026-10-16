@@ -25,7 +25,7 @@ use cntrl_protocol::frame::{
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
 use cntrl_protocol::network::{Listeners, NetworkParams, NetworkSample};
 use cntrl_protocol::ops::{self, Topic};
-use cntrl_protocol::power::{PowerAction, PowerInfo};
+use cntrl_protocol::power::{PowerAction, PowerInfo, Wake, WakeSent};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
 use cntrl_protocol::signers::{SignatureState, SignerLog};
@@ -1592,6 +1592,14 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
         }
+        // A magic packet needs no root, so the agent sends it (D123).
+        ops::Call::PowerWake(target) => {
+            let record =
+                serde_json::json!({ "request": summary, "mac": target.mac, "reach": target.reach });
+            audit(privd, "request.allowed", record).await;
+            serde_json::to_value(wake(target).await?)
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
         // privd checks the policy again and audits its own decision.
         ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,
         ops::Call::PowerPoweroff(_) => power(request, PowerAction::Poweroff, privd, limit).await,
@@ -1816,9 +1824,64 @@ async fn physical_disks() -> Result<Vec<String>, CallError> {
 }
 
 /// What the machine can do about power. Reading it needs no root (angle 10).
+/// Where it's reached and the networks it can wake others on come from one
+/// network reading (D123).
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn power_info() -> Result<PowerInfo, HostError> {
-    cntrl_host::power::info().await
+    let mut info = cntrl_host::power::info().await?;
+    let reading = network_reading().await?;
+    cntrl_host::wake::describe(&mut info, &reading);
+    Ok(info)
+}
+
+async fn network_reading() -> Result<cntrl_host::network::NetworkReading, HostError> {
+    tokio::task::spawn_blocking(|| cntrl_host::network::NetworkReader::default().read())
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))
+}
+
+/// At most this many wake-ups a minute, so a burst of requests can't fill
+/// the network with broadcasts.
+const WAKES_PER_MINUTE: usize = 10;
+
+static WAKES: std::sync::Mutex<Vec<Instant>> = std::sync::Mutex::new(Vec::new());
+
+/// Sends the magic packet that wakes another machine, from this machine's
+/// addresses on the networks it was last reached on (D123).
+async fn wake(target: Wake) -> Result<WakeSent, CallError> {
+    let mac = cntrl_host::wake::parse_mac(&target.mac).ok_or_else(|| {
+        CallError::new(
+            ErrorCode::BadRequest,
+            format!("{} isn't a network card's hardware address", target.mac),
+        )
+    })?;
+    let reading = network_reading().await?;
+    let own = cntrl_host::wake::lan(&reading);
+    let from = cntrl_host::wake::senders(&own, &target.reach);
+    if from.is_empty() {
+        let reason = if own.is_empty() {
+            "this machine has no local network to send it on"
+        } else {
+            "this machine isn't on the network the other was last seen on"
+        };
+        return Err(CallError::new(ErrorCode::NotFound, reason));
+    }
+    {
+        let mut sent = WAKES.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        sent.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        if sent.len() >= WAKES_PER_MINUTE {
+            return Err(CallError::new(
+                ErrorCode::Busy,
+                "it has sent a lot of wake-ups this minute; try again in a minute",
+            ));
+        }
+        sent.push(now);
+    }
+    let sent = tokio::task::spawn_blocking(move || cntrl_host::wake::send(mac, &from))
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))??;
+    Ok(WakeSent { sent })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]

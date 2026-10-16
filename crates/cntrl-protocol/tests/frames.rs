@@ -16,7 +16,7 @@ use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams, HistoryStore};
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
-use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
+use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo, Wake, WakeSent};
 use cntrl_protocol::process::{ProcessOwner, ProcessesParams, ProcessesSample};
 use cntrl_protocol::records::{AlertRecord, AuditCheckpoint, StatsRecord};
 use cntrl_protocol::service::{ServiceList, ServiceState};
@@ -240,6 +240,31 @@ fn power_info_decodes() {
     assert_eq!(info.unlock_after_restart, Some(DiskUnlock::FileVault));
     assert!(info.sessions[1].remote && info.inhibitors.is_empty());
     assert_eq!(PowerAction::Hibernate.op(), "power.hibernate");
+    // Where a magic packet reaches it, and the networks it can wake others on (D123).
+    let wake = info.wake_on_lan.expect("a wired port");
+    assert_eq!(wake.reach[0].address, "192.168.1.20");
+    assert_eq!(info.lan.len(), 2);
+}
+
+#[test]
+fn a_wake_names_the_machine_and_where_it_was_reached() {
+    let text = fs::read_to_string(frames_dir().join("req-power-wake.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-power-wake.json isn't a request");
+    };
+    let Call::PowerWake(wake) = Call::decode(&request.op, request.data).expect("decodes") else {
+        panic!("power.wake isn't PowerWake");
+    };
+    assert_eq!(wake.mac, "a8:a1:59:12:34:56");
+    assert_eq!(
+        (wake.reach[0].address.as_str(), wake.reach[0].prefix),
+        ("192.168.1.30", 24)
+    );
+    let sent: WakeSent = serde_json::from_value(data_of("res-power-wake.json")).expect("sent");
+    assert_eq!(sent.sent[0].interface, "vmbr0");
+    // A wake from an agent that knows nothing of where the machine was: every network.
+    let bare: Wake = serde_json::from_value(json!({"mac": "a8:a1:59:12:34:56"})).expect("bare");
+    assert!(bare.reach.is_empty());
 }
 
 /// The data of an event or a successful response in a golden frame.

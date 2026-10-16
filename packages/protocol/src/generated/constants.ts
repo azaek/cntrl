@@ -41,6 +41,7 @@ export const CAPABILITIES = [
     "containers.manage",
     "checks.run",
     "power.inhibit",
+    "power.wake",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -66,6 +67,7 @@ export const SIGNED_CAPABILITIES: readonly Capability[] = [
     "power.suspend",
     "power.hibernate",
     "history.manage",
+    "power.wake",
 ];
 
 /** How far a signed command's time may be from the machine's clock, either way, in milliseconds. */

@@ -25,6 +25,10 @@ pub const CAPABILITIES: &[&str] = &[
     // monitor-only, since it changes how the machine behaves. Agents before
     // 0.1.21 don't know it, and a policy naming it is invalid on them.
     "power.inhibit",
+    // Sends a magic packet to wake another machine on its network (D123);
+    // not in monitor-only, since it acts on other machines. Agents before
+    // 0.1.21 don't know it either.
+    "power.wake",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.

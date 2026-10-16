@@ -857,6 +857,16 @@ export type InterfaceKind =
  */
 export type JobResult = "done" | "canceled" | "timeout" | "failed" | "dependency" | "skipped" | "unknown";
 
+/** An IPv4 address on a local network. */
+export interface LanAddress {
+    /** Such as `eno1`, `vmbr0` or `en0`. */
+    interface: string;
+    /** Such as `192.168.1.20`. */
+    address: string;
+    /** The prefix length: 24 for a /24. */
+    prefix: number;
+}
+
 /** Limits the gateway enforces on this session. */
 export interface Limits {
     max_frame_bytes: number;
@@ -1142,6 +1152,13 @@ export interface PowerInfo {
     restarts_after_power_loss?: boolean | null;
     /** The wired interface a magic packet would wake, where there is one. */
     wake_on_lan?: WakeOnLan | null;
+    /**
+     * The machine's IPv4 addresses on its local networks, from interfaces
+     * that are up, leaving out loopback, tunnels and containers' links: the
+     * networks it can send a magic packet on, to wake another machine (D123).
+     * Agents before 0.1.21 leave it out.
+     */
+    lan?: LanAddress[];
 }
 
 /** What a power action returns: that it has started. */
@@ -1710,6 +1727,24 @@ export interface Volume {
     network: boolean;
 }
 
+/**
+ * `power.wake`: wakes another machine with a Wake-on-LAN magic packet, sent
+ * from this one to the broadcast address of a network both are on (D123).
+ */
+export interface Wake {
+    /**
+     * The machine to wake, by its wired interface's hardware address, such
+     * as `d0:11:e5:73:0e:f0`.
+     */
+    mac: string;
+    /**
+     * Where it was last reached, from its own `power.info`: the packet goes
+     * out only on this machine's networks that hold one of these addresses.
+     * With none, on all of them.
+     */
+    reach?: LanAddress[];
+}
+
 /** Wake-on-LAN on a wired interface. */
 export interface WakeOnLan {
     /** Such as `eno1` or `en0`. */
@@ -1721,6 +1756,21 @@ export interface WakeOnLan {
      * tell.
      */
     enabled?: boolean | null;
+    /**
+     * Where a magic packet reaches the machine (D123): this interface's IPv4
+     * addresses, or where it has none, as when it's a bridge's port, those
+     * of the interface the default route leaves by. Agents before 0.1.21
+     * leave it out.
+     */
+    reach?: LanAddress[];
+}
+
+/**
+ * What `power.wake` returns: this machine's addresses the packet went out
+ * from. It's sent, not received: nothing answers a magic packet.
+ */
+export interface WakeSent {
+    sent: LanAddress[];
 }
 
 /** What a follow-up watches. */
