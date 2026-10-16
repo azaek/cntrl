@@ -19,7 +19,7 @@ pub const MAX_LIMIT: u32 = 500;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use os::{Sampler, Target, stop, target};
 #[cfg(windows)]
-pub use windows::{Sampler, Target, stop, target};
+pub use windows::{Sampler, Target, stop, target, usage};
 
 #[cfg(windows)]
 mod windows;

@@ -24,6 +24,7 @@ pub mod storage;
 pub mod system;
 #[cfg(target_os = "linux")]
 pub mod systemd;
+pub mod usage;
 #[cfg(windows)]
 pub mod windows;
 

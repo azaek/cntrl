@@ -5,6 +5,11 @@
 //! container; macOS through `shutdown` and `pmset`; Windows through
 //! InitiateShutdownW and SetSuspendState (`windows::power`). The parsers are
 //! plain Rust, so they build and their tests run on any OS.
+//!
+//! For follow-ups (D121) it also says whether someone's using the machine,
+//! and keeps the machine from sleeping on its own while one waits: privd
+//! holds a logind inhibitor on Linux, `caffeinate` on macOS and a power
+//! request on Windows.
 
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use std::fs;
@@ -22,6 +27,16 @@ use cntrl_protocol::power::WakeOnLan;
 use crate::HostError;
 #[cfg(any(target_os = "linux", all(test, unix)))]
 use crate::hwmon::{entries, read};
+
+/// `ioreg`'s `"HIDIdleTime" = 31097067111500`: nanoseconds since anyone
+/// touched a keyboard, mouse or trackpad.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn hid_idle_nanos(text: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let (_, value) = line.split_once("\"HIDIdleTime\" = ")?;
+        value.trim().parse().ok()
+    })
+}
 
 #[cfg(any(target_os = "macos", test))]
 /// `pmset -g`'s `womp` (wake on magic packet) and `autorestart` (start after a
@@ -176,13 +191,13 @@ pub(crate) fn unavailable(action: PowerAction) -> HostError {
 }
 
 #[cfg(target_os = "linux")]
-pub use linux::{act, check, info};
+pub use linux::{Awake, act, check, in_use, info, keep_awake};
 
 #[cfg(target_os = "macos")]
-pub use macos::{act, check, info};
+pub use macos::{Awake, act, check, in_use, info, keep_awake};
 
 #[cfg(windows)]
-pub use crate::windows::power::{act, check, info};
+pub use crate::windows::power::{Awake, act, check, in_use, info, keep_awake};
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -379,6 +394,65 @@ mod linux {
         }
     }
 
+    /// Whether someone's using the machine (D121): a person's session, at a
+    /// seat or over SSH, that logind doesn't call idle. logind calls a
+    /// terminal's session idle after 5 minutes without input, and a
+    /// desktop's when the desktop says so, so its own wait stands in for
+    /// `_within`. None when logind can't say.
+    pub async fn in_use(_within: std::time::Duration) -> Option<bool> {
+        let (connection, manager) = logind().await.ok()?;
+        let mut unsure = false;
+        for (_, _, _, _, path) in manager.list_sessions().await.ok()? {
+            let Ok(builder) = SessionProxy::builder(&connection).path(path) else {
+                unsure = true;
+                continue;
+            };
+            let Ok(session) = builder.build().await else {
+                unsure = true;
+                continue;
+            };
+            if session.class().await.ok().as_deref() != Some("user") {
+                continue;
+            }
+            // A session that's closing is someone who has left.
+            if !matches!(
+                session.state().await.ok().as_deref(),
+                Some("active" | "online")
+            ) {
+                continue;
+            }
+            match session.idle_hint().await {
+                Ok(false) => return Some(true),
+                Ok(true) => {}
+                Err(_) => unsure = true,
+            }
+        }
+        (!unsure).then_some(false)
+    }
+
+    /// The machine kept from sleeping, until this is dropped: a logind
+    /// `sleep` inhibitor in block mode, which `systemd-inhibit --list` shows.
+    /// Taking one without asking is root's, so privd holds it.
+    pub struct Awake {
+        _inhibitor: zbus::zvariant::OwnedFd,
+    }
+
+    pub async fn keep_awake(reason: &str) -> Result<Awake, HostError> {
+        let (_, manager) = logind().await?;
+        let inhibitor = manager
+            .inhibit(
+                "sleep".to_owned(),
+                "cntrl".to_owned(),
+                reason.to_owned(),
+                "block".to_owned(),
+            )
+            .await
+            .map_err(failed)?;
+        Ok(Awake {
+            _inhibitor: inhibitor,
+        })
+    }
+
     fn failed(e: impl std::fmt::Display) -> HostError {
         HostError::Failed(e.to_string())
     }
@@ -459,6 +533,39 @@ mod macos {
         }
     }
 
+    /// Whether anyone touched a keyboard, mouse or trackpad within `within`
+    /// (D121), from the HID system's idle time. None when `ioreg` can't say.
+    pub async fn in_use(within: std::time::Duration) -> Option<bool> {
+        let args = ["-r", "-c", "IOHIDSystem", "-d", "1", "-k", "HIDIdleTime"];
+        let text = tokio::task::spawn_blocking(move || output("/usr/sbin/ioreg", &args))
+            .await
+            .ok()??;
+        let idle = super::hid_idle_nanos(&text)?;
+        Some(std::time::Duration::from_nanos(idle) < within)
+    }
+
+    /// The Mac kept from sleeping on its own, until this is dropped:
+    /// `caffeinate -i`, whose assertion `pmset -g assertions` lists. It also
+    /// ends if this process does, so nothing holds the Mac awake after a crash.
+    pub struct Awake {
+        _caffeinate: tokio::process::Child,
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn keep_awake(_reason: &str) -> Result<Awake, HostError> {
+        let caffeinate = tokio::process::Command::new("/usr/bin/caffeinate")
+            .args(["-i", "-w", &std::process::id().to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| HostError::Failed(format!("can't run caffeinate: {e}")))?;
+        Ok(Awake {
+            _caffeinate: caffeinate,
+        })
+    }
+
     fn output(program: &str, args: &[&str]) -> Option<String> {
         let output = Command::new(program).args(args).output().ok()?;
         output
@@ -471,6 +578,13 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_hid_idle_time() {
+        let text = "+-o IOHIDSystem  <class IOHIDSystem>\n    {\n      \"HIDIdleTime\" = 31097067111500\n    }\n";
+        assert_eq!(hid_idle_nanos(text), Some(31_097_067_111_500));
+        assert_eq!(hid_idle_nanos("nothing here"), None);
+    }
 
     #[test]
     fn reads_pmset() {
@@ -552,6 +666,52 @@ mod tests {
             sys,
             "29 1 8:2 / / rw shared:1 - ext4 /dev/sda2 rw\n"
         ));
+    }
+
+    /// Takes a logind inhibitor, which needs root: `sudo cargo test -p
+    /// cntrl-host -- --ignored keeps_this_linux_machine_awake`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs root and logind"]
+    fn keeps_this_linux_machine_awake_and_says_whether_its_used() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let within = std::time::Duration::from_secs(300);
+            assert!(in_use(within).await.is_some(), "logind says");
+            let awake = keep_awake("cntrl's tests").await.expect("an inhibitor");
+            let listed = std::process::Command::new("systemd-inhibit")
+                .arg("--list")
+                .output()
+                .expect("systemd-inhibit");
+            let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
+            assert!(listed.contains("cntrl's tests"), "{listed}");
+            drop(awake);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keeps_this_mac_awake_and_says_whether_its_used() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let within = std::time::Duration::from_secs(300);
+            assert!(in_use(within).await.is_some(), "ioreg says");
+            let awake = keep_awake("cntrl's tests").await.expect("caffeinate");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let assertions = std::process::Command::new("/usr/bin/pmset")
+                .args(["-g", "assertions"])
+                .output()
+                .expect("pmset");
+            let listed = String::from_utf8_lossy(&assertions.stdout).into_owned();
+            assert!(listed.contains("caffeinate"), "{listed}");
+            drop(awake);
+        });
     }
 
     #[cfg(target_os = "macos")]

@@ -22,8 +22,9 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows_sys::Win32::Security::{LookupAccountSidW, PSID, SID_NAME_USE};
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, IsProcessCritical, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    GetProcessIoCounters, GetProcessTimes, IO_COUNTERS, IsProcessCritical, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess,
+    WaitForSingleObject,
 };
 
 use crate::HostError;
@@ -194,6 +195,36 @@ pub fn stop(pid: u32, started: u64, force: bool) -> Result<StopResult, HostError
     } else {
         Ok(StopResult::StillRunning)
     }
+}
+
+/// What `pid` has used since it started, if it's still the process that
+/// started at `started` (D121). Windows keeps no time for a process's ended
+/// children, and its byte counts are every read and write, not only the
+/// disk's.
+pub fn usage(pid: u32, started: u64) -> Option<crate::usage::Usage> {
+    let process = Process::open(pid, PROCESS_QUERY_LIMITED_INFORMATION).ok()?;
+    if process.start_time() != Some(started) {
+        return None;
+    }
+    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
+    // SAFETY: an open handle with PROCESS_QUERY_LIMITED_INFORMATION, and four
+    // times to fill.
+    let read =
+        unsafe { GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user) };
+    if read == 0 {
+        return None;
+    }
+    let ticks =
+        |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    let mut io = IO_COUNTERS::default();
+    // SAFETY: the same handle, which the call needs no more of, and a struct to fill.
+    let counted = unsafe { GetProcessIoCounters(process.0, &mut io) } != 0;
+    Some(crate::usage::Usage {
+        // FILETIME counts 100 ns.
+        cpu_ms: (ticks(kernel) + ticks(user)) / 10_000,
+        children_cpu_ms: None,
+        disk_bytes: counted.then(|| io.ReadTransferCount + io.WriteTransferCount),
+    })
 }
 
 /// The System Idle Process, PID 0, System, PID 4, and what System starts:

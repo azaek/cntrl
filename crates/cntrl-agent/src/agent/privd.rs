@@ -40,6 +40,10 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// agent next connects, and Windows' Service Control Manager doesn't.
 const EXITS_WHEN_IDLE: bool = cfg!(unix);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
+/// How often keeping the machine awake checks the policy still allows it.
+const AWAKE_RECHECK: Duration = Duration::from_secs(60);
+/// The most processes one `process_usage` call reads.
+const USAGE_MAX: usize = 4096;
 const AUDIT_KEY_FILE: &str = "audit.key";
 /// How long privd waits for systemd's verdict on a job.
 const JOB_LIMIT: Duration = Duration::from_secs(300);
@@ -167,6 +171,10 @@ async fn handle(stream: os::ServerStream, state: &Arc<State>) {
         if let Call::LogStream { params } = request.call {
             return stream_logs(state, request.id, params, channel).await;
         }
+        // So does keeping the machine awake (D121).
+        if let Call::KeepAwake { reason } = request.call {
+            return keep_awake(state, request.id, reason, channel).await;
+        }
         let response = Response::from_result(request.id, respond(state, request.call).await);
         if let Err(e) = ipc::send(&mut channel, &response).await {
             warn!("couldn't answer: {e}");
@@ -184,6 +192,23 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             ErrorCode::BadRequest,
             "a log stream takes its own connection",
         )),
+        Call::KeepAwake { .. } => Err(CallError::new(
+            ErrorCode::BadRequest,
+            "keeping the machine awake takes its own connection",
+        )),
+        Call::ProcessUsage { processes } => {
+            if !policy::load(&state.policy_path, state.owner).allows("processes.read") {
+                let reason = "the device policy doesn't allow processes.read";
+                return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+            }
+            if processes.len() > USAGE_MAX {
+                let reason = format!("at most {USAGE_MAX} processes a call");
+                return Err(CallError::new(ErrorCode::BadRequest, reason));
+            }
+            blocking(move || serde_json::to_value(usage_of(&processes)).map_err(|e| e.to_string()))
+                .await
+                .map_err(CallError::internal)
+        }
         Call::PolicyShow => serde_json::to_value(policy::load(&state.policy_path, state.owner))
             .map_err(|e| CallError::internal(e.to_string())),
         Call::SignersShow => {
@@ -790,6 +815,101 @@ async fn power_check(_action: PowerAction) -> Result<(), HostError> {
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 async fn power_act(_action: PowerAction) -> Result<(), HostError> {
     Err(HostError::Unsupported)
+}
+
+/// What these processes have used since they started, for a follow-up (D121);
+/// one that ended, or whose PID names another now, is left out.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn usage_of(processes: &[(u32, u64)]) -> Vec<super::processes::Used> {
+    processes
+        .iter()
+        .filter_map(|&(pid, started)| {
+            let usage = cntrl_host::usage::read(pid, started)?;
+            Some(super::processes::Used {
+                pid,
+                started,
+                cpu_ms: usage.cpu_ms,
+                children_cpu_ms: usage.children_cpu_ms,
+                disk_bytes: usage.disk_bytes,
+            })
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn usage_of(_processes: &[(u32, u64)]) -> Vec<super::processes::Used> {
+    Vec::new()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+async fn hold_awake(reason: &str) -> Result<cntrl_host::power::Awake, HostError> {
+    cntrl_host::power::keep_awake(reason).await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+async fn hold_awake(_reason: &str) -> Result<(), HostError> {
+    Err(HostError::Unsupported)
+}
+
+/// Answers a `keep_awake` call (D121): checks the policy, keeps the machine
+/// from sleeping on its own, says so, and holds it until the agent hangs up,
+/// or until the policy stops allowing it, which a last answer says. Taking it
+/// and letting it go both go on the audit log.
+async fn keep_awake(
+    state: &Arc<State>,
+    id: u64,
+    reason: String,
+    channel: ipc::Channel<os::ServerStream>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+
+    let (mut sink, mut incoming) = channel.split();
+    let mut answer = async |result: Result<Value, CallError>| {
+        let frame = serde_json::to_vec(&Response::from_result(id, result)).unwrap_or_default();
+        sink.send(bytes::Bytes::from(frame)).await.is_ok()
+    };
+    let allowed = || policy::load(&state.policy_path, state.owner).allows("power.inhibit");
+    if !allowed() {
+        let refused = CallError::new(
+            ErrorCode::PolicyDenied,
+            "the device policy doesn't allow power.inhibit",
+        );
+        answer(Err(refused)).await;
+        return;
+    }
+    let hold = match hold_awake(&reason).await {
+        Ok(hold) => hold,
+        Err(e) => {
+            answer(Err(e.into())).await;
+            return;
+        }
+    };
+    let record = json!({ "reason": reason, "held": true });
+    if let Err(e) = audit(state, "power.inhibit", record).await {
+        warn!("keeping the machine awake wasn't audited: {}", e.msg);
+    }
+    let mut ended = None;
+    if answer(Ok(json!({ "held": true }))).await {
+        let mut check = tokio::time::interval(AWAKE_RECHECK);
+        check.tick().await;
+        ended = loop {
+            tokio::select! {
+                // The agent hung up, or broke the one-request rule.
+                _ = incoming.next() => break None,
+                _ = check.tick() => if !allowed() {
+                    break Some("the device policy doesn't allow power.inhibit any more");
+                },
+            }
+        };
+    }
+    drop(hold);
+    let record = json!({ "reason": reason, "held": false });
+    if let Err(e) = audit(state, "power.inhibit", record).await {
+        warn!("letting the machine sleep again wasn't audited: {}", e.msg);
+    }
+    if let Some(why) = ended {
+        answer(Err(CallError::new(ErrorCode::PolicyDenied, why))).await;
+    }
 }
 
 async fn audit(state: &Arc<State>, kind: &'static str, data: Value) -> Result<(), CallError> {

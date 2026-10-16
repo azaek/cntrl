@@ -245,6 +245,7 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
                 follow_ups,
                 Arc::clone(&latest_processes),
                 Arc::clone(&latest_containers),
+                Arc::clone(&uplink),
                 token.clone(),
             ),
         );

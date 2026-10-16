@@ -77,6 +77,37 @@ pub async fn read_once(privd: PathBuf) -> Result<Vec<ProcessInfo>, String> {
     Reader::new(privd).read().await
 }
 
+/// One process's running totals, as privd reads them for a follow-up (D121).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Used {
+    pub pid: u32,
+    pub started: u64,
+    pub cpu_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children_cpu_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_bytes: Option<u64>,
+}
+
+/// The running totals of these processes, by PID and start time; one that
+/// has ended, or whose PID now names another, is left out. privd reads them,
+/// since another user's take root.
+pub async fn usage(
+    privd: &std::path::Path,
+    processes: Vec<(u32, u64)>,
+) -> Result<Vec<Used>, String> {
+    use super::ipc::{self, Call};
+
+    let value = ipc::call_within(
+        privd,
+        Call::ProcessUsage { processes },
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| e.msg)?;
+    serde_json::from_value(value).map_err(|e| format!("privd's process totals are unreadable: {e}"))
+}
+
 #[cfg(target_os = "linux")]
 struct Reader {
     sampler: Arc<std::sync::Mutex<cntrl_host::processes::Sampler>>,

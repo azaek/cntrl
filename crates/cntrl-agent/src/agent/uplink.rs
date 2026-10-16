@@ -158,6 +158,10 @@ pub struct Uplink {
     /// An uninstall waiting for the session, which `uninstalling` wakes.
     uninstall: std::sync::Mutex<Option<UninstallRequest>>,
     uninstalling: Notify,
+    /// When the gateway was last heard from, in Unix milliseconds: its
+    /// welcome, a heartbeat's answer or any frame. A follow-up whose machine
+    /// slept through a countdown waits for this to pass its waking (D121).
+    heard: std::sync::atomic::AtomicU64,
 }
 
 impl Uplink {
@@ -172,6 +176,7 @@ impl Uplink {
             resumed: Notify::new(),
             uninstall: std::sync::Mutex::new(None),
             uninstalling: Notify::new(),
+            heard: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -256,6 +261,16 @@ impl Uplink {
 
     pub fn status(&self) -> UplinkStatus {
         self.status.borrow().clone()
+    }
+
+    /// When the gateway was last heard from, in Unix milliseconds; 0 never.
+    pub fn heard_ms(&self) -> u64 {
+        self.heard.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn heard_now(&self) {
+        self.heard
+            .store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Tells the uplink the identity changed.
@@ -614,6 +629,7 @@ async fn session(
     // On, as ever or once more: the alert rules judge again (D87).
     config.alerts.rest(false).await;
     info!(session = %welcome.session, gateway = url, "uplink online");
+    uplink.heard_now();
     uplink.set(UplinkStatus::Online {
         gateway: url.to_owned(),
         session: welcome.session.clone(),
@@ -717,13 +733,18 @@ async fn online(
             }
             message = ws.next() => match message {
                 Some(Ok(Message::Text(text))) => match text.as_str() {
-                    PONG => last_pong = Instant::now(),
+                    PONG => {
+                        last_pong = Instant::now();
+                        uplink.heard_now();
+                    }
                     PING => {
+                        uplink.heard_now();
                         if let Err(e) = ws.send(Message::text(PONG)).await {
                             debug!("can't answer a ping: {e}");
                         }
                     }
                     json => {
+                        uplink.heard_now();
                         if let Some(end) = handle(ws, json, stable(), &mut session).await {
                             let End::Disabled(disabled) = end else { return end };
                             // What the session served stops here: subscriptions,
@@ -1310,7 +1331,7 @@ impl Requests {
         let history = Arc::clone(history);
         let followups = Arc::clone(followups);
         let task = tokio::spawn(async move {
-            if let Some(signer) = signer {
+            if let Some(signer) = &signer {
                 // Who signed it, on the record before it runs: Console's actor
                 // isn't signed, the signature is.
                 let record = Call::AuditAppend {
@@ -1326,7 +1347,9 @@ impl Requests {
                     warn!("a signed command's signer wasn't audited: {e}");
                 }
             }
-            let answer = answer(request, call, &policy, &privd, (&history, &followups)).await;
+            let signer = signer.map(|signer| signer.id);
+            let stores = (&history, &followups);
+            let answer = answer(request, call, &policy, &privd, stores, signer).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
         });
@@ -1375,17 +1398,24 @@ async fn act_on_container(
     ipc::call_within(privd, call, limit.max(docker::ACTION_LIMIT)).await
 }
 
-/// Runs one request within its deadline.
+/// Runs one request within its deadline. `signer` is the trusted key that
+/// signed it, where the machine required one.
 async fn answer(
     request: Request,
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
     stores: (&Arc<History>, &Arc<FollowUps>),
+    signer: Option<String>,
 ) -> Response {
     let limit =
         Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
-    match timeout(limit, execute(&request, call, policy, privd, stores, limit)).await {
+    match timeout(
+        limit,
+        execute(&request, call, policy, privd, stores, signer, limit),
+    )
+    .await
+    {
         Ok(Ok(data)) => Response::ok(request.id, data),
         Ok(Err(e)) => Response::err(request.id, e.code, e.msg),
         Err(_) => Response::err(
@@ -1398,12 +1428,14 @@ async fn answer(
 
 /// Checks the policy, then runs the operation. Every operation needs an arm
 /// here, so a new one doesn't compile until it's handled.
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     request: &Request,
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
     (history, followups): (&Arc<History>, &Arc<FollowUps>),
+    signer: Option<String>,
     limit: Duration,
 ) -> Result<serde_json::Value, CallError> {
     let summary = serde_json::json!({ "id": request.id, "op": request.op, "actor": request.actor });
@@ -1504,8 +1536,16 @@ async fn execute(
         ops::Call::FollowUpStart(plan) => {
             let record = serde_json::json!({ "request": summary, "followup": plan.id });
             audit(privd, "request.allowed", record).await;
-            let started = followups.start(plan, request.actor.clone(), policy).await?;
+            let actor = request.actor.clone();
+            let started = followups.start(plan, actor, signer, policy).await?;
             serde_json::to_value(started).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpChange(plan) => {
+            let record = serde_json::json!({ "request": summary, "followup": plan.id });
+            audit(privd, "request.allowed", record).await;
+            let actor = request.actor.clone();
+            let changed = followups.change(plan, actor, signer, policy).await?;
+            serde_json::to_value(changed).map_err(|e| CallError::internal(e.to_string()))
         }
         ops::Call::FollowUpApprove(step) => {
             audit(
@@ -2448,7 +2488,7 @@ async fn go_away(ws: &mut Ws, goaway: &GoAway, stable: bool) -> End {
 /// Whom the machine trusts to sign commands, as privd reads it (D108).
 /// Without privd's answer, a machine is taken to require signatures it can't
 /// check, so nothing that needs one passes.
-async fn signers_view(privd_socket: &Path) -> signers::View {
+pub(super) async fn signers_view(privd_socket: &Path) -> signers::View {
     let broken = |error: String| signers::View {
         state: SignatureState {
             required: true,

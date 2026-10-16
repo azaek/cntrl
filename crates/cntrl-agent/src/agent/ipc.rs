@@ -81,6 +81,18 @@ pub enum Call {
     /// The whole process table. On macOS only root can read other users'
     /// processes, so the agent asks privd (D24).
     ProcessList,
+    /// What these processes, by PID and start time, have used since they
+    /// started, for a follow-up's judging (D121): another user's totals take
+    /// root. privd checks the policy itself.
+    ProcessUsage {
+        processes: Vec<(u32, u64)>,
+    },
+    /// Keeps the machine from sleeping on its own while a follow-up waits
+    /// (D121). privd checks the policy, holds it, answers, and keeps it until
+    /// the agent hangs up, or answers again when the policy stops allowing it.
+    KeepAwake {
+        reason: String,
+    },
     /// Restarts, shuts down, sleeps or hibernates the machine for a request
     /// from Console. privd checks the policy itself, audits, answers, and acts
     /// a moment later (angle 10).
@@ -330,6 +342,12 @@ mod tests {
                 actor: None,
             },
             Call::ProcessList,
+            Call::ProcessUsage {
+                processes: vec![(4211, 1_791_000_000)],
+            },
+            Call::KeepAwake {
+                reason: "A follow-up is waiting".to_owned(),
+            },
             Call::ProcessSignal {
                 request_id: "req_4".to_owned(),
                 pid: 4211,
