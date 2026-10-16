@@ -69,6 +69,8 @@ In Console, an action that's signed ends with a shield.
 
 A signature covers one request, for one machine, in one organization. The machine refuses it if it's more than 5 minutes from its own clock, or if it was used before.
 
+A [follow-up](/docs/console/follow-ups) is signed once, as it starts, and again for each change. Its steps run later, so the machine checks before each one that acts: if the key that signed the follow-up has been removed since, or the machine started requiring signatures after it began without one, its steps are refused. Answering a step that asks first is signed on its own.
+
 ## When a machine refuses
 
 Console says what happened, and what to do:

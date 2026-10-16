@@ -1,0 +1,80 @@
+---
+title: Follow-ups
+description: Tell Console what to do when a job on a machine is done, like notify you, stop it, or put the machine to sleep.
+icon: Flag
+---
+
+A follow-up watches one job on one machine and, once it's done, notifies you and runs the steps you chose: stop the job, stop or restart a container, or sleep, hibernate, shut down or restart the machine. It's used once, and ends when its steps have run. Follow-ups need agent 0.1.21 or later.
+
+The machine does the watching. Console keeps the plan and sends the message, so a follow-up carries on while Console can't reach the machine.
+
+## Set one up
+
+On a device's **Processes** tab, open a process and choose **When done**. The follow-up reads as a sentence, and each underlined part is a choice:
+
+> When **T3 Code and the 6 under it go quiet for 5 min**, **notify Phone**, then **hibernate the PC after asking**.
+
+| Part            | Choices                                                                                                                                                                    |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What it watches | The app the process belongs to, from its top process, with whatever it starts while it works; or only this process and what it starts                                       |
+| When it's done  | When it goes quiet, or when it exits. Either way, a deadline of 2, 6 or 12 hours can give up, or run the steps anyway                                                       |
+| Notify          | A saved channel, email, an address for this follow-up alone, or nobody                                                                                                     |
+| Then            | Stop the job, stop or restart a running container, or a power step, which always goes last                                                                                 |
+| Before each step | Ask first, or count down 60 seconds with Cancel                                                                                                                            |
+
+The machine finds the job's top process itself, and matches each process by its start time too, so a reused PID never counts.
+
+**Goes quiet** means every minute, for 3, 5, 10 or 15 minutes in a row, the job stays under its lines: CPU, in percent of one core across all its processes, and disk, in MB/s read and written. Starting processes doesn't make a minute busy, but the CPU of short tasks the job runs does. The suggested CPU line is a little over half of what the job uses while it works; the line beside it shows what it uses now.
+
+**Keep the machine awake until then** stops it from sleeping on its own while the follow-up waits. It lets go before a power step, and once the follow-up ends.
+
+Choose **Start**. Where the machine [requires signed commands](/docs/console/signed-commands), the follow-up is signed once, in this browser, as it starts.
+
+### An address for this follow-up alone
+
+Paste a Discord, Slack or ntfy address, or any https webhook, and Notify sends there. It's checked as a channel's address is, kept sealed, and deleted when the follow-up ends. Check **Save it as a channel** to keep it on **Alerts** instead.
+
+## While it waits
+
+A strip under the device's header says where it stands on every tab, such as "T3 Code has been quiet for 3 of 5 minutes", and what happens next. The job's process panel says the same, and the rows it watches carry a flag.
+
+- **Change** reopens the sentence. The quiet minutes so far still count unless you change when it's done.
+- **Cancel** ends it, and none of its steps run.
+
+## When it's done
+
+Notify sends one message: it says what finished, on which machine, and links to Console. When the channel can't take it, it's tried 3 times over about 3 minutes, then sent by email instead. A webhook gets JSON with `type` set to `followup.done`.
+
+Then each step runs in order:
+
+- **Ask first**: Console asks, in the strip and the panel, with **Not now** and the step's own button, such as **Hibernate**. It waits until the deadline while that's ahead, or 12 hours, and then doesn't run the step.
+- **Do it**: a 60-second countdown, with **Cancel**, which ends the follow-up.
+
+A power step can skip itself when someone has used the machine's keyboard or mouse in the last 5 minutes. It also waits for the machine's other follow-ups to finish, so it never cuts one short.
+
+The report stays under the header for 12 hours, until you choose **Done**, and every follow-up's report is in the **Follow-ups** section of the device's **Overview**.
+
+## When Console can't reach the machine
+
+The machine keeps watching on its own, and Console shows what happened once it's back.
+
+A step that acts never runs unseen. When it's due and Console can't reach the machine, because the machine is asleep, offline, or hasn't heard from Console in 40 seconds, the step waits and counts down again once Console can. After 3 tries a minute apart, the follow-up is cancelled as **Machine not reachable**, and you're told.
+
+A machine that slept through a countdown doesn't act on waking. It counts down again, so you can still cancel.
+
+Cancel a follow-up while its machine is out of reach, and Console offers **End it here**: it ends in Console now, and the machine ends it as soon as it reconnects. A machine that restarts ends its follow-ups, since the jobs they watched are gone.
+
+## Who can do what
+
+Owners and admins set up, change, answer and cancel follow-ups. Members see them.
+
+Each step needs its permission in the machine's [policy](/docs/console/permissions): stopping the job needs `processes.signal`, a container step `containers.manage`, a power step its own, such as `power.hibernate`, and keeping the machine awake `power.inhibit`. A step that's off can't be added, and one turned off after the follow-up started is skipped, with the reason in its report.
+
+Where the machine requires signed commands, it checks the follow-up's signature before every step that acts. If the browser key that signed it is no longer trusted, or signatures became required after it started without one, its steps are refused. Answering **Ask first** with the step's button is signed too.
+
+## On each plan
+
+|                            | Free                       | Pro and Team                           |
+| -------------------------- | -------------------------- | -------------------------------------- |
+| Follow-ups waiting at once | 1, across the organization | As many as you like, up to 10 a machine |
+| Where Notify sends         | Email and one ntfy channel | Every channel                          |
