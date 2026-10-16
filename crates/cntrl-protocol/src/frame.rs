@@ -367,6 +367,9 @@ pub enum RecordKind {
     Metrics,
     /// A rule the device decides fired or resolved (`records::AlertRecord`).
     Alert,
+    /// Something that happened to a follow-up (`followup::FollowUpRecord`,
+    /// D121). Never dropped when the outbox is full.
+    Followup,
     #[serde(other)]
     Unknown,
 }

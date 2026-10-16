@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use cntrl_protocol::containers::{
     ContainerHealth, ContainerJob, ContainerState, ContainersSample, EngineKind,
 };
+use cntrl_protocol::followup::{
+    AtDeadline, FollowUpRecord, FollowUpsSample, Stage, Started, StepAction, Watch,
+};
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams, HistoryStore};
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
@@ -59,6 +62,9 @@ fn golden_frames_round_trip() {
                             serde_json::from_value::<AuditCheckpoint>(data).map(drop)
                         }
                         RecordKind::Alert => serde_json::from_value::<AlertRecord>(data).map(drop),
+                        RecordKind::Followup => {
+                            serde_json::from_value::<FollowUpRecord>(data).map(drop)
+                        }
                         RecordKind::Unknown => panic!("{name}: a record of unknown type"),
                     };
                     decoded.unwrap_or_else(|e| panic!("{name}: record {}: {e}", record.seq));
@@ -333,4 +339,84 @@ fn container_frames_decode() {
     assert_eq!(target.id, "app-web-1");
     let newer: ContainerState = serde_json::from_value(json!("hibernating")).expect("parses");
     assert_eq!(newer, ContainerState::Unknown);
+}
+
+#[test]
+fn followup_frames_decode() {
+    let text = fs::read_to_string(frames_dir().join("req-followup-start.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-followup-start.json isn't a request");
+    };
+    let Call::FollowUpStart(plan) = Call::decode(&request.op, request.data).expect("decodes")
+    else {
+        panic!("followup.start isn't FollowUpStart");
+    };
+    assert_eq!(
+        plan.watch,
+        Watch::App {
+            pid: 4821,
+            started: 1_791_600_000
+        }
+    );
+    assert_eq!(
+        plan.deadline.map(|deadline| deadline.then),
+        Some(AtDeadline::RunSteps)
+    );
+    assert!(plan.steps[1].ask && plan.keep_awake);
+    assert_eq!(
+        plan.steps[3].what,
+        StepAction::Power {
+            action: PowerAction::Hibernate,
+            skip_if_in_use: true
+        }
+    );
+    let started: Started =
+        serde_json::from_value(data_of("res-followup-start.json")).expect("a start");
+    assert_eq!(started.scope.processes, 12);
+    let sample: FollowUpsSample =
+        serde_json::from_value(data_of("evt-followups.json")).expect("a sample");
+    assert_eq!(
+        sample.followups[0].stage,
+        Stage::CountingDown {
+            step: 3,
+            until: 1_791_621_060_000
+        }
+    );
+    assert_eq!(
+        sample.followups[1]
+            .minute
+            .as_ref()
+            .map(|minute| minute.busy),
+        Some(true)
+    );
+    // A step a newer Console invents reads as unknown, which the agent refuses.
+    let newer: StepAction =
+        serde_json::from_value(json!({"kind": "dim_the_lights"})).expect("parses");
+    assert_eq!(newer, StepAction::Unknown);
+    let record: FollowUpRecord = serde_json::from_value(json!({
+        "id": "fu_x", "at": 1, "event": {"kind": "ended", "why": "restarted"}
+    }))
+    .expect("a record");
+    assert!(matches!(
+        record.event,
+        cntrl_protocol::followup::Event::Ended { .. }
+    ));
+}
+
+#[test]
+fn followups_are_signed_as_they_start_and_never_to_stop() {
+    let signed = |name: &str| {
+        OPS.iter()
+            .find(|info| info.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .needs_signature()
+    };
+    assert!(signed("followup.start"));
+    assert!(signed("followup.approve"));
+    assert!(!signed("followup.skip"));
+    assert!(!signed("followup.cancel"));
+    // The rest still follow their capability.
+    assert!(signed("service.restart"));
+    assert!(!signed("system.info"));
+    assert!(TOPICS.iter().all(|info| !info.needs_signature()));
 }

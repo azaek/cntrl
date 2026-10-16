@@ -171,6 +171,43 @@ define_ops! {
         capability: "history.manage",
         since: 1,
     },
+    /// Sets up a follow-up (D119, D121): a one-use plan the machine carries
+    /// out when a job is done. Watching needs only reading; each step needs
+    /// its own capability, now and when it runs. Always signed where the
+    /// machine requires signatures, since the plan can act later without
+    /// another one.
+    FollowUpStart = "followup.start" {
+        params: crate::followup::Plan,
+        result: crate::followup::Started,
+        capability: "processes.read",
+        signed: Always,
+        since: 1,
+    },
+    /// Approves a step that asked first, which then runs at once.
+    FollowUpApprove = "followup.approve" {
+        params: crate::followup::StepRef,
+        result: crate::followup::FollowUpRef,
+        capability: "processes.read",
+        signed: Always,
+        since: 1,
+    },
+    /// Skips a step: one asking first, or one counting down. Never signed, so
+    /// stopping something from happening works from any browser.
+    FollowUpSkip = "followup.skip" {
+        params: crate::followup::StepRef,
+        result: crate::followup::FollowUpRef,
+        capability: "processes.read",
+        signed: Never,
+        since: 1,
+    },
+    /// Ends a follow-up; what hasn't run won't. Never signed, like a skip.
+    FollowUpCancel = "followup.cancel" {
+        params: crate::followup::FollowUpRef,
+        result: crate::followup::FollowUpRef,
+        capability: "processes.read",
+        signed: Never,
+        since: 1,
+    },
 }
 
 define_topics! {
@@ -219,6 +256,14 @@ define_topics! {
         params: crate::containers::ContainersParams,
         event: crate::containers::ContainersSample,
         capability: "containers.read",
+        since: 1,
+    },
+    /// The machine's follow-ups and where each one is (D121), as the
+    /// subscription opens and every 15 s.
+    FollowUps = "followups" {
+        params: crate::followup::FollowUpsParams,
+        event: crate::followup::FollowUpsSample,
+        capability: "processes.read",
         since: 1,
     },
 }

@@ -40,6 +40,7 @@ export const CAPABILITIES = [
     "containers.read",
     "containers.manage",
     "checks.run",
+    "power.inhibit",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -75,3 +76,83 @@ export const SIGNED_COMMANDS_FEATURE = "signed_commands";
 
 /** The longest name a signer's key may have. */
 export const SIGNER_NAME_MAX = 80;
+
+/** Follow-ups (D121): their defaults and limits, as the agent keeps them. */
+/** Minutes in a row under every line that make a job done, by default. */
+export const FOLLOWUP_QUIET_MINUTES = 5;
+/** How long a step that acts counts down before it runs. */
+export const FOLLOWUP_COUNTDOWN_SECONDS = 60;
+/** How long an ask-first step waits without a deadline, then is skipped. */
+export const FOLLOWUP_ASK_HOURS = 12;
+/** Input this recent means someone's using the machine. */
+export const FOLLOWUP_IN_USE_MINUTES = 5;
+/** The most follow-ups a machine keeps at once. */
+export const FOLLOWUP_MAX = 10;
+/** The longest a follow-up's ID may be. */
+export const FOLLOWUP_ID_MAX = 64;
+
+/** Programs that start others for people: climbing from a process to its job's top stops below them (D121). Lowercase, without `.exe`. */
+export const FOLLOWUP_LAUNCHERS: readonly string[] = [
+    "init",
+    "systemd",
+    "launchd",
+    "runsv",
+    "runsvdir",
+    "s6-supervise",
+    "supervisord",
+    "tini",
+    "dumb-init",
+    "containerd-shim",
+    "containerd-shim-runc-v2",
+    "services",
+    "svchost",
+    "wininit",
+    "winlogon",
+    "smss",
+    "csrss",
+    "taskhostw",
+    "login",
+    "sshd",
+    "sshd-session",
+    "mosh-server",
+    "sudo",
+    "su",
+    "doas",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "tcsh",
+    "csh",
+    "nu",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "terminal",
+    "iterm2",
+    "ghostty",
+    "warp",
+    "wezterm",
+    "wezterm-gui",
+    "alacritty",
+    "kitty",
+    "foot",
+    "konsole",
+    "xterm",
+    "tilix",
+    "gnome-terminal-server",
+    "windowsterminal",
+    "openconsole",
+    "conhost",
+    "tmux",
+    "tmux: server",
+    "screen",
+    "zellij",
+    "explorer",
+    "gnome-shell",
+    "plasmashell",
+    "kwin_wayland",
+    "kwin_x11",
+];

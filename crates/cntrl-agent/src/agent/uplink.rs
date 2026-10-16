@@ -27,7 +27,7 @@ use cntrl_protocol::ops::{self, Topic};
 use cntrl_protocol::power::{PowerAction, PowerInfo};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
-use cntrl_protocol::signers::{self as signatures, SignatureState, SignerLog};
+use cntrl_protocol::signers::{SignatureState, SignerLog};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::storage::{DisksHealth, StorageParams, StorageSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
@@ -1272,12 +1272,13 @@ impl Requests {
             Ok(call) => call,
             Err(e) => return refuse(e.code(), e.to_string()),
         };
-        // An operation that changes the machine needs a trusted signer's
-        // signature where the machine requires them (D108).
+        // An operation that changes the machine, or sets up a follow-up that
+        // may later, needs a trusted signer's signature where the machine
+        // requires them (D108, D121); stopping or skipping never does.
         let needs = ops::OPS
             .iter()
             .find(|info| info.name == request.op)
-            .is_some_and(|info| signatures::needs_signature(info.capability));
+            .is_some_and(|info| info.needs_signature());
         let signer = if needs {
             match signing.admit(device_id, &request, now_ms()) {
                 Ok(signer) => signer,
@@ -1489,6 +1490,13 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
         }
+        ops::Call::FollowUpStart(_)
+        | ops::Call::FollowUpApprove(_)
+        | ops::Call::FollowUpSkip(_)
+        | ops::Call::FollowUpCancel(_) => Err(CallError::new(
+            ErrorCode::BadRequest,
+            "follow-ups aren't in this build of the agent yet".to_owned(),
+        )),
         ops::Call::HistoryClear(_) => {
             audit(
                 privd,
@@ -2032,6 +2040,10 @@ impl Subscriptions {
                 }
                 debug!(id = %subscribe.id, every_ms, "storage subscription opened");
                 self.open.insert(subscribe.id, sub);
+            }
+            Topic::FollowUps(_) => {
+                let msg = "follow-ups aren't in this build of the agent yet".to_owned();
+                return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
             }
             Topic::Containers(params) => {
                 let every_ms = params.interval_ms.unwrap_or(3_000).max(2_000);

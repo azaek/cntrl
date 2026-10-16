@@ -21,6 +21,10 @@ pub const CAPABILITIES: &[&str] = &[
     // Runs the checks Console sets up from this device's network (D56); not
     // in monitor-only, since checking addresses can map a network.
     "checks.run",
+    // Keeps the machine from sleeping while a follow-up waits (D121); not in
+    // monitor-only, since it changes how the machine behaves. Agents before
+    // 0.1.21 don't know it, and a policy naming it is invalid on them.
+    "power.inhibit",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.

@@ -6,6 +6,7 @@
       "name": "system.info",
       "capability": "system.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -17,6 +18,7 @@
       "name": "service.list",
       "capability": "services.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -28,6 +30,7 @@
       "name": "app.quit",
       "capability": "processes.signal",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/AppQuit"
       },
@@ -39,6 +42,7 @@
       "name": "process.signal",
       "capability": "processes.signal",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ProcessSignal"
       },
@@ -50,6 +54,7 @@
       "name": "service.restart",
       "capability": "services.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ServiceRef"
       },
@@ -61,6 +66,7 @@
       "name": "service.start",
       "capability": "services.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ServiceRef"
       },
@@ -72,6 +78,7 @@
       "name": "service.stop",
       "capability": "services.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ServiceRef"
       },
@@ -83,6 +90,7 @@
       "name": "service.enable",
       "capability": "services.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ServiceRef"
       },
@@ -94,6 +102,7 @@
       "name": "service.disable",
       "capability": "services.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ServiceRef"
       },
@@ -105,6 +114,7 @@
       "name": "power.info",
       "capability": "power.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -116,6 +126,7 @@
       "name": "power.reboot",
       "capability": "power.reboot",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -127,6 +138,7 @@
       "name": "power.poweroff",
       "capability": "power.poweroff",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -138,6 +150,7 @@
       "name": "power.suspend",
       "capability": "power.suspend",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -149,6 +162,7 @@
       "name": "power.hibernate",
       "capability": "power.hibernate",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -160,6 +174,7 @@
       "name": "network.listeners",
       "capability": "network.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -171,6 +186,7 @@
       "name": "storage.health",
       "capability": "system.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
@@ -182,6 +198,7 @@
       "name": "history.read",
       "capability": "system.read",
       "since": 1,
+      "signed": false,
       "params": {
         "$ref": "#/$defs/HistoryParams"
       },
@@ -193,6 +210,7 @@
       "name": "history.keep",
       "capability": "history.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/HistoryKeep"
       },
@@ -204,6 +222,7 @@
       "name": "container.start",
       "capability": "containers.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ContainerRef"
       },
@@ -215,6 +234,7 @@
       "name": "container.stop",
       "capability": "containers.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ContainerRef"
       },
@@ -226,6 +246,7 @@
       "name": "container.restart",
       "capability": "containers.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/ContainerRef"
       },
@@ -237,11 +258,60 @@
       "name": "history.clear",
       "capability": "history.manage",
       "since": 1,
+      "signed": true,
       "params": {
         "$ref": "#/$defs/NoParams"
       },
       "result": {
         "$ref": "#/$defs/HistoryStore"
+      }
+    },
+    {
+      "name": "followup.start",
+      "capability": "processes.read",
+      "since": 1,
+      "signed": true,
+      "params": {
+        "$ref": "#/$defs/Plan"
+      },
+      "result": {
+        "$ref": "#/$defs/Started"
+      }
+    },
+    {
+      "name": "followup.approve",
+      "capability": "processes.read",
+      "since": 1,
+      "signed": true,
+      "params": {
+        "$ref": "#/$defs/StepRef"
+      },
+      "result": {
+        "$ref": "#/$defs/FollowUpRef"
+      }
+    },
+    {
+      "name": "followup.skip",
+      "capability": "processes.read",
+      "since": 1,
+      "signed": false,
+      "params": {
+        "$ref": "#/$defs/StepRef"
+      },
+      "result": {
+        "$ref": "#/$defs/FollowUpRef"
+      }
+    },
+    {
+      "name": "followup.cancel",
+      "capability": "processes.read",
+      "since": 1,
+      "signed": false,
+      "params": {
+        "$ref": "#/$defs/FollowUpRef"
+      },
+      "result": {
+        "$ref": "#/$defs/FollowUpRef"
       }
     }
   ],
@@ -310,6 +380,17 @@
       },
       "event": {
         "$ref": "#/$defs/ContainersSample"
+      }
+    },
+    {
+      "name": "followups",
+      "capability": "processes.read",
+      "since": 1,
+      "params": {
+        "$ref": "#/$defs/FollowUpsParams"
+      },
+      "event": {
+        "$ref": "#/$defs/FollowUpsSample"
       }
     }
   ]

@@ -64,10 +64,11 @@ pub fn ops(ops: &[OpSchema], topics: &[TopicSchema]) -> Result<String, String> {
         let params = ref_name(op.params.as_value())?;
         let result = ref_name(op.result.as_value())?;
         op_entries.push_str(&format!(
-            "{INDENT}{}: {{ params: {params}; result: {result}; capability: {}; since: {} }};\n",
+            "{INDENT}{}: {{ params: {params}; result: {result}; capability: {}; since: {}; signed: {} }};\n",
             quote(op.info.name)?,
             quote(op.info.capability)?,
-            op.info.since
+            op.info.since,
+            op.info.needs_signature()
         ));
         imports.extend([params, result]);
     }
@@ -91,7 +92,7 @@ pub fn ops(ops: &[OpSchema], topics: &[TopicSchema]) -> Result<String, String> {
         imports.join(", ")
     ));
     out.push_str(
-        "\n/** Every operation: its parameters, its result and the policy capability that gates it. */\n",
+        "\n/** Every operation: its parameters, its result, the policy capability that gates it and whether a machine that requires signatures needs one on it (D108, D121). */\n",
     );
     out.push_str(&format!(
         "export interface Ops {{\n{op_entries}}}\n\nexport type OpName = keyof Ops;\n"
@@ -104,7 +105,7 @@ pub fn ops(ops: &[OpSchema], topics: &[TopicSchema]) -> Result<String, String> {
     ));
     out.push_str(&registry_table(
         "OPS",
-        "The operations registry, in declaration order.",
+        "The operations registry, in declaration order. `signed`: whether a machine that requires signatures needs one on the operation (D108, D121).",
         ops.iter().map(|op| op.info),
     )?);
     out.push_str(&registry_table(
@@ -178,6 +179,55 @@ pub fn constants() -> String {
         "\n/** The longest name a signer's key may have. */\nexport const SIGNER_NAME_MAX = {};\n",
         cntrl_protocol::signers::NAME_MAX
     ));
+    {
+        use cntrl_protocol::followup;
+        out.push_str(
+            "\n/** Follow-ups (D121): their defaults and limits, as the agent keeps them. */\n",
+        );
+        for (name, value, doc_text) in [
+            (
+                "FOLLOWUP_QUIET_MINUTES",
+                followup::QUIET_MINUTES.to_string(),
+                "Minutes in a row under every line that make a job done, by default.",
+            ),
+            (
+                "FOLLOWUP_COUNTDOWN_SECONDS",
+                followup::COUNTDOWN_SECONDS.to_string(),
+                "How long a step that acts counts down before it runs.",
+            ),
+            (
+                "FOLLOWUP_ASK_HOURS",
+                followup::ASK_HOURS.to_string(),
+                "How long an ask-first step waits without a deadline, then is skipped.",
+            ),
+            (
+                "FOLLOWUP_IN_USE_MINUTES",
+                followup::IN_USE_MINUTES.to_string(),
+                "Input this recent means someone's using the machine.",
+            ),
+            (
+                "FOLLOWUP_MAX",
+                followup::MAX_FOLLOWUPS.to_string(),
+                "The most follow-ups a machine keeps at once.",
+            ),
+            (
+                "FOLLOWUP_ID_MAX",
+                followup::ID_MAX.to_string(),
+                "The longest a follow-up's ID may be.",
+            ),
+        ] {
+            out.push_str(&format!(
+                "/** {doc_text} */\nexport const {name} = {value};\n"
+            ));
+        }
+        out.push_str(
+            "\n/** Programs that start others for people: climbing from a process to its job's top stops below them (D121). Lowercase, without `.exe`. */\n",
+        );
+        out.push_str(&format!(
+            "export const FOLLOWUP_LAUNCHERS: readonly string[] = {};\n",
+            string_array(followup::LAUNCHERS)
+        ));
+    }
     out
 }
 
@@ -198,10 +248,11 @@ fn registry_table(
     let mut out = format!("\n/** {doc_text} */\nexport const {name} = [\n");
     for info in entries {
         out.push_str(&format!(
-            "{INDENT}{{ name: {}, capability: {}, since: {} }},\n",
+            "{INDENT}{{ name: {}, capability: {}, since: {}, signed: {} }},\n",
             quote(info.name)?,
             quote(info.capability)?,
-            info.since
+            info.since,
+            info.needs_signature()
         ));
     }
     out.push_str("] as const;\n");

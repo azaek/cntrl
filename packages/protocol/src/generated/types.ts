@@ -117,6 +117,9 @@ export interface AppQuitResult {
     result: QuitResult;
 }
 
+/** What happens at the deadline. */
+export type AtDeadline = "unknown" | "give_up" | "run_steps";
+
 /**
  * `audit_checkpoint`: privd's signature over the head of the device's audit
  * log. Console keeps them, so the log can later be checked against them.
@@ -338,6 +341,12 @@ export interface CpuStats {
     load: LoadAverage;
 }
 
+/** A time to stop waiting. */
+export interface Deadline {
+    at: number;
+    then: AtDeadline;
+}
+
 /** One check. */
 export interface DeviceCheck {
     id: string;
@@ -436,6 +445,12 @@ export interface DisksHealth {
     note?: string | null;
 }
 
+/** Why the job counts as done. */
+export type DoneWhy = ("exited" | "quiet" | "unknown") | "deadline";
+
+/** Why a follow-up ended. */
+export type EndedWhy = ("cancelled" | "unknown") | "completed" | "gave_up" | "restarted" | "gone";
+
 /** A container engine. */
 export interface Engine {
     kind: EngineKind;
@@ -531,6 +546,16 @@ export interface Event {
     data: unknown;
 }
 
+/** What happened. */
+export type Event2 =
+    | { scope: Scope; kind: "started" }
+    | { why: DoneWhy; kind: "done" }
+    | { step: number; kind: "asking" }
+    | { step: number; until: number; kind: "counting_down" }
+    | { step: number; outcome: Outcome; kind: "step" }
+    | { why: EndedWhy; kind: "ended" }
+    | { kind: "unknown" };
+
 /** A mounted filesystem. */
 export interface Filesystem {
     /** Where it's mounted, such as `/` or `/mnt/media`. */
@@ -550,6 +575,54 @@ export interface Filesystem {
      * for root aren't in it, so used and available don't add up to the total.
      */
     available: number;
+}
+
+/** When a follow-up's job is done. */
+export type Finish =
+    | { kind: "exits" }
+    | ({ minutes: number; cpu: number; disk?: number | null; kind: "quiet" })
+    | { kind: "unknown" };
+
+/** A `followup` outbox record: one thing that happened to a follow-up. */
+export interface FollowUpRecord {
+    id: string;
+    at: number;
+    event: Event2;
+}
+
+/**
+ * `followup.cancel`: one follow-up. Also the answer of approve, skip and
+ * cancel.
+ */
+export interface FollowUpRef {
+    id: string;
+}
+
+/** One follow-up as it stands. */
+export interface FollowUpState {
+    id: string;
+    scope: Scope;
+    /** When it was set up. */
+    since: number;
+    stage: Stage;
+    /** The minute so far. */
+    minute?: Minute | null;
+    /** Whole minutes in a row under every line. */
+    quiet_minutes: number;
+    /** Keeping the machine awake now. */
+    keeping_awake?: boolean;
+}
+
+/** The `followups` topic's parameters: none. */
+export type FollowUpsParams = { [key: string]: never };
+
+/**
+ * The `followups` topic: every follow-up the machine has, with where each one
+ * is, sent as a subscription opens and every 15 s while it's open.
+ */
+export interface FollowUpsSample {
+    ts: number;
+    followups: FollowUpState[];
 }
 
 /** Any frame of protocol v1. */
@@ -912,6 +985,18 @@ export interface MemoryStats {
     available: number;
 }
 
+/** A minute's readings of the job, and whether they made it busy. */
+export interface Minute {
+    /**
+     * Averaged over the minute's samples, the short processes it ran
+     * included where the OS keeps their time.
+     */
+    cpu: number;
+    /** Where the machine can read it. */
+    disk?: number | null;
+    busy: boolean;
+}
+
 /** Network throughput, in bytes per second. */
 export interface NetworkIo {
     received: number;
@@ -964,6 +1049,14 @@ export interface OutboxState {
     oldest_unacked?: number | null;
 }
 
+/** How a step went. */
+export type Outcome =
+    | ({ processes?: number | null; kind: "ran" })
+    | { why: SkippedWhy; kind: "skipped" }
+    | { reason: string; kind: "refused" }
+    | { reason: string; kind: "failed" }
+    | { kind: "unknown" };
+
 /** Pausing the agent on its machine, as `cntrl pause` does. */
 export interface Pause {
     /** The account that paused it, as the machine names it. */
@@ -974,6 +1067,26 @@ export interface Pause {
 
 /** The gateway's answer to `pause`, once it has recorded it. */
 export type Paused = { [key: string]: never };
+
+/** `followup.start`: what to watch, when it's done, what then. */
+export interface Plan {
+    /**
+     * Chosen by Console (`fu_` and a ULID). Starting the same ID again
+     * answers with the follow-up already waiting, as a retry after a dropped
+     * link does; a different plan under it is refused.
+     */
+    id: string;
+    watch: Watch;
+    finish: Finish;
+    deadline?: Deadline | null;
+    /** In order. Empty means it only reports that the job is done. */
+    steps?: Step[];
+    /**
+     * Keep the machine from sleeping until the follow-up ends; needs
+     * `power.inhibit`.
+     */
+    keep_awake?: boolean;
+}
 
 /** The device policy in force, by hash. */
 export interface PolicySummary {
@@ -1144,7 +1257,7 @@ export interface ReconnectWindow {
 }
 
 /** What an outbox record holds. */
-export type RecordKind = ("audit_checkpoint" | "metrics" | "unknown") | "alert";
+export type RecordKind = ("audit_checkpoint" | "metrics" | "unknown") | "alert" | "followup";
 
 /** Records from the agent's outbox, delivered at least once. */
 export interface Records {
@@ -1184,6 +1297,17 @@ export interface Route {
     gateway?: string | null;
     /** The interface the route leaves by. */
     interface: string;
+}
+
+/** What a follow-up watches. */
+export interface Scope {
+    /** The top process's name, or the container's. */
+    name: string;
+    /** The top process, for an app or a process. */
+    pid?: number | null;
+    started?: number | null;
+    /** Processes in the job now, the top one included; 0 for a container. */
+    processes: number;
 }
 
 /** What a temperature sensor measures. */
@@ -1344,6 +1468,9 @@ export interface SignerLog {
     entries: SignerEntry[];
 }
 
+/** Why a step didn't run. */
+export type SkippedWhy = "unknown" | "skipped" | "no_answer" | "in_use" | "cant_tell" | "nothing_to_do";
+
 export type SocketProtocol = "tcp" | "udp";
 
 /** A metric over one column: its lowest and highest reading and their average. */
@@ -1351,6 +1478,23 @@ export interface Span {
     min: number;
     max: number;
     avg: number;
+}
+
+/** Where a follow-up is. */
+export type Stage =
+    | { kind: "waiting" }
+    | { step: number; kind: "asking" }
+    | { step: number; until: number; kind: "counting_down" }
+    | { step: number; kind: "running" }
+    | { kind: "unknown" };
+
+/**
+ * `followup.start`'s answer: the follow-up waiting, and what it watches as the
+ * machine found it, which is what Console shows.
+ */
+export interface Started {
+    id: string;
+    scope: Scope;
 }
 
 /** Parameters of the `stats` topic. */
@@ -1402,6 +1546,39 @@ export interface StatsSample {
     /** GPUs, as of the last look; the agent looks every 2 s. */
     gpus?: GpuStats[];
 }
+
+/** One step, carried out when the job is done. */
+export interface Step {
+    /** What it does; `do` on the wire. */
+    do: StepAction;
+    /**
+     * Wait for someone to approve it (`followup.approve`). Otherwise a step
+     * that acts counts down {@link COUNTDOWN_SECONDS} and runs unless skipped.
+     */
+    ask?: boolean;
+}
+
+/** What a step does. */
+export type StepAction =
+    | { kind: "notify" }
+    | { kind: "stop" }
+    | ({ app: string; user?: string | null; kind: "quit_app" })
+    | ({ unit: string; scope?: ServiceScope; user?: string | null; action: StopOrRestart; kind: "service" })
+    | { id: string; action: StopOrRestart; kind: "container" }
+    | { action: PowerAction; skip_if_in_use?: boolean; kind: "power" }
+    | { kind: "unknown" };
+
+/**
+ * `followup.approve` and `followup.skip`: one step of one follow-up, by its
+ * place in the plan's steps, from 0.
+ */
+export interface StepRef {
+    id: string;
+    step: number;
+}
+
+/** Stop or restart. */
+export type StopOrRestart = "stop" | "restart" | "unknown";
 
 export type StopResult = "unknown" | "stopped" | "still_running" | "not_running";
 
@@ -1525,6 +1702,13 @@ export interface WakeOnLan {
      */
     enabled?: boolean | null;
 }
+
+/** What a follow-up watches. */
+export type Watch =
+    | { pid: number; started: number; kind: "app" }
+    | { pid: number; started: number; kind: "process" }
+    | { id: string; kind: "container" }
+    | { kind: "unknown" };
 
 /** The gateway's answer to a valid {@link Hello}. */
 export interface Welcome {

@@ -43,6 +43,7 @@ fn codegen(check: bool) -> Result<(), String> {
     generator.subschema_for::<cntrl_protocol::records::StatsRecord>();
     generator.subschema_for::<cntrl_protocol::records::AuditCheckpoint>();
     generator.subschema_for::<cntrl_protocol::records::AlertRecord>();
+    generator.subschema_for::<cntrl_protocol::followup::FollowUpRecord>();
     let defs = generator.definitions().clone();
 
     let schema = json!({
@@ -108,6 +109,7 @@ fn operations(ops: &[OpSchema], topics: &[TopicSchema]) -> Value {
             "name": op.info.name,
             "capability": op.info.capability,
             "since": op.info.since,
+            "signed": op.info.needs_signature(),
             "params": op.params,
             "result": op.result,
         })).collect::<Vec<_>>(),
