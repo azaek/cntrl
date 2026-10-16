@@ -17,6 +17,7 @@ use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::checks::{CheckResults, DeviceCheck};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
+use cntrl_protocol::followup::{FollowUpRef, FollowUpsParams, FollowUpsSample};
 use cntrl_protocol::frame::{
     AgentInfo, Disabled, Event, Frame, GoAway, HeartbeatConfig, Hello, HelloAuth, Pause,
     PolicySummary, Records, Request, Response, SigAlg, Subscribe, Uninstall, Welcome,
@@ -51,6 +52,7 @@ use super::alerts::Alerts;
 use super::checks;
 use super::containers;
 use super::docker;
+use super::followups::FollowUps;
 use super::history::History;
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
@@ -294,6 +296,9 @@ pub struct UplinkConfig {
     pub alerts: Arc<Alerts>,
     /// The history this device keeps, for `history.*` (D52).
     pub history: Arc<History>,
+    /// The follow-ups this device carries out, for `followup.*` and the
+    /// `followups` topic (D121).
+    pub followups: Arc<FollowUps>,
     /// Signed commands (D108): whom the machine trusts, and what it's seen.
     pub signing: Arc<signers::Gate>,
 }
@@ -676,6 +681,7 @@ async fn online(
             network: &session.config.network,
             storage: &session.config.storage,
             containers: &session.config.containers,
+            followups: &session.config.followups,
         };
         if let Err(end) = session
             .subs
@@ -770,6 +776,12 @@ async fn online(
             Some(sample) = next_value(&mut session.subs.containers), if session.subs.containers.is_some() => {
                 let containers = |topic: &Watching| matches!(topic, Watching::Containers);
                 if let Err(end) = session.subs.publish_to(ws, containers, sample.ts, &*sample).await {
+                    return end;
+                }
+            }
+            Some(sample) = next_value(&mut session.subs.followups), if session.subs.followups.is_some() => {
+                let followups = |topic: &Watching| matches!(topic, Watching::FollowUps);
+                if let Err(end) = session.subs.publish_to(ws, followups, sample.ts, &*sample).await {
                     return end;
                 }
             }
@@ -1168,11 +1180,11 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
     let reply = match frame {
         Frame::Req(request) => {
             let privd = &session.config.privd_socket;
-            let history = &session.config.history;
+            let stores = (&session.config.history, &session.config.followups);
             let signing = (&*session.config.signing, session.device_id.as_str());
             session
                 .requests
-                .start(request, &session.policy, privd, history, signing)?
+                .start(request, &session.policy, privd, stores, signing)?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
@@ -1184,6 +1196,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
                 network: &session.config.network,
                 storage: &session.config.storage,
                 containers: &session.config.containers,
+                followups: &session.config.followups,
             };
             return session
                 .subs
@@ -1248,7 +1261,7 @@ impl Requests {
         request: Request,
         policy: &Arc<PolicyState>,
         privd: &Path,
-        history: &Arc<History>,
+        (history, followups): (&Arc<History>, &Arc<FollowUps>),
         (signing, device_id): (&signers::Gate, &str),
     ) -> Option<Response> {
         let refuse = |code, msg: String| Some(Response::err(request.id.clone(), code, msg));
@@ -1295,6 +1308,7 @@ impl Requests {
         let id = request.id.clone();
         let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
         let history = Arc::clone(history);
+        let followups = Arc::clone(followups);
         let task = tokio::spawn(async move {
             if let Some(signer) = signer {
                 // Who signed it, on the record before it runs: Console's actor
@@ -1312,7 +1326,7 @@ impl Requests {
                     warn!("a signed command's signer wasn't audited: {e}");
                 }
             }
-            let answer = answer(request, call, &policy, &privd, &history).await;
+            let answer = answer(request, call, &policy, &privd, (&history, &followups)).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
         });
@@ -1367,16 +1381,11 @@ async fn answer(
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
-    history: &Arc<History>,
+    stores: (&Arc<History>, &Arc<FollowUps>),
 ) -> Response {
     let limit =
         Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
-    match timeout(
-        limit,
-        execute(&request, call, policy, privd, history, limit),
-    )
-    .await
-    {
+    match timeout(limit, execute(&request, call, policy, privd, stores, limit)).await {
         Ok(Ok(data)) => Response::ok(request.id, data),
         Ok(Err(e)) => Response::err(request.id, e.code, e.msg),
         Err(_) => Response::err(
@@ -1394,7 +1403,7 @@ async fn execute(
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
-    history: &Arc<History>,
+    (history, followups): (&Arc<History>, &Arc<FollowUps>),
     limit: Duration,
 ) -> Result<serde_json::Value, CallError> {
     let summary = serde_json::json!({ "id": request.id, "op": request.op, "actor": request.actor });
@@ -1490,13 +1499,46 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
         }
-        ops::Call::FollowUpStart(_)
-        | ops::Call::FollowUpApprove(_)
-        | ops::Call::FollowUpSkip(_)
-        | ops::Call::FollowUpCancel(_) => Err(CallError::new(
-            ErrorCode::BadRequest,
-            "follow-ups aren't in this build of the agent yet".to_owned(),
-        )),
+        // Follow-ups (D121): set up, answered and ended here; each step runs
+        // later through privd, which checks the policy again and audits it.
+        ops::Call::FollowUpStart(plan) => {
+            let record = serde_json::json!({ "request": summary, "followup": plan.id });
+            audit(privd, "request.allowed", record).await;
+            let started = followups.start(plan, request.actor.clone(), policy).await?;
+            serde_json::to_value(started).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpApprove(step) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.approve(&step.id, step.step).await?;
+            serde_json::to_value(FollowUpRef { id: step.id })
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpSkip(step) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.skip(&step.id, step.step).await?;
+            serde_json::to_value(FollowUpRef { id: step.id })
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpCancel(target) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.cancel(&target.id).await?;
+            serde_json::to_value(target).map_err(|e| CallError::internal(e.to_string()))
+        }
         ops::Call::HistoryClear(_) => {
             audit(
                 privd,
@@ -1826,6 +1868,7 @@ struct Subscriptions {
     network: Option<watch::Receiver<Option<Arc<NetworkSample>>>>,
     storage: Option<watch::Receiver<Option<Arc<StorageSample>>>>,
     containers: Option<watch::Receiver<Option<Arc<ContainersSample>>>>,
+    followups: Option<watch::Receiver<Option<Arc<FollowUpsSample>>>>,
     open: HashMap<String, Subscription>,
     log_out: logs::Batches,
     log_batches: mpsc::Receiver<(String, LogsBatch)>,
@@ -1842,6 +1885,7 @@ impl Subscriptions {
             network: None,
             storage: None,
             containers: None,
+            followups: None,
             open: HashMap::new(),
             log_out,
             log_batches,
@@ -1887,6 +1931,7 @@ enum Watching {
     Network,
     Storage,
     Containers,
+    FollowUps,
 }
 
 /// The samplers a subscription reads from.
@@ -1896,6 +1941,7 @@ struct Samplers<'a> {
     network: &'a network::Latest,
     storage: &'a storage::Latest,
     containers: &'a containers::Latest,
+    followups: &'a FollowUps,
 }
 
 /// A process table this recent goes to a new subscription at once.
@@ -2042,8 +2088,31 @@ impl Subscriptions {
                 self.open.insert(subscribe.id, sub);
             }
             Topic::FollowUps(_) => {
-                let msg = "follow-ups aren't in this build of the agent yet".to_owned();
-                return send(ws, &refuse(ErrorCode::BadRequest, msg)).await;
+                let receiver = self
+                    .followups
+                    .get_or_insert_with(|| samplers.followups.subscribe());
+                let latest = receiver.borrow().clone();
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(
+                        subscribe.id.clone(),
+                        encode(&FollowUpsParams {})?,
+                    )),
+                )
+                .await?;
+                // Every change goes out as it happens: the task publishes on
+                // each tick and when a follow-up moves.
+                let mut sub = Subscription {
+                    topic: Watching::FollowUps,
+                    every_ms: 0,
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(sample) = latest {
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
+                }
+                debug!(id = %subscribe.id, "followups subscription opened");
+                self.open.insert(subscribe.id, sub);
             }
             Topic::Containers(params) => {
                 let every_ms = params.interval_ms.unwrap_or(3_000).max(2_000);
@@ -2249,6 +2318,13 @@ impl Subscriptions {
             .any(|sub| matches!(sub.topic, Watching::Containers))
         {
             self.containers = None;
+        }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::FollowUps))
+        {
+            self.followups = None;
         }
     }
 
@@ -2967,6 +3043,7 @@ mod tests {
     }
 
     async fn uplink_config(dir: &Path) -> UplinkConfig {
+        let outbox = Arc::new(Outbox::open(dir).await);
         UplinkConfig {
             state_dir: dir.to_path_buf(),
             privd_socket: dir.join("privd.sock"),
@@ -2976,9 +3053,10 @@ mod tests {
             network: Arc::new(network::Latest::new(None)),
             storage: Arc::new(storage::Latest::new(None)),
             containers: Arc::new(containers::Latest::new(None)),
-            outbox: Arc::new(Outbox::open(dir).await),
+            outbox: Arc::clone(&outbox),
             alerts: Arc::new(Alerts::open(dir).await),
             history: Arc::new(History::open(dir)),
+            followups: Arc::new(FollowUps::open(dir, outbox, dir.join("privd.sock")).await),
             signing: Arc::new(signers::Gate::new(dir)),
         }
     }

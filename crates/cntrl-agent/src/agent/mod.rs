@@ -11,6 +11,7 @@ mod containers;
 mod digest;
 mod docker;
 mod enroll;
+mod followups;
 mod health;
 mod history;
 mod host;
@@ -29,6 +30,7 @@ mod os;
 mod outbox;
 mod paused;
 mod policy;
+mod presence;
 mod privd;
 mod processes;
 mod redact;
@@ -160,6 +162,14 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
         let state_dir = config.paths.state_dir.clone();
         let outbox = Arc::new(Outbox::open(&state_dir).await);
         let alert_rules = Arc::new(alerts::Alerts::open(&state_dir).await);
+        let follow_ups = Arc::new(
+            followups::FollowUps::open(
+                &state_dir,
+                Arc::clone(&outbox),
+                config.paths.privd_socket.clone(),
+            )
+            .await,
+        );
         let history = Arc::new(history::History::open(&state_dir));
         let privd_socket = config.paths.privd_socket.clone();
         let uplink_config = UplinkConfig {
@@ -173,6 +183,7 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
             containers: Arc::clone(&latest_containers),
             outbox: Arc::clone(&outbox),
             alerts: Arc::clone(&alert_rules),
+            followups: Arc::clone(&follow_ups),
             history: Arc::clone(&history),
             signing: Arc::new(signers::Gate::new(&state_dir)),
         };
@@ -213,7 +224,11 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
         supervisor.spawn("stats", stats::run(host_stats, latest_stats, token.clone()));
         supervisor.spawn(
             "processes",
-            processes::run(latest_processes, privd_socket.clone(), token.clone()),
+            processes::run(
+                Arc::clone(&latest_processes),
+                privd_socket.clone(),
+                token.clone(),
+            ),
         );
         supervisor.spawn("network", network::run(latest_network, token.clone()));
         supervisor.spawn(
@@ -221,6 +236,15 @@ fn run(config_path: &Path, config: Config, stop: CancellationToken) -> ExitCode 
             storage::run(
                 latest_storage,
                 cntrl_host::storage::backend(),
+                token.clone(),
+            ),
+        );
+        supervisor.spawn(
+            "followups",
+            followups::run(
+                follow_ups,
+                Arc::clone(&latest_processes),
+                Arc::clone(&latest_containers),
                 token.clone(),
             ),
         );

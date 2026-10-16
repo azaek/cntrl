@@ -147,14 +147,18 @@ impl Outbox {
     }
 }
 
-/// Drops the oldest stats records until the outbox fits its limits.
+/// Drops the oldest records until the outbox fits its limits, but never an
+/// audit checkpoint or a follow-up's (D121): a follow-up's report goes out once
+/// and has no later copy.
 fn trim(records: &mut VecDeque<OutboxRecord>) {
     let mut bytes: usize = records.iter().map(size).sum();
     while records.len() > MAX_RECORDS || bytes > MAX_BYTES {
-        let Some(oldest) = records
-            .iter()
-            .position(|record| record.kind != RecordKind::AuditCheckpoint)
-        else {
+        let Some(oldest) = records.iter().position(|record| {
+            !matches!(
+                record.kind,
+                RecordKind::AuditCheckpoint | RecordKind::Followup
+            )
+        }) else {
             return;
         };
         if let Some(dropped) = records.remove(oldest) {

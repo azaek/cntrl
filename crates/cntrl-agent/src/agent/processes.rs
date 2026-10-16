@@ -71,6 +71,12 @@ pub async fn run(
     }
 }
 
+/// Reads the whole table once, as a follow-up's setup and its stop step need
+/// it now rather than at the next sample (D121).
+pub async fn read_once(privd: PathBuf) -> Result<Vec<ProcessInfo>, String> {
+    Reader::new(privd).read().await
+}
+
 #[cfg(target_os = "linux")]
 struct Reader {
     sampler: Arc<std::sync::Mutex<cntrl_host::processes::Sampler>>,
