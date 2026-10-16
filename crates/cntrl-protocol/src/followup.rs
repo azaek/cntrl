@@ -27,10 +27,10 @@ pub const ASK_HOURS: u32 = 12;
 pub const IN_USE_MINUTES: u32 = 5;
 /// The most follow-ups a machine keeps at once; Console's plans allow fewer.
 pub const MAX_FOLLOWUPS: usize = 10;
-/// A machine that slept through a step's countdown doesn't run the step when
-/// it wakes: it tries to reach Console, this many times a minute apart, and
-/// counts down again once it has. Then the follow-up is cancelled as
-/// unreachable.
+/// A step that acts never runs unseen: when its countdown ends while Console
+/// can't reach the machine, or the machine slept through it, the step waits.
+/// The machine tries this many times, a minute apart, and counts down again
+/// once Console can reach it; then the follow-up is cancelled as unreachable.
 pub const REACH_TRIES: u32 = 3;
 /// The longest a follow-up's ID may be.
 pub const ID_MAX: usize = 64;
@@ -288,8 +288,9 @@ pub enum Stage {
     /// A power step waits for these follow-ups' jobs to be done before it
     /// counts down or asks, since the machine going would end them.
     WaitingFor { step: u32, followups: Vec<String> },
-    /// The machine slept through this step's countdown and is reaching
-    /// Console before it counts down again, `tries` of [`REACH_TRIES`] so far.
+    /// This step's countdown ended while nobody could stop it from Console:
+    /// it counts down again once Console can reach the machine, `tries` of
+    /// [`REACH_TRIES`] so far.
     Reaching { step: u32, tries: u32 },
     #[serde(other)]
     Unknown,
@@ -336,15 +337,30 @@ pub enum Event {
     Asking { step: u32 },
     /// A step runs at `until` unless someone skips it.
     CountingDown { step: u32, until: u64 },
-    /// The machine slept through this step's countdown, so the step didn't
-    /// run when it woke: it counts down again once Console can reach it.
-    Slept { step: u32 },
+    /// This step's countdown ended while nobody could stop it from Console,
+    /// so the step didn't run: it counts down again once Console can reach
+    /// the machine.
+    Held { step: u32, why: HeldWhy },
     /// A power step waits for these follow-ups' jobs to be done.
     WaitingFor { step: u32, followups: Vec<String> },
     /// A step's outcome. A message's step is `ran` when Console should send it.
     Step { step: u32, outcome: Outcome },
     /// It's over: nothing more happens to it.
     Ended { why: EndedWhy },
+    #[serde(other)]
+    Unknown,
+}
+
+/// Why a step's countdown didn't end in the step running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum HeldWhy {
+    /// The machine slept through it, or woke only after it.
+    Slept,
+    /// Console couldn't reach the machine as it ended, or the agent wasn't
+    /// running.
+    Unreachable,
     #[serde(other)]
     Unknown,
 }
@@ -421,9 +437,9 @@ pub enum EndedWhy {
     /// What it watched was gone before the follow-up started properly, as
     /// when a PID was reused.
     Gone,
-    /// The machine slept through a countdown and couldn't reach Console in
-    /// [`REACH_TRIES`] tries after it woke, so nothing more ran: Console says
-    /// "Machine not reachable".
+    /// A countdown ended while nobody could stop it from Console, and Console
+    /// still couldn't reach the machine after [`REACH_TRIES`] tries, so nothing
+    /// more ran: Console says "Machine not reachable".
     Unreachable,
     #[serde(other)]
     Unknown,

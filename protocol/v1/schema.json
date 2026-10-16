@@ -4750,7 +4750,7 @@
             "step",
             "tries"
           ],
-          "description": "The machine slept through this step's countdown and is reaching\nConsole before it counts down again, `tries` of [`REACH_TRIES`] so far."
+          "description": "This step's countdown ended while nobody could stop it from Console:\nit counts down again once Console can reach the machine, `tries` of\n[`REACH_TRIES`] so far."
         },
         {
           "type": "object",
@@ -5290,16 +5290,20 @@
               "format": "uint32",
               "minimum": 0
             },
+            "why": {
+              "$ref": "#/$defs/HeldWhy"
+            },
             "kind": {
               "type": "string",
-              "const": "slept"
+              "const": "held"
             }
           },
           "required": [
             "kind",
-            "step"
+            "step",
+            "why"
           ],
-          "description": "The machine slept through this step's countdown, so the step didn't\nrun when it woke: it counts down again once Console can reach it."
+          "description": "This step's countdown ended while nobody could stop it from Console,\nso the step didn't run: it counts down again once Console can reach\nthe machine."
         },
         {
           "type": "object",
@@ -5399,6 +5403,27 @@
         }
       ],
       "description": "Why the job counts as done."
+    },
+    "HeldWhy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "slept",
+          "description": "The machine slept through it, or woke only after it."
+        },
+        {
+          "type": "string",
+          "const": "unreachable",
+          "description": "Console couldn't reach the machine as it ended, or the agent wasn't\nrunning."
+        }
+      ],
+      "description": "Why a step's countdown didn't end in the step running."
     },
     "Outcome": {
       "oneOf": [
@@ -5555,7 +5580,7 @@
         {
           "type": "string",
           "const": "unreachable",
-          "description": "The machine slept through a countdown and couldn't reach Console in\n[`REACH_TRIES`] tries after it woke, so nothing more ran: Console says\n\"Machine not reachable\"."
+          "description": "A countdown ended while nobody could stop it from Console, and Console\nstill couldn't reach the machine after [`REACH_TRIES`] tries, so nothing\nmore ran: Console says \"Machine not reachable\"."
         }
       ],
       "description": "Why a follow-up ended."

@@ -15,10 +15,11 @@
 //! A minute's CPU and disk come from the running totals of the job's
 //! processes, read through privd at each look, so the short tasks a job runs
 //! between two looks count where the OS keeps their time; the process table's
-//! samples stand in where the totals can't be read. A countdown the machine
-//! slept through doesn't run when it wakes: it starts over once Console can
-//! reach the machine, or the follow-up ends as unreachable. A power step waits
-//! for the other follow-ups' jobs, since the machine going would end them.
+//! samples stand in where the totals can't be read. A step that acts never
+//! runs unseen: a countdown that ends while Console can't reach the machine,
+//! or that the machine slept through, starts over once Console can, or the
+//! follow-up ends as unreachable. A power step waits for the other
+//! follow-ups' jobs, since the machine going would end them.
 //!
 //! The judging is written as pure functions over a saved follow-up (`judge_*`,
 //! `advance`, `woke`, `used`), so the rules are tested without a clock or a
@@ -35,7 +36,7 @@ use cntrl_protocol::app::{AppQuitResult, QuitResult};
 use cntrl_protocol::containers::{Container, ContainerState, ContainersSample};
 use cntrl_protocol::followup::{
     self, AtDeadline, DoneWhy, EndedWhy, Event, Finish, FollowUpRecord, FollowUpState,
-    FollowUpsSample, Minute, Outcome, Plan, Scope, SkippedWhy, Stage, Started, StepAction,
+    FollowUpsSample, HeldWhy, Minute, Outcome, Plan, Scope, SkippedWhy, Stage, Started, StepAction,
     StopOrRestart, Watch,
 };
 use cntrl_protocol::frame::{Actor, RecordKind};
@@ -54,7 +55,7 @@ use super::ipc::{self, Call, CallError, Request, Response};
 use super::outbox::Outbox;
 use super::policy::PolicyState;
 use super::signers;
-use super::uplink::{self, Uplink, now_ms};
+use super::uplink::{self, Uplink, UplinkStatus, now_ms};
 use super::{containers, os, processes};
 
 pub const FOLLOWUPS_FILE: &str = "followups.json";
@@ -82,6 +83,9 @@ const TABLE_LAG_MS: u64 = 3_000;
 /// What keeping the machine awake says, in `pmset -g assertions`,
 /// `systemd-inhibit --list` and `powercfg /requests`.
 const AWAKE_REASON: &str = "A cntrl follow-up is waiting for a job";
+/// Console counts a machine it hasn't heard from in this long as out of
+/// reach: the gateway's heartbeat is every 15 s, and it gives up after 40.
+const LINK_FRESH_MS: u64 = 40_000;
 /// How long after a power step ran nothing keeps the machine awake: privd
 /// acts a moment after it answers, and a hold taken again would stop it.
 const GOING_MS: u64 = 2 * MINUTE_MS;
@@ -168,15 +172,37 @@ enum Effect {
     Run(u32),
 }
 
-/// What a follow-up's steps go by besides itself: when Console last heard
-/// from the machine, and the follow-ups whose jobs still run.
+/// What a follow-up's steps go by besides itself: the link to Console, and
+/// the follow-ups whose jobs still run.
 #[derive(Debug, Clone, Copy, Default)]
 struct Around<'a> {
+    /// When the gateway was last heard from, in Unix milliseconds; 0 never.
     heard: u64,
+    /// Whether the uplink is online.
+    online: bool,
     waiting: &'a [String],
 }
 
-impl Around<'_> {
+impl<'a> Around<'a> {
+    fn of(uplink: &Uplink, waiting: &'a [String]) -> Self {
+        Self {
+            heard: uplink.heard_ms(),
+            online: matches!(uplink.status(), UplinkStatus::Online { .. }),
+            waiting,
+        }
+    }
+
+    /// Whether someone in Console could stop a step now: the link is up and
+    /// the gateway was heard from lately.
+    fn reachable(&self, now: u64) -> bool {
+        self.online && now.saturating_sub(self.heard) <= LINK_FRESH_MS
+    }
+
+    /// Whether Console has heard from the machine since `since`.
+    fn heard_since(&self, since: u64) -> bool {
+        self.online && self.heard >= since
+    }
+
     /// The other follow-ups whose jobs still run.
     fn others(&self, id: &str) -> Vec<String> {
         self.waiting
@@ -812,7 +838,11 @@ fn stage_of(kept: &Kept, waiting: &[String]) -> Stage {
             Pending::Reaching { tries, .. } => Stage::Reaching { step: next, tries },
             Pending::WaitingFor => Stage::WaitingFor {
                 step: next,
-                followups: Around { heard: 0, waiting }.others(&kept.plan.id),
+                followups: Around {
+                    waiting,
+                    ..Around::default()
+                }
+                .others(&kept.plan.id),
             },
             Pending::Fresh | Pending::Due | Pending::Skipped => Stage::Running { step: next },
         },
@@ -1100,15 +1130,22 @@ fn advance(kept: &mut Kept, now: u64, around: Around<'_>) -> Vec<Effect> {
                 }));
                 kept.phase = after;
             }
-            Pending::CountingDown { until, .. } if now >= until => {
+            Pending::CountingDown { until, .. } if now >= until && around.reachable(now) => {
                 kept.phase = Phase::Stepping {
                     next,
                     pending: Pending::Due,
                 };
             }
-            // Console has heard from the machine since it woke: the person
+            // Nobody can stop it from Console now (D121, the owner: "if
+            // machine is not reachable we cancel the follow up after 3
+            // tries"): it waits, and counts down again in Console's sight.
+            Pending::CountingDown { until, .. } if now >= until => {
+                effects.extend(hold(kept, now, HeldWhy::Unreachable));
+                return effects;
+            }
+            // Console has heard from the machine since the hold: the person
             // can see the countdown, and stop it.
-            Pending::Reaching { woke, tries, .. } if around.heard >= woke => {
+            Pending::Reaching { woke, tries, .. } if around.heard_since(woke) => {
                 let until = now + u64::from(followup::COUNTDOWN_SECONDS) * 1_000;
                 kept.phase = Phase::Stepping {
                     next,
@@ -1160,15 +1197,15 @@ fn advance(kept: &mut Kept, now: u64, around: Around<'_>) -> Vec<Effect> {
     }
 }
 
-/// The machine slept, or the agent was stopped, until `now`: a countdown it
-/// slept through doesn't run when it wakes, as someone may have just woken
-/// it. It starts over once Console can reach the machine, so the person can
-/// see it and stop it; the wake is the first try.
-fn woke(kept: &mut Kept, now: u64) -> Vec<Effect> {
+/// Holds a step whose countdown nobody could stop from Console: it doesn't
+/// run, and counts down again once Console has heard from the machine since
+/// `now`, so the person can see it and stop it. The hold is a try; a step
+/// held already takes another. Only a countdown's hold goes on the record.
+fn hold(kept: &mut Kept, now: u64, why: HeldWhy) -> Vec<Effect> {
     let Phase::Stepping { next, pending } = kept.phase else {
         return Vec::new();
     };
-    let (tries, first) = match pending {
+    let (tries, counting) = match pending {
         Pending::CountingDown { tries, .. } => (tries, true),
         Pending::Reaching { tries, .. } => (tries, false),
         _ => return Vec::new(),
@@ -1181,22 +1218,29 @@ fn woke(kept: &mut Kept, now: u64) -> Vec<Effect> {
             next: now + MINUTE_MS,
         },
     };
-    if first {
-        vec![Effect::Record(Event::Slept { step: next })]
+    if counting {
+        vec![Effect::Record(Event::Held { step: next, why })]
     } else {
         Vec::new()
     }
 }
 
+/// The machine slept, or the agent was stopped, until `now`: a countdown it
+/// slept through doesn't run when it wakes, as someone may have just woken
+/// it, even if the link comes straight back.
+fn woke(kept: &mut Kept, now: u64) -> Vec<Effect> {
+    hold(kept, now, HeldWhy::Slept)
+}
+
 /// At the agent's start: a countdown that ran out while the agent was down,
 /// for an update or because the machine slept before it started again, is
-/// one nobody could stop, so it's taken as slept through.
+/// one nobody could stop.
 fn missed(kept: &mut Kept, now: u64) -> Vec<Effect> {
     match kept.phase {
         Phase::Stepping {
             pending: Pending::CountingDown { until, .. },
             ..
-        } if now >= until => woke(kept, now),
+        } if now >= until => hold(kept, now, HeldWhy::Unreachable),
         _ => Vec::new(),
     }
 }
@@ -1298,7 +1342,7 @@ pub async fn run(
         }
         effects
     };
-    carry_out(&followups, effects, uplink.heard_ms()).await;
+    carry_out(&followups, effects, &uplink).await;
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + TICK, TICK);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut ticks: u32 = 0;
@@ -1376,7 +1420,7 @@ pub async fn run(
                     "the machine slept through a follow-up's countdown; it counts down again once Console can reach it"
                 );
             }
-            carry_out(&followups, effects, uplink.heard_ms()).await;
+            carry_out(&followups, effects, &uplink).await;
         }
         match look {
             Look::Tick => {
@@ -1392,10 +1436,7 @@ pub async fn run(
                 let effects = {
                     let mut saved = followups.saved.lock().await;
                     let waiting = waiting_ids(&saved);
-                    let around = Around {
-                        heard: uplink.heard_ms(),
-                        waiting: &waiting,
-                    };
+                    let around = Around::of(&uplink, &waiting);
                     let mut effects = Vec::new();
                     for kept in &mut saved.followups {
                         let id = kept.plan.id.clone();
@@ -1450,7 +1491,7 @@ pub async fn run(
                     }
                     effects
                 };
-                carry_out(&followups, effects, uplink.heard_ms()).await;
+                carry_out(&followups, effects, &uplink).await;
                 keep_awake(&followups, now_ms(), &mut awake_retry, minute_ends).await;
                 let saved = followups.saved.lock().await;
                 let live = Live {
@@ -1515,10 +1556,7 @@ pub async fn run(
                 let effects = {
                     let mut saved = followups.saved.lock().await;
                     let waiting = waiting_ids(&saved);
-                    let around = Around {
-                        heard: uplink.heard_ms(),
-                        waiting: &waiting,
-                    };
+                    let around = Around::of(&uplink, &waiting);
                     let effects: Vec<(String, Effect)> = saved
                         .followups
                         .iter_mut()
@@ -1534,7 +1572,7 @@ pub async fn run(
                     }
                     effects
                 };
-                carry_out(&followups, effects, uplink.heard_ms()).await;
+                carry_out(&followups, effects, &uplink).await;
                 keep_awake(&followups, now_ms(), &mut awake_retry, false).await;
                 let saved = followups.saved.lock().await;
                 let live = Live {
@@ -1711,7 +1749,7 @@ async fn end_other_boots(followups: &FollowUps) {
 
 /// Pushes the records and runs the steps the effects call for, each step's
 /// outcome moving its follow-up on, until nothing more is due.
-async fn carry_out(followups: &FollowUps, mut effects: Vec<(String, Effect)>, heard: u64) {
+async fn carry_out(followups: &FollowUps, mut effects: Vec<(String, Effect)>, uplink: &Uplink) {
     while !effects.is_empty() {
         let mut more = Vec::new();
         for (id, effect) in effects {
@@ -1765,10 +1803,7 @@ async fn carry_out(followups: &FollowUps, mut effects: Vec<(String, Effect)>, he
                     }
                     let mut saved = followups.saved.lock().await;
                     let waiting = waiting_ids(&saved);
-                    let around = Around {
-                        heard,
-                        waiting: &waiting,
-                    };
+                    let around = Around::of(uplink, &waiting);
                     if let Some(kept) = saved.followups.iter_mut().find(|kept| kept.plan.id == id) {
                         more.extend(
                             finish_step(kept, step, outcome, now, around)
@@ -2141,8 +2176,17 @@ mod tests {
         }
     }
 
-    const ALONE: Around<'static> = Around {
+    /// Console in reach, whenever it's asked, and no other follow-up waiting.
+    const LINKED: Around<'static> = Around {
+        heard: u64::MAX,
+        online: true,
+        waiting: &[],
+    };
+
+    /// Console out of reach since the start.
+    const OFFLINE: Around<'static> = Around {
         heard: 0,
+        online: false,
         waiting: &[],
     };
 
@@ -2328,7 +2372,7 @@ mod tests {
             step(StepAction::Stop, false),
         ];
         let mut kept = kept(steps, quiet(5));
-        let effects = done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        let effects = done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         assert_eq!(
             records(&effects),
             vec![
@@ -2345,14 +2389,14 @@ mod tests {
                 },
             ]
         );
-        assert!(advance(&mut kept, 59_999, ALONE).is_empty());
-        assert_eq!(advance(&mut kept, 60_000, ALONE), vec![Effect::Run(1)]);
+        assert!(advance(&mut kept, 59_999, LINKED).is_empty());
+        assert_eq!(advance(&mut kept, 60_000, LINKED), vec![Effect::Run(1)]);
         let finished = finish_step(
             &mut kept,
             1,
             Outcome::Ran { processes: Some(4) },
             61_000,
-            ALONE,
+            LINKED,
         );
         assert_eq!(
             records(&finished),
@@ -2376,13 +2420,13 @@ mod tests {
             step(StepAction::Notify, false),
         ];
         let mut kept = kept(steps, quiet(5));
-        done(&mut kept, DoneWhy::Exited, 0, ALONE);
+        done(&mut kept, DoneWhy::Exited, 0, LINKED);
         kept.phase = Phase::Stepping {
             next: 0,
             pending: Pending::Skipped,
         };
         assert_eq!(
-            records(&advance(&mut kept, 10, ALONE)),
+            records(&advance(&mut kept, 10, LINKED)),
             vec![
                 Event::Step {
                     step: 0,
@@ -2405,12 +2449,12 @@ mod tests {
     fn ask_first_waits_for_an_answer_then_gives_up_on_it() {
         let steps = vec![step(StepAction::Stop, true)];
         let mut kept = kept(steps, quiet(5));
-        let effects = done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        let effects = done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         assert_eq!(records(&effects)[1], Event::Asking { step: 0 });
         let hours = u64::from(followup::ASK_HOURS) * HOUR_MS;
-        assert!(advance(&mut kept, hours - 1, ALONE).is_empty());
+        assert!(advance(&mut kept, hours - 1, LINKED).is_empty());
         assert_eq!(
-            records(&advance(&mut kept, hours, ALONE)),
+            records(&advance(&mut kept, hours, LINKED)),
             vec![
                 Event::Step {
                     step: 0,
@@ -2432,7 +2476,7 @@ mod tests {
             at: 10 * MINUTE_MS,
             then: AtDeadline::GiveUp,
         });
-        done(&mut early, DoneWhy::Quiet, 0, ALONE);
+        done(&mut early, DoneWhy::Quiet, 0, LINKED);
         assert_eq!(
             early.phase,
             Phase::Stepping {
@@ -2448,7 +2492,7 @@ mod tests {
             at: 1_000,
             then: AtDeadline::RunSteps,
         });
-        done(&mut late, DoneWhy::Deadline, 5_000, ALONE);
+        done(&mut late, DoneWhy::Deadline, 5_000, LINKED);
         let hours = u64::from(followup::ASK_HOURS) * HOUR_MS;
         assert_eq!(
             late.phase,
@@ -2464,33 +2508,38 @@ mod tests {
     #[test]
     fn an_approved_step_runs_at_once() {
         let mut kept = kept(vec![step(StepAction::Stop, true)], quiet(5));
-        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         kept.phase = Phase::Stepping {
             next: 0,
             pending: Pending::Due,
         };
-        assert_eq!(advance(&mut kept, 1, ALONE), vec![Effect::Run(0)]);
+        assert_eq!(advance(&mut kept, 1, LINKED), vec![Effect::Run(0)]);
     }
 
     #[test]
     fn a_countdown_slept_through_waits_for_console_then_counts_down_again() {
         let mut kept = kept(vec![step(power(PowerAction::Poweroff), false)], quiet(5));
-        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         // The machine sleeps mid-countdown and wakes an hour later.
         assert_eq!(
             records(&woke(&mut kept, HOUR_MS)),
-            vec![Event::Slept { step: 0 }]
+            vec![Event::Held {
+                step: 0,
+                why: HeldWhy::Slept
+            }]
         );
         // Console last heard from it before it slept: nothing runs, though
-        // the countdown's end has long passed.
+        // the countdown's end has long passed and the link looks up.
         let unheard = Around {
             heard: 30_000,
+            online: true,
             waiting: &[],
         };
         assert!(advance(&mut kept, HOUR_MS + 5_000, unheard).is_empty());
         // Console hears from it again: the countdown starts over.
         let heard = Around {
             heard: HOUR_MS + 8_000,
+            online: true,
             waiting: &[],
         };
         let until = HOUR_MS + 10_000 + 60_000;
@@ -2499,17 +2548,22 @@ mod tests {
             vec![Event::CountingDown { step: 0, until }]
         );
         assert!(advance(&mut kept, until - 1, heard).is_empty());
-        assert_eq!(advance(&mut kept, until, heard), vec![Effect::Run(0)]);
+        // Heartbeats keep coming, so it runs when the countdown ends.
+        let beating = Around {
+            heard: until - 5_000,
+            ..heard
+        };
+        assert_eq!(advance(&mut kept, until, beating), vec![Effect::Run(0)]);
     }
 
     #[test]
     fn a_machine_that_cant_reach_console_ends_its_follow_up_after_three_tries() {
         let mut kept = kept(vec![step(power(PowerAction::Suspend), false)], quiet(5));
-        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         woke(&mut kept, HOUR_MS);
         // The wake was the first try; a minute apart come the rest.
         for minute in 1..u64::from(followup::REACH_TRIES) {
-            assert!(advance(&mut kept, HOUR_MS + minute * MINUTE_MS, ALONE).is_empty());
+            assert!(advance(&mut kept, HOUR_MS + minute * MINUTE_MS, OFFLINE).is_empty());
             assert!(matches!(
                 stage_of(&kept, &[]),
                 Stage::Reaching { tries, .. } if u64::from(tries) == minute + 1
@@ -2517,7 +2571,7 @@ mod tests {
         }
         let at = HOUR_MS + u64::from(followup::REACH_TRIES) * MINUTE_MS;
         assert_eq!(
-            records(&advance(&mut kept, at, ALONE)),
+            records(&advance(&mut kept, at, OFFLINE)),
             vec![Event::Ended {
                 why: EndedWhy::Unreachable
             }]
@@ -2528,7 +2582,7 @@ mod tests {
     #[test]
     fn a_countdown_that_ran_out_while_the_agent_was_down_waits_too() {
         let mut kept = kept(vec![step(StepAction::Stop, false)], quiet(5));
-        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         // Back before its end: it carries on.
         assert!(missed(&mut kept, 30_000).is_empty());
         assert!(matches!(
@@ -2538,25 +2592,82 @@ mod tests {
         // Back after it: nobody could have stopped it, so it waits for Console.
         assert_eq!(
             records(&missed(&mut kept, 90_000)),
-            vec![Event::Slept { step: 0 }]
+            vec![Event::Held {
+                step: 0,
+                why: HeldWhy::Unreachable
+            }]
         );
-        assert!(advance(&mut kept, 95_000, ALONE).is_empty());
+        assert!(advance(&mut kept, 95_000, OFFLINE).is_empty());
+    }
+
+    #[test]
+    fn a_countdown_that_ends_out_of_consoles_reach_waits_for_it() {
+        let mut kept = kept(vec![step(StepAction::Stop, false)], quiet(5));
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
+        // The link dropped at 20 s; the countdown ends at 60 s.
+        let lost = Around {
+            heard: 20_000,
+            online: false,
+            waiting: &[],
+        };
+        assert_eq!(
+            records(&advance(&mut kept, 60_000, lost)),
+            vec![Event::Held {
+                step: 0,
+                why: HeldWhy::Unreachable
+            }]
+        );
+        assert!(advance(&mut kept, 100_000, lost).is_empty());
+        // Back: the countdown starts over, in Console's sight.
+        let back = Around {
+            heard: 110_000,
+            online: true,
+            waiting: &[],
+        };
+        assert_eq!(
+            records(&advance(&mut kept, 110_000, back)),
+            vec![Event::CountingDown {
+                step: 0,
+                until: 170_000
+            }]
+        );
+        let beating = Around {
+            heard: 165_000,
+            ..back
+        };
+        assert_eq!(advance(&mut kept, 170_000, beating), vec![Effect::Run(0)]);
+        // A link that's up but silent past the heartbeat's limit is out of reach too.
+        let mut quiet_link = self::kept(vec![step(StepAction::Stop, false)], quiet(5));
+        done(&mut quiet_link, DoneWhy::Quiet, 0, LINKED);
+        let silent = Around {
+            heard: 10_000,
+            online: true,
+            waiting: &[],
+        };
+        assert!(matches!(
+            records(&advance(&mut quiet_link, 60_000, silent))[..],
+            [Event::Held { .. }]
+        ));
     }
 
     #[test]
     fn sleeping_again_through_a_second_countdown_uses_a_try() {
         let mut kept = kept(vec![step(StepAction::Stop, false)], quiet(5));
-        done(&mut kept, DoneWhy::Quiet, 0, ALONE);
+        done(&mut kept, DoneWhy::Quiet, 0, LINKED);
         woke(&mut kept, HOUR_MS);
         let heard = Around {
             heard: HOUR_MS + 1,
+            online: true,
             waiting: &[],
         };
         advance(&mut kept, HOUR_MS + 2, heard);
         // It slept through that one too: on the record again, and a try.
         assert_eq!(
             records(&woke(&mut kept, 2 * HOUR_MS)),
-            vec![Event::Slept { step: 0 }]
+            vec![Event::Held {
+                step: 0,
+                why: HeldWhy::Slept
+            }]
         );
         assert!(matches!(
             stage_of(&kept, &[]),
@@ -2574,8 +2685,8 @@ mod tests {
         // As the pass began, this follow-up's job still ran, and another's does.
         let waiting = ["fu_1".to_owned(), "fu_2".to_owned()];
         let around = Around {
-            heard: 0,
             waiting: &waiting,
+            ..LINKED
         };
         let effects = done(&mut kept, DoneWhy::Quiet, 0, around);
         assert_eq!(
@@ -2596,7 +2707,7 @@ mod tests {
         assert!(advance(&mut kept, 60_000, around).is_empty());
         // The other job is done: the power step counts down.
         assert_eq!(
-            records(&advance(&mut kept, 70_000, ALONE)),
+            records(&advance(&mut kept, 70_000, LINKED)),
             vec![Event::CountingDown {
                 step: 1,
                 until: 130_000

@@ -428,9 +428,9 @@ fn a_change_holds_a_whole_plan_and_the_sleep_records_decode() {
         sample.followups[1].stage,
         Stage::Reaching { step: 0, tries: 2 }
     );
-    let text = fs::read_to_string(frames_dir().join("rec-followup-slept.json")).expect("read");
+    let text = fs::read_to_string(frames_dir().join("rec-followup-held.json")).expect("read");
     let Frame::Rec(rec) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
-        panic!("rec-followup-slept.json isn't records");
+        panic!("rec-followup-held.json isn't records");
     };
     let events: Vec<cntrl_protocol::followup::Event> = rec
         .recs
@@ -445,6 +445,10 @@ fn a_change_holds_a_whole_plan_and_the_sleep_records_decode() {
         events.first(),
         Some(&cntrl_protocol::followup::Event::Changed { recount: true })
     );
+    assert!(events.contains(&cntrl_protocol::followup::Event::Held {
+        step: 0,
+        why: cntrl_protocol::followup::HeldWhy::Unreachable
+    }));
     assert_eq!(
         events.last(),
         Some(&cntrl_protocol::followup::Event::Ended {

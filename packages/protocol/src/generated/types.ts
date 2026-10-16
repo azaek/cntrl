@@ -559,7 +559,7 @@ export type Event2 =
     | { why: DoneWhy; kind: "done" }
     | { step: number; kind: "asking" }
     | { step: number; until: number; kind: "counting_down" }
-    | { step: number; kind: "slept" }
+    | { step: number; why: HeldWhy; kind: "held" }
     | { step: number; followups: string[]; kind: "waiting_for" }
     | { step: number; outcome: Outcome; kind: "step" }
     | { why: EndedWhy; kind: "ended" }
@@ -692,6 +692,9 @@ export interface HeartbeatConfig {
     interval_ms: number;
     timeout_ms: number;
 }
+
+/** Why a step's countdown didn't end in the step running. */
+export type HeldWhy = "unknown" | "slept" | "unreachable";
 
 /**
  * The agent's first frame: who it is, proof of its device key, and what its
