@@ -4,7 +4,7 @@ description: What cntrl collects, why, who handles it for us, and what you can a
 icon: ShieldCheck
 ---
 
-_Last updated: 10 October 2026._
+_Last updated: 17 October 2026._
 
 This policy covers Cntrl Console (console.cntrl.pw), the cntrl agent you install on your machines, the gateway they connect to (gw.cntrl.pw), and this website (cntrl.pw). Cntrl Bridge, the desktop app, runs on your own network and sends us nothing.
 
@@ -33,6 +33,7 @@ When you add a machine, the agent tells Console about it:
 - Its hostname, the name you give it, its tags, its operating system and version, its architecture, its CPU model and memory size, the agent's version, and when it was last seen.
 - A hash of its machine ID, so a reinstalled machine is recognized, and its public keys, so it can prove who it is. Its private keys never leave it.
 - What its local policy allows Console to do.
+- Only if you turn on **Can be woken** for it: its wired port's MAC address, whether Wake-on-LAN is on, and the local IP addresses it was last reached at, so another of your machines can [wake it](/docs/console/wake). And only while its policy lets it wake others: its local IP addresses, to tell which of your machines share a network. Turning either off, or removing the device, deletes them.
 
 While you have a device's page open, its live readings pass through our gateway to your browser: CPU, memory, disks, network, GPUs, processes, services, containers, ports and log lines. **We don't store them.** The charts' history is kept on the device itself. The agent removes common secrets from log lines, such as passwords, tokens and keys, before a line leaves the machine; agents older than that feature send log lines as they are, and Console says so on the Logs tab.
 
@@ -108,6 +109,7 @@ Each works under its own data processing terms. Where data leaves the EU, the UK
 - Sessions: until you sign out, or they expire.
 - Invitations: 7 days.
 - Alerts that fired, and check results: 90 days.
+- What wakes a device: until you turn waking off for it, or remove it.
 - Billing records: as long as Polar and the law on records require.
 - Analytics: as long as PostHog keeps events for our project.
 - Deleting your account or an organization in Console takes effect at once. If you ask us to delete your account instead, we delete it within 30 days. Either way, our database's backups keep it for up to their restore window after that.

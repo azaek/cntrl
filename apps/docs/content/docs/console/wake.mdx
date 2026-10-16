@@ -1,0 +1,47 @@
+---
+title: Wake a machine
+description: Wake a machine that's asleep or off from Console, through another of your machines on the same network.
+icon: Sun
+---
+
+Console can wake a machine that's asleep or shut down: another of your machines on the same network sends it a Wake-on-LAN packet. It pairs with [follow-ups](/docs/console/follow-ups): put the PC to sleep when the job's done, and wake it when you need it again. It needs agent 0.1.21 or later, on both machines.
+
+Both machines have to agree to it, and each starts off:
+
+- **The machine to wake** has **Can be woken** turned on in Console. Until then, Console keeps nothing it could wake it with.
+- **A machine that sends the packet** allows `power.wake` in its policy. Pick one that stays on and is wired to the same network, such as a NAS, a Raspberry Pi or a server.
+
+## Set it up
+
+1. **Turn on Wake-on-LAN on the machine to wake.** It's a setting in the firmware (BIOS or UEFI), and one for the network adapter in the operating system. In Console, a device's **Actions** menu has **Wake-on-LAN**, with the steps for its system and its own interface and MAC address filled in.
+2. **Turn on Can be woken.** It's at the top of the same **Wake-on-LAN** dialog. Turn it on while the machine is online: Console asks it where a wake-up reaches it. Owners and admins can change it.
+3. **Allow waking on a machine that stays on.** On it, run:
+
+```bash
+sudo cntrl policy modify --allow power.wake
+```
+
+On Windows, run it without `sudo` in PowerShell opened as administrator. Where the machine requires [signed commands](/docs/console/signed-commands), each wake is signed too.
+
+## Wake it
+
+While the machine is offline, its **Actions** menu has **Wake** where **Wake-on-LAN** was. Once it can be woken, its Overview's Health and its tabs have **Wake** too.
+
+The dialog draws the machines that could send the packet, grouped by what Console knows of their networks, each wired to the machine to wake. The likeliest is picked, and you can pick another. A machine that can't send it says why: it's offline, its agent is older than 0.1.21, its policy doesn't allow it, or it's on another network. Where there's a fix, the command for it is right there.
+
+**Wake** sends the packet. Nothing answers a Wake-on-LAN packet, so Console follows the machine until it's back online. If it hasn't come back after 3 minutes, Console says so, and you can try another machine.
+
+## What the packet is, and where it goes
+
+The packet is the standard magic packet: six `FF` bytes, then the machine's MAC address 16 times, sent as UDP to port 9, three times. The sending machine sends it only to the broadcast address of its own networks that hold one of the addresses the machine to wake was last reached at, and at most ten a minute. A wake that doesn't say where the machine was is refused, so the packet never goes out on every network the sender is on. `power.wake` can't send anything else, or anywhere else.
+
+## When it doesn't wake
+
+- **Wi-Fi.** A wake-up packet often doesn't reach a machine on Wi-Fi. Console warns when the machine was on Wi-Fi when it last heard.
+- **A Mac** wakes this way from sleep, not from shut down. On it, **Wake for network access** has to be on (`sudo pmset -a womp 1`).
+- **Windows' fast startup** can keep a shut-down PC from waking. Turn it off in Control Panel, Power Options, **Choose what the power buttons do**.
+- **A machine that moved.** Console keeps where the machine was last reached, from when it last connected. A machine that moved to another network has to come online once before it can be woken there.
+
+## What Console keeps
+
+Only while a machine can be woken: its wired port's MAC address, whether Wake-on-LAN is on, and the local IP addresses it was last reached at. Only while a machine's policy allows `power.wake`: its local IP addresses, so Console can tell which machines share a network. Turning **Can be woken** off, denying `power.wake`, or removing the device deletes them. See the [privacy policy](/docs/legal/privacy).

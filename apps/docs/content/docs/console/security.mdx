@@ -27,6 +27,7 @@ Console can only ask for the operations in one list, [`ops.rs`](https://github.c
 - Only root on the machine changes its policy. Console can't.
 - SSH and the agent's own services can't be stopped or restarted through Console.
 - Console can't pause a machine, or resume one that someone paused.
+- Waking a machine sends one fixed packet, only on networks the sender shares with that machine's last addresses. See [Wake a machine](/docs/console/wake#what-the-packet-is-and-where-it-goes).
 
 ## Signed commands
 
@@ -67,7 +68,7 @@ The log is `/var/log/cntrl/audit` on Linux and macOS, and `%ProgramData%\cntrl\a
 
 ## What Console keeps
 
-Among what Console keeps to run your organization: your account, your organization and its people, your devices' details, your checks, rules and channels, and alerts and check results for 90 days. A channel's address is kept encrypted.
+Among what Console keeps to run your organization: your account, your organization and its people, your devices' details, your checks, rules and channels, and alerts and check results for 90 days. A channel's address is kept encrypted. A machine's MAC address and local IP addresses are kept only once you turn on [waking](/docs/console/wake#what-console-keeps) for it, and deleted when you turn it off.
 
 Live readings pass through to your browser and aren't stored. The charts' history stays on the machine itself. The [privacy policy](/docs/legal/privacy) lists everything kept, including billing, email and analytics if you agree to them, who handles it and for how long.
 

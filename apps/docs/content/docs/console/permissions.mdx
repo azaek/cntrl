@@ -36,9 +36,10 @@ Console groups them by part of the machine. Each part is off, or at one of its l
 | Power      | Sleep           | `power.suspend`     | Put the machine to sleep                                       | No             |
 | Power      | Hibernate       | `power.hibernate`   | Hibernate the machine                                          | No             |
 | Power      | Keep awake      | `power.inhibit`     | Keep the machine awake while a follow-up waits for its job     | No             |
+| Power      | Wake others     | `power.wake`        | Send a wake-up packet to another machine on its network        | No             |
 | Checks     | Run             | `checks.run`        | Check websites and ports from this machine's network           | No             |
 
-`checks.run` is off out of the box because checking addresses from a machine can map the network it's on. See [Checks](/docs/console/checks#from-one-of-your-machines).
+`checks.run` is off out of the box because checking addresses from a machine can map the network it's on. See [Checks](/docs/console/checks#from-one-of-your-machines). `power.wake` is off too, since it acts on other machines; see [Wake a machine](/docs/console/wake).
 
 ## Change what Console may do
 
