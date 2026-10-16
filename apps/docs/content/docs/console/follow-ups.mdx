@@ -50,7 +50,7 @@ Then each step runs in order:
 - **Ask first**: Console asks, in the strip and the panel, with **Not now** and the step's own button, such as **Hibernate**. It waits until the deadline while that's ahead, or 12 hours, and then doesn't run the step.
 - **Do it**: a 60-second countdown, with **Cancel**, which ends the follow-up.
 
-A power step can skip itself when someone has used the machine's keyboard or mouse in the last 5 minutes. It also waits for the machine's other follow-ups to finish, so it never cuts one short.
+A power step can skip itself when someone's using the machine, as the machine can tell: on a Mac, its keyboard, mouse or trackpad in the last 5 minutes; on Linux, a signed-in session, at the machine or over SSH, that isn't idle; on Windows, input in the last 5 minutes in a signed-in session, at the machine or over Remote Desktop. When the machine can't tell, the step doesn't run. A power step also waits for the machine's other follow-ups to finish, so it never cuts one short.
 
 The report stays under the header for 12 hours, until you choose **Done**, and every follow-up's report is in the **Follow-ups** section of the device's **Overview**.
 
