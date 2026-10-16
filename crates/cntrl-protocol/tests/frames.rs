@@ -404,6 +404,56 @@ fn followup_frames_decode() {
 }
 
 #[test]
+fn a_change_holds_a_whole_plan_and_the_sleep_records_decode() {
+    let text = fs::read_to_string(frames_dir().join("req-followup-change.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-followup-change.json isn't a request");
+    };
+    let Call::FollowUpChange(plan) = Call::decode(&request.op, request.data).expect("decodes")
+    else {
+        panic!("followup.change isn't FollowUpChange");
+    };
+    assert_eq!(plan.id, "fu_01m5followup00000000000000");
+    assert!(plan.steps[1].ask && !plan.keep_awake);
+    let sample: FollowUpsSample =
+        serde_json::from_value(data_of("evt-followups-holding.json")).expect("a sample");
+    assert_eq!(
+        sample.followups[0].stage,
+        Stage::WaitingFor {
+            step: 1,
+            followups: vec!["fu_01m5followupcontainer000000".to_owned()]
+        }
+    );
+    assert_eq!(
+        sample.followups[1].stage,
+        Stage::Reaching { step: 0, tries: 2 }
+    );
+    let text = fs::read_to_string(frames_dir().join("rec-followup-slept.json")).expect("read");
+    let Frame::Rec(rec) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("rec-followup-slept.json isn't records");
+    };
+    let events: Vec<cntrl_protocol::followup::Event> = rec
+        .recs
+        .iter()
+        .map(|record| {
+            serde_json::from_value::<FollowUpRecord>(record.data.clone())
+                .expect("a record")
+                .event
+        })
+        .collect();
+    assert_eq!(
+        events.first(),
+        Some(&cntrl_protocol::followup::Event::Changed { recount: true })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&cntrl_protocol::followup::Event::Ended {
+            why: cntrl_protocol::followup::EndedWhy::Unreachable
+        })
+    );
+}
+
+#[test]
 fn followups_are_signed_as_they_start_and_never_to_stop() {
     let signed = |name: &str| {
         OPS.iter()
@@ -412,6 +462,7 @@ fn followups_are_signed_as_they_start_and_never_to_stop() {
             .needs_signature()
     };
     assert!(signed("followup.start"));
+    assert!(signed("followup.change"));
     assert!(signed("followup.approve"));
     assert!(!signed("followup.skip"));
     assert!(!signed("followup.cancel"));

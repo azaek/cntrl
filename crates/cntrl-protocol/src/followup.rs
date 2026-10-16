@@ -1,8 +1,9 @@
 //! Follow-ups (D119, D121): a one-use plan for a job on a machine. Console sets
-//! one up with `followup.start`; the machine watches the job, judges when it's
-//! done, carries out the steps in order and reports each through the outbox,
-//! so a report made offline reaches Console once the link is back. It never
-//! fires twice, and it isn't an alert rule.
+//! one up with `followup.start` and may change it with `followup.change` while
+//! it waits; the machine watches the job, judges when it's done, carries out
+//! the steps in order and reports each through the outbox, so a report made
+//! offline reaches Console once the link is back. It never fires twice, and it
+//! isn't an alert rule.
 //!
 //! CPU is a percentage of one core, as the process table gives it, summed over
 //! the job's processes; disk is bytes a second, read and written together;
@@ -26,6 +27,11 @@ pub const ASK_HOURS: u32 = 12;
 pub const IN_USE_MINUTES: u32 = 5;
 /// The most follow-ups a machine keeps at once; Console's plans allow fewer.
 pub const MAX_FOLLOWUPS: usize = 10;
+/// A machine that slept through a step's countdown doesn't run the step when
+/// it wakes: it tries to reach Console, this many times a minute apart, and
+/// counts down again once it has. Then the follow-up is cancelled as
+/// unreachable.
+pub const REACH_TRIES: u32 = 3;
 /// The longest a follow-up's ID may be.
 pub const ID_MAX: usize = 64;
 
@@ -35,7 +41,8 @@ pub const ID_MAX: usize = 64;
 pub struct Plan {
     /// Chosen by Console (`fu_` and a ULID). Starting the same ID again
     /// answers with the follow-up already waiting, as a retry after a dropped
-    /// link does; a different plan under it is refused.
+    /// link does; a different plan under it is refused, and goes through
+    /// `followup.change` instead.
     pub id: String,
     pub watch: Watch,
     pub finish: Finish,
@@ -278,6 +285,12 @@ pub enum Stage {
     CountingDown { step: u32, until: u64 },
     /// A step is running.
     Running { step: u32 },
+    /// A power step waits for these follow-ups' jobs to be done before it
+    /// counts down or asks, since the machine going would end them.
+    WaitingFor { step: u32, followups: Vec<String> },
+    /// The machine slept through this step's countdown and is reaching
+    /// Console before it counts down again, `tries` of [`REACH_TRIES`] so far.
+    Reaching { step: u32, tries: u32 },
     #[serde(other)]
     Unknown,
 }
@@ -286,10 +299,13 @@ pub enum Stage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Minute {
-    /// Averaged over the minute's samples, the short processes it ran
-    /// included where the OS keeps their time.
+    /// From the CPU time the job's processes used over the minute, that of
+    /// the short ones it ran and waited for included (Linux and macOS keep
+    /// it, Windows doesn't); from the process table's samples where the
+    /// machine can't read that time.
     pub cpu: f64,
-    /// Where the machine can read it.
+    /// Bytes read and written over the minute, a second; on Linux the short
+    /// processes' included. Where the machine can read it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk: Option<u64>,
     pub busy: bool,
@@ -311,12 +327,20 @@ pub struct FollowUpRecord {
 pub enum Event {
     /// Set up and watching.
     Started { scope: Scope },
+    /// Changed while it waited (`followup.change`); `recount` when new lines,
+    /// minutes or finish started the quiet count over.
+    Changed { recount: bool },
     /// The job is done, or the deadline came and the steps run anyway.
     Done { why: DoneWhy },
     /// A step waits for someone to approve or skip it.
     Asking { step: u32 },
     /// A step runs at `until` unless someone skips it.
     CountingDown { step: u32, until: u64 },
+    /// The machine slept through this step's countdown, so the step didn't
+    /// run when it woke: it counts down again once Console can reach it.
+    Slept { step: u32 },
+    /// A power step waits for these follow-ups' jobs to be done.
+    WaitingFor { step: u32, followups: Vec<String> },
     /// A step's outcome. A message's step is `ran` when Console should send it.
     Step { step: u32, outcome: Outcome },
     /// It's over: nothing more happens to it.
@@ -397,6 +421,10 @@ pub enum EndedWhy {
     /// What it watched was gone before the follow-up started properly, as
     /// when a PID was reused.
     Gone,
+    /// The machine slept through a countdown and couldn't reach Console in
+    /// [`REACH_TRIES`] tries after it woke, so nothing more ran: Console says
+    /// "Machine not reachable".
+    Unreachable,
     #[serde(other)]
     Unknown,
 }

@@ -88,6 +88,8 @@ export const FOLLOWUP_ASK_HOURS = 12;
 export const FOLLOWUP_IN_USE_MINUTES = 5;
 /** The most follow-ups a machine keeps at once. */
 export const FOLLOWUP_MAX = 10;
+/** How many times, a minute apart, a machine that slept through a countdown tries to reach Console before the follow-up is cancelled. */
+export const FOLLOWUP_REACH_TRIES = 3;
 /** The longest a follow-up's ID may be. */
 export const FOLLOWUP_ID_MAX = 64;
 

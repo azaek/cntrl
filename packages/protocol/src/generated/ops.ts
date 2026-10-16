@@ -27,6 +27,7 @@ export interface Ops {
     "container.restart": { params: ContainerRef; result: ContainerJob; capability: "containers.manage"; since: 1; signed: true };
     "history.clear": { params: NoParams; result: HistoryStore; capability: "history.manage"; since: 1; signed: true };
     "followup.start": { params: Plan; result: Started; capability: "processes.read"; since: 1; signed: true };
+    "followup.change": { params: Plan; result: Started; capability: "processes.read"; since: 1; signed: true };
     "followup.approve": { params: StepRef; result: FollowUpRef; capability: "processes.read"; since: 1; signed: true };
     "followup.skip": { params: StepRef; result: FollowUpRef; capability: "processes.read"; since: 1; signed: false };
     "followup.cancel": { params: FollowUpRef; result: FollowUpRef; capability: "processes.read"; since: 1; signed: false };
@@ -72,6 +73,7 @@ export const OPS = [
     { name: "container.restart", capability: "containers.manage", since: 1, signed: true },
     { name: "history.clear", capability: "history.manage", since: 1, signed: true },
     { name: "followup.start", capability: "processes.read", since: 1, signed: true },
+    { name: "followup.change", capability: "processes.read", since: 1, signed: true },
     { name: "followup.approve", capability: "processes.read", since: 1, signed: true },
     { name: "followup.skip", capability: "processes.read", since: 1, signed: false },
     { name: "followup.cancel", capability: "processes.read", since: 1, signed: false },

@@ -449,7 +449,13 @@ export interface DisksHealth {
 export type DoneWhy = ("exited" | "quiet" | "unknown") | "deadline";
 
 /** Why a follow-up ended. */
-export type EndedWhy = ("cancelled" | "unknown") | "completed" | "gave_up" | "restarted" | "gone";
+export type EndedWhy =
+    | ("cancelled" | "unknown")
+    | "completed"
+    | "gave_up"
+    | "restarted"
+    | "gone"
+    | "unreachable";
 
 /** A container engine. */
 export interface Engine {
@@ -549,9 +555,12 @@ export interface Event {
 /** What happened. */
 export type Event2 =
     | { scope: Scope; kind: "started" }
+    | { recount: boolean; kind: "changed" }
     | { why: DoneWhy; kind: "done" }
     | { step: number; kind: "asking" }
     | { step: number; until: number; kind: "counting_down" }
+    | { step: number; kind: "slept" }
+    | { step: number; followups: string[]; kind: "waiting_for" }
     | { step: number; outcome: Outcome; kind: "step" }
     | { why: EndedWhy; kind: "ended" }
     | { kind: "unknown" };
@@ -988,11 +997,16 @@ export interface MemoryStats {
 /** A minute's readings of the job, and whether they made it busy. */
 export interface Minute {
     /**
-     * Averaged over the minute's samples, the short processes it ran
-     * included where the OS keeps their time.
+     * From the CPU time the job's processes used over the minute, that of
+     * the short ones it ran and waited for included (Linux and macOS keep
+     * it, Windows doesn't); from the process table's samples where the
+     * machine can't read that time.
      */
     cpu: number;
-    /** Where the machine can read it. */
+    /**
+     * Bytes read and written over the minute, a second; on Linux the short
+     * processes' included. Where the machine can read it.
+     */
     disk?: number | null;
     busy: boolean;
 }
@@ -1073,7 +1087,8 @@ export interface Plan {
     /**
      * Chosen by Console (`fu_` and a ULID). Starting the same ID again
      * answers with the follow-up already waiting, as a retry after a dropped
-     * link does; a different plan under it is refused.
+     * link does; a different plan under it is refused, and goes through
+     * `followup.change` instead.
      */
     id: string;
     watch: Watch;
@@ -1486,6 +1501,8 @@ export type Stage =
     | { step: number; kind: "asking" }
     | { step: number; until: number; kind: "counting_down" }
     | { step: number; kind: "running" }
+    | { step: number; followups: string[]; kind: "waiting_for" }
+    | { step: number; tries: number; kind: "reaching" }
     | { kind: "unknown" };
 
 /**

@@ -211,6 +211,11 @@ pub fn constants() -> String {
                 "The most follow-ups a machine keeps at once.",
             ),
             (
+                "FOLLOWUP_REACH_TRIES",
+                followup::REACH_TRIES.to_string(),
+                "How many times, a minute apart, a machine that slept through a countdown tries to reach Console before the follow-up is cancelled.",
+            ),
+            (
                 "FOLLOWUP_ID_MAX",
                 followup::ID_MAX.to_string(),
                 "The longest a follow-up's ID may be.",

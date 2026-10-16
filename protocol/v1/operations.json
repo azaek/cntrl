@@ -279,6 +279,18 @@
       }
     },
     {
+      "name": "followup.change",
+      "capability": "processes.read",
+      "since": 1,
+      "signed": true,
+      "params": {
+        "$ref": "#/$defs/Plan"
+      },
+      "result": {
+        "$ref": "#/$defs/Started"
+      }
+    },
+    {
       "name": "followup.approve",
       "capability": "processes.read",
       "since": 1,

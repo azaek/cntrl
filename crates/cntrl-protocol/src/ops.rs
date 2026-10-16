@@ -183,6 +183,17 @@ define_ops! {
         signed: Always,
         since: 1,
     },
+    /// Changes a follow-up while it waits for its job: the same ID with a
+    /// new plan for the same job. New lines, minutes or finish start the
+    /// quiet count over; new steps, a new deadline or keeping awake keep it.
+    /// Signed like a start, since the new plan can act later too.
+    FollowUpChange = "followup.change" {
+        params: crate::followup::Plan,
+        result: crate::followup::Started,
+        capability: "processes.read",
+        signed: Always,
+        since: 1,
+    },
     /// Approves a step that asked first, which then runs at once.
     FollowUpApprove = "followup.approve" {
         params: crate::followup::StepRef,

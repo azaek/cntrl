@@ -2669,7 +2669,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Chosen by Console (`fu_` and a ULID). Starting the same ID again\nanswers with the follow-up already waiting, as a retry after a dropped\nlink does; a different plan under it is refused."
+          "description": "Chosen by Console (`fu_` and a ULID). Starting the same ID again\nanswers with the follow-up already waiting, as a retry after a dropped\nlink does; a different plan under it is refused, and goes through\n`followup.change` instead."
         },
         "watch": {
           "$ref": "#/$defs/Watch"
@@ -4704,6 +4704,57 @@
         {
           "type": "object",
           "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "followups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "waiting_for"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "followups"
+          ],
+          "description": "A power step waits for these follow-ups' jobs to be done before it\ncounts down or asks, since the machine going would end them."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "tries": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "reaching"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "tries"
+          ],
+          "description": "The machine slept through this step's countdown and is reaching\nConsole before it counts down again, `tries` of [`REACH_TRIES`] so far."
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": {
               "type": "string",
               "const": "unknown"
@@ -4722,7 +4773,7 @@
         "cpu": {
           "type": "number",
           "format": "double",
-          "description": "Averaged over the minute's samples, the short processes it ran\nincluded where the OS keeps their time."
+          "description": "From the CPU time the job's processes used over the minute, that of\nthe short ones it ran and waited for included (Linux and macOS keep\nit, Windows doesn't); from the process table's samples where the\nmachine can't read that time."
         },
         "disk": {
           "type": [
@@ -4731,7 +4782,7 @@
           ],
           "format": "uint64",
           "minimum": 0,
-          "description": "Where the machine can read it."
+          "description": "Bytes read and written over the minute, a second; on Linux the short\nprocesses' included. Where the machine can read it."
         },
         "busy": {
           "type": "boolean"
@@ -5156,6 +5207,23 @@
         {
           "type": "object",
           "properties": {
+            "recount": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "required": [
+            "kind",
+            "recount"
+          ],
+          "description": "Changed while it waited (`followup.change`); `recount` when new lines,\nminutes or finish started the quiet count over."
+        },
+        {
+          "type": "object",
+          "properties": {
             "why": {
               "$ref": "#/$defs/DoneWhy"
             },
@@ -5213,6 +5281,51 @@
             "until"
           ],
           "description": "A step runs at `until` unless someone skips it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "slept"
+            }
+          },
+          "required": [
+            "kind",
+            "step"
+          ],
+          "description": "The machine slept through this step's countdown, so the step didn't\nrun when it woke: it counts down again once Console can reach it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "followups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "waiting_for"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "followups"
+          ],
+          "description": "A power step waits for these follow-ups' jobs to be done."
         },
         {
           "type": "object",
@@ -5438,6 +5551,11 @@
           "type": "string",
           "const": "gone",
           "description": "What it watched was gone before the follow-up started properly, as\nwhen a PID was reused."
+        },
+        {
+          "type": "string",
+          "const": "unreachable",
+          "description": "The machine slept through a countdown and couldn't reach Console in\n[`REACH_TRIES`] tries after it woke, so nothing more ran: Console says\n\"Machine not reachable\"."
         }
       ],
       "description": "Why a follow-up ended."
