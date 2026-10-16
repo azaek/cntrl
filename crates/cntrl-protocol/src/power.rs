@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::network::InterfaceKind;
+
 /// A power action, by the name of its operation's second part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -130,6 +132,11 @@ pub struct LanAddress {
     pub address: String,
     /// The prefix length: 24 for a /24.
     pub prefix: u8,
+    /// The interface's kind, so Console can say when a machine was reached
+    /// over Wi-Fi, which a magic packet often doesn't wake; absent where it's
+    /// unknown, and in a wake's `reach`, which needs only where to send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<InterfaceKind>,
 }
 
 /// `power.wake`: wakes another machine with a Wake-on-LAN magic packet, sent
@@ -142,8 +149,8 @@ pub struct Wake {
     pub mac: String,
     /// Where it was last reached, from its own `power.info`: the packet goes
     /// out only on this machine's networks that hold one of these addresses.
-    /// With none, on all of them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// A wake without them is refused, so it never goes out on every network
+    /// this machine is on.
     pub reach: Vec<LanAddress>,
 }
 

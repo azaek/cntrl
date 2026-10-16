@@ -2240,6 +2240,17 @@
           "minimum": 0,
           "maximum": 255,
           "description": "The prefix length: 24 for a /24."
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterfaceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The interface's kind, so Console can say when a machine was reached\nover Wi-Fi, which a magic packet often doesn't wake; absent where it's\nunknown, and in a wake's `reach`, which needs only where to send."
         }
       },
       "required": [
@@ -2248,6 +2259,32 @@
         "prefix"
       ],
       "description": "An IPv4 address on a local network."
+    },
+    "InterfaceKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ethernet",
+            "wifi",
+            "loopback",
+            "bridge",
+            "bond",
+            "vlan",
+            "other"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "tunnel",
+          "description": "A VPN or tunnel: WireGuard, `tun`, `utun`, GRE and the like."
+        },
+        {
+          "type": "string",
+          "const": "virtual",
+          "description": "A container's or a virtual machine's link: `veth`, `docker0`, `virbr0`."
+        }
+      ]
     },
     "PowerStarted": {
       "type": "object",
@@ -2273,11 +2310,12 @@
           "items": {
             "$ref": "#/$defs/LanAddress"
           },
-          "description": "Where it was last reached, from its own `power.info`: the packet goes\nout only on this machine's networks that hold one of these addresses.\nWith none, on all of them."
+          "description": "Where it was last reached, from its own `power.info`: the packet goes\nout only on this machine's networks that hold one of these addresses.\nA wake without them is refused, so it never goes out on every network\nthis machine is on."
         }
       },
       "required": [
-        "mac"
+        "mac",
+        "reach"
       ],
       "description": "`power.wake`: wakes another machine with a Wake-on-LAN magic packet, sent\nfrom this one to the broadcast address of a network both are on (D123)."
     },
@@ -4052,32 +4090,6 @@
         "errors"
       ],
       "description": "One network interface."
-    },
-    "InterfaceKind": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "ethernet",
-            "wifi",
-            "loopback",
-            "bridge",
-            "bond",
-            "vlan",
-            "other"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "tunnel",
-          "description": "A VPN or tunnel: WireGuard, `tun`, `utun`, GRE and the like."
-        },
-        {
-          "type": "string",
-          "const": "virtual",
-          "description": "A container's or a virtual machine's link: `veth`, `docker0`, `virbr0`."
-        }
-      ]
     },
     "InterfaceAddress": {
       "type": "object",

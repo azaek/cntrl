@@ -865,6 +865,12 @@ export interface LanAddress {
     address: string;
     /** The prefix length: 24 for a /24. */
     prefix: number;
+    /**
+     * The interface's kind, so Console can say when a machine was reached
+     * over Wi-Fi, which a magic packet often doesn't wake; absent where it's
+     * unknown, and in a wake's `reach`, which needs only where to send.
+     */
+    kind?: InterfaceKind | null;
 }
 
 /** Limits the gateway enforces on this session. */
@@ -1740,9 +1746,10 @@ export interface Wake {
     /**
      * Where it was last reached, from its own `power.info`: the packet goes
      * out only on this machine's networks that hold one of these addresses.
-     * With none, on all of them.
+     * A wake without them is refused, so it never goes out on every network
+     * this machine is on.
      */
-    reach?: LanAddress[];
+    reach: LanAddress[];
 }
 
 /** Wake-on-LAN on a wired interface. */

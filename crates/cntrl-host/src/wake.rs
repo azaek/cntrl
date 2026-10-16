@@ -101,6 +101,7 @@ pub fn lan(reading: &NetworkReading) -> Vec<LanAddress> {
                     interface: interface.name.clone(),
                     address: ip.to_string(),
                     prefix: address.prefix,
+                    kind: Some(interface.kind),
                 })
             })
         })
@@ -168,12 +169,9 @@ pub fn describe(info: &mut PowerInfo, reading: &NetworkReading) {
 }
 
 /// The addresses of this machine's to send from, for a machine last reached
-/// at `reach`: those on a network holding one of them, or with nothing to
-/// go by, all of them.
+/// at `reach`: those on a network holding one of them. With nothing to go
+/// by, none: a packet never goes out on every network this machine is on.
 pub fn senders(own: &[LanAddress], reach: &[LanAddress]) -> Vec<LanAddress> {
-    if reach.is_empty() {
-        return own.to_vec();
-    }
     own.iter()
         .filter(|address| reach.iter().any(|target| holds(address, target)))
         .cloned()
@@ -247,6 +245,15 @@ mod tests {
             interface: interface.to_owned(),
             address: address.to_owned(),
             prefix,
+            kind: None,
+        }
+    }
+
+    /// An address as the machine reports it, with its interface's kind.
+    fn on(kind: InterfaceKind, interface: &str, address: &str, prefix: u8) -> LanAddress {
+        LanAddress {
+            kind: Some(kind),
+            ..self::address(interface, address, prefix)
         }
     }
 
@@ -344,8 +351,8 @@ mod tests {
         assert_eq!(
             lan(&reading),
             [
-                address("eno1", "192.168.1.20", 24),
-                address("vmbr0", "10.0.0.2", 24)
+                on(InterfaceKind::Ethernet, "eno1", "192.168.1.20", 24),
+                on(InterfaceKind::Bridge, "vmbr0", "10.0.0.2", 24)
             ]
         );
     }
@@ -366,11 +373,11 @@ mod tests {
         };
         assert_eq!(
             reach(&reading, "enp3s0"),
-            [address("vmbr0", "192.168.1.5", 24)]
+            [on(InterfaceKind::Bridge, "vmbr0", "192.168.1.5", 24)]
         );
         assert_eq!(
             reach(&reading, "vmbr0"),
-            [address("vmbr0", "192.168.1.5", 24)]
+            [on(InterfaceKind::Bridge, "vmbr0", "192.168.1.5", 24)]
         );
     }
 
@@ -391,7 +398,10 @@ mod tests {
         assert_eq!(wake.interface, "Ethernet");
         assert_eq!(wake.mac, "a8:a1:59:12:34:56");
         assert_eq!(wake.enabled, None);
-        assert_eq!(wake.reach, [address("Ethernet", "192.168.1.30", 24)]);
+        assert_eq!(
+            wake.reach,
+            [on(InterfaceKind::Ethernet, "Ethernet", "192.168.1.30", 24)]
+        );
         assert_eq!(info.lan.len(), 2);
         // What the OS named stays, with where it's reached filled in.
         let mut named = PowerInfo {
@@ -409,7 +419,11 @@ mod tests {
             (wake.interface.as_str(), wake.enabled),
             ("Wi-Fi", Some(false))
         );
-        assert_eq!(wake.reach, [address("Wi-Fi", "192.168.1.31", 24)]);
+        // Over Wi-Fi, which Console says may not wake it.
+        assert_eq!(
+            wake.reach,
+            [on(InterfaceKind::Wifi, "Wi-Fi", "192.168.1.31", 24)]
+        );
     }
 
     #[test]
@@ -423,6 +437,7 @@ mod tests {
             [address("eno1", "192.168.1.20", 24)]
         );
         assert!(senders(&own, &[address("eth0", "192.168.9.77", 24)]).is_empty());
-        assert_eq!(senders(&own, &[]), own);
+        // Nothing to go by sends nothing, never on every network.
+        assert!(senders(&own, &[]).is_empty());
     }
 }

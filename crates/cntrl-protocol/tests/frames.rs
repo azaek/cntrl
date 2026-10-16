@@ -260,11 +260,17 @@ fn a_wake_names_the_machine_and_where_it_was_reached() {
         (wake.reach[0].address.as_str(), wake.reach[0].prefix),
         ("192.168.1.30", 24)
     );
+    // Only where to send it: the kind of interface is the machine's to report, not the sender's to use.
+    assert_eq!(wake.reach[0].kind, None);
     let sent: WakeSent = serde_json::from_value(data_of("res-power-wake.json")).expect("sent");
     assert_eq!(sent.sent[0].interface, "vmbr0");
-    // A wake from an agent that knows nothing of where the machine was: every network.
-    let bare: Wake = serde_json::from_value(json!({"mac": "a8:a1:59:12:34:56"})).expect("bare");
-    assert!(bare.reach.is_empty());
+    // A wake that doesn't say where the machine was isn't a wake: it would go out on every network.
+    assert!(serde_json::from_value::<Wake>(json!({"mac": "a8:a1:59:12:34:56"})).is_err());
+    // Each address says its interface's kind, so Console can tell a machine reached over Wi-Fi.
+    let info: PowerInfo = serde_json::from_value(data_of("res-power-info.json")).expect("info");
+    let port = info.wake_on_lan.expect("a port");
+    assert_eq!(port.reach[0].kind, Some(InterfaceKind::Ethernet));
+    assert_eq!(info.lan[1].kind, Some(InterfaceKind::Wifi));
 }
 
 /// The data of an event or a successful response in a golden frame.

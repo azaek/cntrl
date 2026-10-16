@@ -1855,6 +1855,14 @@ async fn wake(target: Wake) -> Result<WakeSent, CallError> {
             format!("{} isn't a network card's hardware address", target.mac),
         )
     })?;
+    // Without where it was last reached there's no network to pick, and the
+    // packet never goes out on every one this machine is on.
+    if target.reach.is_empty() {
+        return Err(CallError::new(
+            ErrorCode::BadRequest,
+            "it doesn't say where the machine was last reached",
+        ));
+    }
     let reading = network_reading().await?;
     let own = cntrl_host::wake::lan(&reading);
     let from = cntrl_host::wake::senders(&own, &target.reach);
