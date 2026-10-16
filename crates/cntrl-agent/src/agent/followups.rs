@@ -230,10 +230,13 @@ struct Sums {
     cpu: f64,
     disk: Option<f64>,
     samples: u32,
+    /// When the minute's first sample came.
+    first: Option<u64>,
 }
 
 impl Sums {
-    fn add(&mut self, cpu: f64, disk: Option<f64>) {
+    fn add(&mut self, cpu: f64, disk: Option<f64>, at: u64) {
+        self.first.get_or_insert(at);
         self.cpu += cpu;
         if let Some(disk) = disk {
             *self.disk.get_or_insert(0.0) += disk;
@@ -251,6 +254,29 @@ impl Sums {
         let disk = self.disk.map(|sum| (sum / samples).round().max(0.0) as u64);
         Some(minute_of(self.cpu / samples, disk, finish))
     }
+
+    /// Whether the samples span enough of the minute to judge it.
+    fn covers(&self, now: u64) -> bool {
+        self.first
+            .is_some_and(|first| now.saturating_sub(first) >= COUNTED_AT_LEAST_MS)
+    }
+}
+
+/// The minute that just ended, judged from the job's own totals, or where
+/// they can't be read, the table's samples; none when neither saw enough of
+/// it. Minutes end together for every follow-up, so one set up late in a
+/// minute waits for the next: a moment's reading never counts as a quiet
+/// minute.
+fn minute_judged(
+    meter: Option<&Meter>,
+    sums: Option<&Sums>,
+    finish: &Finish,
+    now: u64,
+) -> Option<Minute> {
+    meter.and_then(|meter| meter.minute(finish)).or_else(|| {
+        sums.filter(|sums| sums.covers(now))
+            .and_then(|sums| sums.minute(finish))
+    })
 }
 
 /// A minute's readings judged against the plan's lines: busy if the CPU or
@@ -1460,10 +1486,8 @@ pub async fn run(
                         }
                         if minute_ends {
                             let finish = kept.plan.finish.clone();
-                            let minute = meters
-                                .get(&id)
-                                .and_then(|meter| meter.minute(&finish))
-                                .or_else(|| sums.get(&id).and_then(|sums| sums.minute(&finish)));
+                            let minute =
+                                minute_judged(meters.get(&id), sums.get(&id), &finish, now);
                             if let Some(why) = judge_minute(kept, minute) {
                                 found.extend(done(kept, why, now, around));
                             }
@@ -1519,7 +1543,9 @@ pub async fn run(
                         present.insert(kept.plan.id.clone(), !job.is_empty());
                         if !job.is_empty() {
                             let cpu = job.iter().map(|process| process.cpu).sum();
-                            sums.entry(kept.plan.id.clone()).or_default().add(cpu, None);
+                            sums.entry(kept.plan.id.clone())
+                                .or_default()
+                                .add(cpu, None, now_ms());
                         }
                     }
                 }
@@ -1546,7 +1572,9 @@ pub async fn run(
                         if let Some(container) = running {
                             // A container's share of the machine, as a percentage of one core.
                             let cpu = container.cpu.unwrap_or(0.0) * cores * 100.0;
-                            sums.entry(kept.plan.id.clone()).or_default().add(cpu, None);
+                            sums.entry(kept.plan.id.clone())
+                                .or_default()
+                                .add(cpu, None, now_ms());
                         }
                     }
                 }
@@ -2280,14 +2308,40 @@ mod tests {
         };
         let mut kept = kept(vec![], finish.clone());
         let mut busy = Sums::default();
-        busy.add(1.0, Some(50_000.0));
+        busy.add(1.0, Some(50_000.0), 0);
         assert_eq!(judge_minute(&mut kept, busy.minute(&finish)), None);
         let mut idle = Sums::default();
-        idle.add(1.0, Some(10.0));
+        idle.add(1.0, Some(10.0), 0);
         assert_eq!(
             judge_minute(&mut kept, idle.minute(&finish)),
             Some(DoneWhy::Quiet)
         );
+    }
+
+    #[test]
+    fn a_moment_of_a_minute_never_counts_as_quiet() {
+        let finish = Finish::Quiet {
+            minutes: 1,
+            cpu: 6.0,
+            disk: None,
+        };
+        // Set up 15 s before the minute ends: one sample of the table is all there is.
+        let mut late = Sums::default();
+        late.add(0.5, None, 45_000);
+        assert!(minute_judged(None, Some(&late), &finish, 60_000).is_none());
+        // Seen from 20 s in, the minute is judged.
+        let mut seen = Sums::default();
+        seen.add(0.5, None, 20_000);
+        seen.add(0.5, None, 45_000);
+        assert!(
+            minute_judged(None, Some(&seen), &finish, 60_000).is_some_and(|minute| !minute.busy)
+        );
+        // Totals over too little of it leave it to the samples, which need enough too.
+        let mut meter = Meter::default();
+        meter.look(reading(50_000, &[]));
+        meter.look(reading(60_000, &[]));
+        assert!(minute_judged(Some(&meter), Some(&late), &finish, 60_000).is_none());
+        assert!(minute_judged(Some(&meter), Some(&seen), &finish, 60_000).is_some());
     }
 
     #[test]
