@@ -9,13 +9,38 @@ use serde_json::{Map, Value};
 
 use crate::codes::ErrorCode;
 
-/// A registry entry: the wire name, the policy capability that gates it, and the
-/// protocol revision that introduced it.
+/// A registry entry: the wire name, the policy capability that gates it, the
+/// protocol revision that introduced it, and whether a machine that requires
+/// signatures needs one on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpInfo {
     pub name: &'static str,
     pub capability: &'static str,
     pub since: u32,
+    pub signed: Signed,
+}
+
+/// Whether an operation must be signed where the machine requires signatures
+/// (D108). Most follow their capability; a few say so themselves (D121): a
+/// follow-up is signed as it's set up, whatever it needs to read, and the
+/// operations that stop or skip something never are, so stopping always works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signed {
+    /// As its capability says: signed when the capability changes the machine.
+    ByCapability,
+    Always,
+    Never,
+}
+
+impl OpInfo {
+    /// Whether the operation must be signed where the machine requires it.
+    pub fn needs_signature(&self) -> bool {
+        match self.signed {
+            Signed::ByCapability => crate::signers::needs_signature(self.capability),
+            Signed::Always => true,
+            Signed::Never => false,
+        }
+    }
 }
 
 /// Topics have the same registry fields as operations.
@@ -80,12 +105,15 @@ pub struct TopicSchema {
 }
 
 macro_rules! define_ops {
+    (@signed) => { $crate::registry::Signed::ByCapability };
+    (@signed $signed:ident) => { $crate::registry::Signed::$signed };
     ($(
         $(#[$attr:meta])*
         $variant:ident = $name:literal {
             params: $params:ty,
             result: $result:ty,
             capability: $capability:literal,
+            $(signed: $signed:ident,)?
             since: $since:literal $(,)?
         }
     ),* $(,)?) => {
@@ -98,7 +126,12 @@ macro_rules! define_ops {
 
         /// Every operation, in declaration order.
         pub const OPS: &[$crate::OpInfo] = &[
-            $( $crate::OpInfo { name: $name, capability: $capability, since: $since }, )*
+            $( $crate::OpInfo {
+                name: $name,
+                capability: $capability,
+                since: $since,
+                signed: define_ops!(@signed $($signed)?),
+            }, )*
         ];
 
         impl Call {
@@ -131,7 +164,12 @@ macro_rules! define_ops {
         pub fn op_schemas(generator: &mut schemars::SchemaGenerator) -> Vec<$crate::OpSchema> {
             vec![$(
                 $crate::OpSchema {
-                    info: $crate::OpInfo { name: $name, capability: $capability, since: $since },
+                    info: $crate::OpInfo {
+                        name: $name,
+                        capability: $capability,
+                        since: $since,
+                        signed: define_ops!(@signed $($signed)?),
+                    },
                     params: generator.subschema_for::<$params>(),
                     result: generator.subschema_for::<$result>(),
                 },
@@ -156,9 +194,14 @@ macro_rules! define_topics {
             $( $(#[$attr])* $variant($params), )*
         }
 
-        /// Every topic, in declaration order.
+        /// Every topic, in declaration order. Subscribing never needs a signature.
         pub const TOPICS: &[$crate::TopicInfo] = &[
-            $( $crate::OpInfo { name: $name, capability: $capability, since: $since }, )*
+            $( $crate::OpInfo {
+                name: $name,
+                capability: $capability,
+                since: $since,
+                signed: $crate::registry::Signed::Never,
+            }, )*
         ];
 
         impl Topic {
@@ -191,7 +234,12 @@ macro_rules! define_topics {
         pub fn topic_schemas(generator: &mut schemars::SchemaGenerator) -> Vec<$crate::TopicSchema> {
             vec![$(
                 $crate::TopicSchema {
-                    info: $crate::OpInfo { name: $name, capability: $capability, since: $since },
+                    info: $crate::OpInfo {
+                        name: $name,
+                        capability: $capability,
+                        since: $since,
+                        signed: $crate::registry::Signed::Never,
+                    },
                     params: generator.subschema_for::<$params>(),
                     event: generator.subschema_for::<$event>(),
                 },

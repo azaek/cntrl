@@ -17,6 +17,7 @@ use cntrl_protocol::auth::{gateway_host, hello_signing_string};
 use cntrl_protocol::checks::{CheckResults, DeviceCheck};
 use cntrl_protocol::codes::{ErrorCode, close};
 use cntrl_protocol::containers::{ContainerRef, ContainersParams, ContainersSample};
+use cntrl_protocol::followup::{FollowUpRef, FollowUpsParams, FollowUpsSample};
 use cntrl_protocol::frame::{
     AgentInfo, Disabled, Event, Frame, GoAway, HeartbeatConfig, Hello, HelloAuth, Pause,
     PolicySummary, Records, Request, Response, SigAlg, Subscribe, Uninstall, Welcome,
@@ -24,10 +25,10 @@ use cntrl_protocol::frame::{
 use cntrl_protocol::logs::{LogsBatch, LogsParams};
 use cntrl_protocol::network::{Listeners, NetworkParams, NetworkSample};
 use cntrl_protocol::ops::{self, Topic};
-use cntrl_protocol::power::{PowerAction, PowerInfo};
+use cntrl_protocol::power::{PowerAction, PowerInfo, Wake, WakeSent};
 use cntrl_protocol::process::ProcessesParams;
 use cntrl_protocol::service::{ServiceAction, ServiceList, ServiceRef, ServiceStatus};
-use cntrl_protocol::signers::{self as signatures, SignatureState, SignerLog};
+use cntrl_protocol::signers::{SignatureState, SignerLog};
 use cntrl_protocol::stats::{StatsParams, StatsSample};
 use cntrl_protocol::storage::{DisksHealth, StorageParams, StorageSample};
 use cntrl_protocol::{MAX_FRAME_BYTES, PING, PONG, PROTOCOL_VERSION, SUBPROTOCOL};
@@ -51,6 +52,7 @@ use super::alerts::Alerts;
 use super::checks;
 use super::containers;
 use super::docker;
+use super::followups::FollowUps;
 use super::history::History;
 use super::host;
 use super::identity::{self, DEVICE_KEY_FILE, Identity};
@@ -156,6 +158,10 @@ pub struct Uplink {
     /// An uninstall waiting for the session, which `uninstalling` wakes.
     uninstall: std::sync::Mutex<Option<UninstallRequest>>,
     uninstalling: Notify,
+    /// When the gateway was last heard from, in Unix milliseconds: its
+    /// welcome, a heartbeat's answer or any frame. A follow-up whose machine
+    /// slept through a countdown waits for this to pass its waking (D121).
+    heard: std::sync::atomic::AtomicU64,
 }
 
 impl Uplink {
@@ -170,6 +176,7 @@ impl Uplink {
             resumed: Notify::new(),
             uninstall: std::sync::Mutex::new(None),
             uninstalling: Notify::new(),
+            heard: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -256,6 +263,16 @@ impl Uplink {
         self.status.borrow().clone()
     }
 
+    /// When the gateway was last heard from, in Unix milliseconds; 0 never.
+    pub fn heard_ms(&self) -> u64 {
+        self.heard.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn heard_now(&self) {
+        self.heard
+            .store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Tells the uplink the identity changed.
     pub fn enrolled(&self) {
         self.enrolled.notify_one();
@@ -294,6 +311,9 @@ pub struct UplinkConfig {
     pub alerts: Arc<Alerts>,
     /// The history this device keeps, for `history.*` (D52).
     pub history: Arc<History>,
+    /// The follow-ups this device carries out, for `followup.*` and the
+    /// `followups` topic (D121).
+    pub followups: Arc<FollowUps>,
     /// Signed commands (D108): whom the machine trusts, and what it's seen.
     pub signing: Arc<signers::Gate>,
 }
@@ -609,6 +629,7 @@ async fn session(
     // On, as ever or once more: the alert rules judge again (D87).
     config.alerts.rest(false).await;
     info!(session = %welcome.session, gateway = url, "uplink online");
+    uplink.heard_now();
     uplink.set(UplinkStatus::Online {
         gateway: url.to_owned(),
         session: welcome.session.clone(),
@@ -676,6 +697,7 @@ async fn online(
             network: &session.config.network,
             storage: &session.config.storage,
             containers: &session.config.containers,
+            followups: &session.config.followups,
         };
         if let Err(end) = session
             .subs
@@ -711,13 +733,18 @@ async fn online(
             }
             message = ws.next() => match message {
                 Some(Ok(Message::Text(text))) => match text.as_str() {
-                    PONG => last_pong = Instant::now(),
+                    PONG => {
+                        last_pong = Instant::now();
+                        uplink.heard_now();
+                    }
                     PING => {
+                        uplink.heard_now();
                         if let Err(e) = ws.send(Message::text(PONG)).await {
                             debug!("can't answer a ping: {e}");
                         }
                     }
                     json => {
+                        uplink.heard_now();
                         if let Some(end) = handle(ws, json, stable(), &mut session).await {
                             let End::Disabled(disabled) = end else { return end };
                             // What the session served stops here: subscriptions,
@@ -770,6 +797,12 @@ async fn online(
             Some(sample) = next_value(&mut session.subs.containers), if session.subs.containers.is_some() => {
                 let containers = |topic: &Watching| matches!(topic, Watching::Containers);
                 if let Err(end) = session.subs.publish_to(ws, containers, sample.ts, &*sample).await {
+                    return end;
+                }
+            }
+            Some(sample) = next_value(&mut session.subs.followups), if session.subs.followups.is_some() => {
+                let followups = |topic: &Watching| matches!(topic, Watching::FollowUps);
+                if let Err(end) = session.subs.publish_to(ws, followups, sample.ts, &*sample).await {
                     return end;
                 }
             }
@@ -1168,11 +1201,11 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
     let reply = match frame {
         Frame::Req(request) => {
             let privd = &session.config.privd_socket;
-            let history = &session.config.history;
+            let stores = (&session.config.history, &session.config.followups);
             let signing = (&*session.config.signing, session.device_id.as_str());
             session
                 .requests
-                .start(request, &session.policy, privd, history, signing)?
+                .start(request, &session.policy, privd, stores, signing)?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
@@ -1184,6 +1217,7 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
                 network: &session.config.network,
                 storage: &session.config.storage,
                 containers: &session.config.containers,
+                followups: &session.config.followups,
             };
             return session
                 .subs
@@ -1248,7 +1282,7 @@ impl Requests {
         request: Request,
         policy: &Arc<PolicyState>,
         privd: &Path,
-        history: &Arc<History>,
+        (history, followups): (&Arc<History>, &Arc<FollowUps>),
         (signing, device_id): (&signers::Gate, &str),
     ) -> Option<Response> {
         let refuse = |code, msg: String| Some(Response::err(request.id.clone(), code, msg));
@@ -1272,12 +1306,13 @@ impl Requests {
             Ok(call) => call,
             Err(e) => return refuse(e.code(), e.to_string()),
         };
-        // An operation that changes the machine needs a trusted signer's
-        // signature where the machine requires them (D108).
+        // An operation that changes the machine, or sets up a follow-up that
+        // may later, needs a trusted signer's signature where the machine
+        // requires them (D108, D121); stopping or skipping never does.
         let needs = ops::OPS
             .iter()
             .find(|info| info.name == request.op)
-            .is_some_and(|info| signatures::needs_signature(info.capability));
+            .is_some_and(|info| info.needs_signature());
         let signer = if needs {
             match signing.admit(device_id, &request, now_ms()) {
                 Ok(signer) => signer,
@@ -1294,8 +1329,9 @@ impl Requests {
         let id = request.id.clone();
         let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
         let history = Arc::clone(history);
+        let followups = Arc::clone(followups);
         let task = tokio::spawn(async move {
-            if let Some(signer) = signer {
+            if let Some(signer) = &signer {
                 // Who signed it, on the record before it runs: Console's actor
                 // isn't signed, the signature is.
                 let record = Call::AuditAppend {
@@ -1311,7 +1347,9 @@ impl Requests {
                     warn!("a signed command's signer wasn't audited: {e}");
                 }
             }
-            let answer = answer(request, call, &policy, &privd, &history).await;
+            let signer = signer.map(|signer| signer.id);
+            let stores = (&history, &followups);
+            let answer = answer(request, call, &policy, &privd, stores, signer).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
         });
@@ -1360,19 +1398,21 @@ async fn act_on_container(
     ipc::call_within(privd, call, limit.max(docker::ACTION_LIMIT)).await
 }
 
-/// Runs one request within its deadline.
+/// Runs one request within its deadline. `signer` is the trusted key that
+/// signed it, where the machine required one.
 async fn answer(
     request: Request,
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
-    history: &Arc<History>,
+    stores: (&Arc<History>, &Arc<FollowUps>),
+    signer: Option<String>,
 ) -> Response {
     let limit =
         Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
     match timeout(
         limit,
-        execute(&request, call, policy, privd, history, limit),
+        execute(&request, call, policy, privd, stores, signer, limit),
     )
     .await
     {
@@ -1388,12 +1428,14 @@ async fn answer(
 
 /// Checks the policy, then runs the operation. Every operation needs an arm
 /// here, so a new one doesn't compile until it's handled.
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     request: &Request,
     call: ops::Call,
     policy: &PolicyState,
     privd: &Path,
-    history: &Arc<History>,
+    (history, followups): (&Arc<History>, &Arc<FollowUps>),
+    signer: Option<String>,
     limit: Duration,
 ) -> Result<serde_json::Value, CallError> {
     let summary = serde_json::json!({ "id": request.id, "op": request.op, "actor": request.actor });
@@ -1489,6 +1531,54 @@ async fn execute(
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
         }
+        // Follow-ups (D121): set up, answered and ended here; each step runs
+        // later through privd, which checks the policy again and audits it.
+        ops::Call::FollowUpStart(plan) => {
+            let record = serde_json::json!({ "request": summary, "followup": plan.id });
+            audit(privd, "request.allowed", record).await;
+            let actor = request.actor.clone();
+            let started = followups.start(plan, actor, signer, policy).await?;
+            serde_json::to_value(started).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpChange(plan) => {
+            let record = serde_json::json!({ "request": summary, "followup": plan.id });
+            audit(privd, "request.allowed", record).await;
+            let actor = request.actor.clone();
+            let changed = followups.change(plan, actor, signer, policy).await?;
+            serde_json::to_value(changed).map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpApprove(step) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.approve(&step.id, step.step).await?;
+            serde_json::to_value(FollowUpRef { id: step.id })
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpSkip(step) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.skip(&step.id, step.step).await?;
+            serde_json::to_value(FollowUpRef { id: step.id })
+                .map_err(|e| CallError::internal(e.to_string()))
+        }
+        ops::Call::FollowUpCancel(target) => {
+            audit(
+                privd,
+                "request.allowed",
+                serde_json::json!({ "request": summary }),
+            )
+            .await;
+            followups.cancel(&target.id).await?;
+            serde_json::to_value(target).map_err(|e| CallError::internal(e.to_string()))
+        }
         ops::Call::HistoryClear(_) => {
             audit(
                 privd,
@@ -1501,6 +1591,14 @@ async fn execute(
                 .await
                 .map_err(|e| CallError::internal(e.to_string()))??;
             serde_json::to_value(store).map_err(|e| CallError::internal(e.to_string()))
+        }
+        // A magic packet needs no root, so the agent sends it (D123).
+        ops::Call::PowerWake(target) => {
+            let record =
+                serde_json::json!({ "request": summary, "mac": target.mac, "reach": target.reach });
+            audit(privd, "request.allowed", record).await;
+            serde_json::to_value(wake(target).await?)
+                .map_err(|e| CallError::internal(e.to_string()))
         }
         // privd checks the policy again and audits its own decision.
         ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,
@@ -1726,9 +1824,72 @@ async fn physical_disks() -> Result<Vec<String>, CallError> {
 }
 
 /// What the machine can do about power. Reading it needs no root (angle 10).
+/// Where it's reached and the networks it can wake others on come from one
+/// network reading (D123).
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 async fn power_info() -> Result<PowerInfo, HostError> {
-    cntrl_host::power::info().await
+    let mut info = cntrl_host::power::info().await?;
+    let reading = network_reading().await?;
+    cntrl_host::wake::describe(&mut info, &reading);
+    Ok(info)
+}
+
+async fn network_reading() -> Result<cntrl_host::network::NetworkReading, HostError> {
+    tokio::task::spawn_blocking(|| cntrl_host::network::NetworkReader::default().read())
+        .await
+        .map_err(|e| HostError::Failed(e.to_string()))
+}
+
+/// At most this many wake-ups a minute, so a burst of requests can't fill
+/// the network with broadcasts.
+const WAKES_PER_MINUTE: usize = 10;
+
+static WAKES: std::sync::Mutex<Vec<Instant>> = std::sync::Mutex::new(Vec::new());
+
+/// Sends the magic packet that wakes another machine, from this machine's
+/// addresses on the networks it was last reached on (D123).
+async fn wake(target: Wake) -> Result<WakeSent, CallError> {
+    let mac = cntrl_host::wake::parse_mac(&target.mac).ok_or_else(|| {
+        CallError::new(
+            ErrorCode::BadRequest,
+            format!("{} isn't a network card's hardware address", target.mac),
+        )
+    })?;
+    // Without where it was last reached there's no network to pick, and the
+    // packet never goes out on every one this machine is on.
+    if target.reach.is_empty() {
+        return Err(CallError::new(
+            ErrorCode::BadRequest,
+            "it doesn't say where the machine was last reached",
+        ));
+    }
+    let reading = network_reading().await?;
+    let own = cntrl_host::wake::lan(&reading);
+    let from = cntrl_host::wake::senders(&own, &target.reach);
+    if from.is_empty() {
+        let reason = if own.is_empty() {
+            "this machine has no local network to send it on"
+        } else {
+            "this machine isn't on the network the other was last seen on"
+        };
+        return Err(CallError::new(ErrorCode::NotFound, reason));
+    }
+    {
+        let mut sent = WAKES.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        sent.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        if sent.len() >= WAKES_PER_MINUTE {
+            return Err(CallError::new(
+                ErrorCode::Busy,
+                "it has sent a lot of wake-ups this minute; try again in a minute",
+            ));
+        }
+        sent.push(now);
+    }
+    let sent = tokio::task::spawn_blocking(move || cntrl_host::wake::send(mac, &from))
+        .await
+        .map_err(|e| CallError::internal(e.to_string()))??;
+    Ok(WakeSent { sent })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -1818,6 +1979,7 @@ struct Subscriptions {
     network: Option<watch::Receiver<Option<Arc<NetworkSample>>>>,
     storage: Option<watch::Receiver<Option<Arc<StorageSample>>>>,
     containers: Option<watch::Receiver<Option<Arc<ContainersSample>>>>,
+    followups: Option<watch::Receiver<Option<Arc<FollowUpsSample>>>>,
     open: HashMap<String, Subscription>,
     log_out: logs::Batches,
     log_batches: mpsc::Receiver<(String, LogsBatch)>,
@@ -1834,6 +1996,7 @@ impl Subscriptions {
             network: None,
             storage: None,
             containers: None,
+            followups: None,
             open: HashMap::new(),
             log_out,
             log_batches,
@@ -1879,6 +2042,7 @@ enum Watching {
     Network,
     Storage,
     Containers,
+    FollowUps,
 }
 
 /// The samplers a subscription reads from.
@@ -1888,6 +2052,7 @@ struct Samplers<'a> {
     network: &'a network::Latest,
     storage: &'a storage::Latest,
     containers: &'a containers::Latest,
+    followups: &'a FollowUps,
 }
 
 /// A process table this recent goes to a new subscription at once.
@@ -2031,6 +2196,33 @@ impl Subscriptions {
                     send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
                 }
                 debug!(id = %subscribe.id, every_ms, "storage subscription opened");
+                self.open.insert(subscribe.id, sub);
+            }
+            Topic::FollowUps(_) => {
+                let receiver = self
+                    .followups
+                    .get_or_insert_with(|| samplers.followups.subscribe());
+                let latest = receiver.borrow().clone();
+                send(
+                    ws,
+                    &Frame::Res(Response::ok(
+                        subscribe.id.clone(),
+                        encode(&FollowUpsParams {})?,
+                    )),
+                )
+                .await?;
+                // Every change goes out as it happens: the task publishes on
+                // each tick and when a follow-up moves.
+                let mut sub = Subscription {
+                    topic: Watching::FollowUps,
+                    every_ms: 0,
+                    next_ts: 0,
+                    seq: 0,
+                };
+                if let Some(sample) = latest {
+                    send_event(ws, &subscribe.id, &mut sub, sample.ts, &*sample).await?;
+                }
+                debug!(id = %subscribe.id, "followups subscription opened");
                 self.open.insert(subscribe.id, sub);
             }
             Topic::Containers(params) => {
@@ -2238,6 +2430,13 @@ impl Subscriptions {
         {
             self.containers = None;
         }
+        if !self
+            .open
+            .values()
+            .any(|sub| matches!(sub.topic, Watching::FollowUps))
+        {
+            self.followups = None;
+        }
     }
 
     /// Sends a new sample to every `stats` subscription that's due.
@@ -2360,7 +2559,7 @@ async fn go_away(ws: &mut Ws, goaway: &GoAway, stable: bool) -> End {
 /// Whom the machine trusts to sign commands, as privd reads it (D108).
 /// Without privd's answer, a machine is taken to require signatures it can't
 /// check, so nothing that needs one passes.
-async fn signers_view(privd_socket: &Path) -> signers::View {
+pub(super) async fn signers_view(privd_socket: &Path) -> signers::View {
     let broken = |error: String| signers::View {
         state: SignatureState {
             required: true,
@@ -2955,6 +3154,7 @@ mod tests {
     }
 
     async fn uplink_config(dir: &Path) -> UplinkConfig {
+        let outbox = Arc::new(Outbox::open(dir).await);
         UplinkConfig {
             state_dir: dir.to_path_buf(),
             privd_socket: dir.join("privd.sock"),
@@ -2964,9 +3164,10 @@ mod tests {
             network: Arc::new(network::Latest::new(None)),
             storage: Arc::new(storage::Latest::new(None)),
             containers: Arc::new(containers::Latest::new(None)),
-            outbox: Arc::new(Outbox::open(dir).await),
+            outbox: Arc::clone(&outbox),
             alerts: Arc::new(Alerts::open(dir).await),
             history: Arc::new(History::open(dir)),
+            followups: Arc::new(FollowUps::open(dir, outbox, dir.join("privd.sock")).await),
             signing: Arc::new(signers::Gate::new(dir)),
         }
     }

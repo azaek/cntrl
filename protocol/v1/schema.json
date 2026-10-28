@@ -972,6 +972,11 @@
           "type": "string",
           "const": "alert",
           "description": "A rule the device decides fired or resolved (`records::AlertRecord`)."
+        },
+        {
+          "type": "string",
+          "const": "followup",
+          "description": "Something that happened to a follow-up (`followup::FollowUpRecord`,\nD121). Never dropped when the outbox is full."
         }
       ],
       "description": "What an outbox record holds."
@@ -2094,6 +2099,13 @@
             }
           ],
           "description": "The wired interface a magic packet would wake, where there is one."
+        },
+        "lan": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "The machine's IPv4 addresses on its local networks, from interfaces\nthat are up, leaving out loopback, tunnels and containers' links: the\nnetworks it can send a magic packet on, to wake another machine (D123).\nAgents before 0.1.21 leave it out."
         }
       },
       "required": [
@@ -2196,6 +2208,13 @@
             "null"
           ],
           "description": "Whether it's set to wake the machine; absent where the agent can't\ntell."
+        },
+        "reach": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "Where a magic packet reaches the machine (D123): this interface's IPv4\naddresses, or where it has none, as when it's a bridge's port, those\nof the interface the default route leaves by. Agents before 0.1.21\nleave it out."
         }
       },
       "required": [
@@ -2203,6 +2222,69 @@
         "mac"
       ],
       "description": "Wake-on-LAN on a wired interface."
+    },
+    "LanAddress": {
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": "string",
+          "description": "Such as `eno1`, `vmbr0` or `en0`."
+        },
+        "address": {
+          "type": "string",
+          "description": "Such as `192.168.1.20`."
+        },
+        "prefix": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The prefix length: 24 for a /24."
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterfaceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The interface's kind, so Console can say when a machine was reached\nover Wi-Fi, which a magic packet often doesn't wake; absent where it's\nunknown, and in a wake's `reach`, which needs only where to send."
+        }
+      },
+      "required": [
+        "interface",
+        "address",
+        "prefix"
+      ],
+      "description": "An IPv4 address on a local network."
+    },
+    "InterfaceKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ethernet",
+            "wifi",
+            "loopback",
+            "bridge",
+            "bond",
+            "vlan",
+            "other"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "tunnel",
+          "description": "A VPN or tunnel: WireGuard, `tun`, `utun`, GRE and the like."
+        },
+        {
+          "type": "string",
+          "const": "virtual",
+          "description": "A container's or a virtual machine's link: `veth`, `docker0`, `virbr0`."
+        }
+      ]
     },
     "PowerStarted": {
       "type": "object",
@@ -2215,6 +2297,42 @@
         "action"
       ],
       "description": "What a power action returns: that it has started."
+    },
+    "Wake": {
+      "type": "object",
+      "properties": {
+        "mac": {
+          "type": "string",
+          "description": "The machine to wake, by its wired interface's hardware address, such\nas `d0:11:e5:73:0e:f0`."
+        },
+        "reach": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          },
+          "description": "Where it was last reached, from its own `power.info`: the packet goes\nout only on this machine's networks that hold one of these addresses.\nA wake without them is refused, so it never goes out on every network\nthis machine is on."
+        }
+      },
+      "required": [
+        "mac",
+        "reach"
+      ],
+      "description": "`power.wake`: wakes another machine with a Wake-on-LAN magic packet, sent\nfrom this one to the broadcast address of a network both are on (D123)."
+    },
+    "WakeSent": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LanAddress"
+          }
+        }
+      },
+      "required": [
+        "sent"
+      ],
+      "description": "What `power.wake` returns: this machine's addresses the packet went out\nfrom. It's sent, not received: nothing answers a magic packet."
     },
     "Listeners": {
       "type": "object",
@@ -2658,6 +2776,481 @@
           "description": "A state from a newer engine or agent."
         }
       ]
+    },
+    "Plan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Chosen by Console (`fu_` and a ULID). Starting the same ID again\nanswers with the follow-up already waiting, as a retry after a dropped\nlink does; a different plan under it is refused, and goes through\n`followup.change` instead."
+        },
+        "watch": {
+          "$ref": "#/$defs/Watch"
+        },
+        "finish": {
+          "$ref": "#/$defs/Finish"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Deadline"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "description": "In order. Empty means it only reports that the job is done.",
+          "default": []
+        },
+        "keep_awake": {
+          "type": "boolean",
+          "description": "Keep the machine from sleeping until the follow-up ends; needs\n`power.inhibit`."
+        }
+      },
+      "required": [
+        "id",
+        "watch",
+        "finish"
+      ],
+      "description": "`followup.start`: what to watch, when it's done, what then."
+    },
+    "Watch": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "started": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "app"
+            }
+          },
+          "required": [
+            "kind",
+            "pid",
+            "started"
+          ],
+          "description": "The app a process belongs to: the machine climbs from it to the app's\ntop process ([`job_top`]) and watches that and everything under it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "started": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "process"
+            }
+          },
+          "required": [
+            "kind",
+            "pid",
+            "started"
+          ],
+          "description": "Exactly this process and everything it starts."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "container"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "A container, by ID, its first 12 characters, or name."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "What a follow-up watches."
+    },
+    "Finish": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "exits"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "When the job's top process, or the container, is gone."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "minutes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "cpu": {
+              "type": "number",
+              "format": "double"
+            },
+            "disk": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "quiet"
+            }
+          },
+          "required": [
+            "kind",
+            "minutes",
+            "cpu"
+          ],
+          "description": "When the job has been under every line for `minutes` minutes in a row.\nA minute is busy if its CPU is over `cpu`, or its disk over `disk`;\nwithout `disk`, disk doesn't count. Starting processes alone doesn't\nmake a minute busy, but the CPU of short ones the job ran does."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "When a follow-up's job is done."
+    },
+    "Deadline": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "then": {
+          "$ref": "#/$defs/AtDeadline"
+        }
+      },
+      "required": [
+        "at",
+        "then"
+      ],
+      "description": "A time to stop waiting."
+    },
+    "AtDeadline": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "give_up",
+          "description": "Stop waiting and run nothing."
+        },
+        {
+          "type": "string",
+          "const": "run_steps",
+          "description": "Run the steps as if the job were done."
+        }
+      ],
+      "description": "What happens at the deadline."
+    },
+    "Step": {
+      "type": "object",
+      "properties": {
+        "do": {
+          "$ref": "#/$defs/StepAction",
+          "description": "What it does; `do` on the wire."
+        },
+        "ask": {
+          "type": "boolean",
+          "description": "Wait for someone to approve it (`followup.approve`). Otherwise a step\nthat acts counts down [`COUNTDOWN_SECONDS`] and runs unless skipped."
+        }
+      },
+      "required": [
+        "do"
+      ],
+      "description": "One step, carried out when the job is done."
+    },
+    "StepAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "notify"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "One message, which Console sends when the step's record arrives."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "stop"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Stops the job: its processes, asked to close and forced after a few\nseconds (on Windows they end at once), or the container."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "string"
+            },
+            "user": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "quit_app"
+            }
+          },
+          "required": [
+            "kind",
+            "app"
+          ],
+          "description": "Asks a Mac app to quit, as the Dock asks, so it can save."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unit": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/ServiceScope"
+            },
+            "user": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "action": {
+              "$ref": "#/$defs/StopOrRestart"
+            },
+            "kind": {
+              "type": "string",
+              "const": "service"
+            }
+          },
+          "required": [
+            "kind",
+            "unit",
+            "action"
+          ],
+          "description": "Stops or restarts a service."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "$ref": "#/$defs/StopOrRestart"
+            },
+            "kind": {
+              "type": "string",
+              "const": "container"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "action"
+          ],
+          "description": "Stops or restarts a container."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/PowerAction"
+            },
+            "skip_if_in_use": {
+              "type": "boolean",
+              "description": "Skip it while someone's using the machine, or when it can't tell."
+            },
+            "kind": {
+              "type": "string",
+              "const": "power"
+            }
+          },
+          "required": [
+            "kind",
+            "action"
+          ],
+          "description": "Sleeps, hibernates, shuts down or restarts the machine."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "What a step does."
+    },
+    "StopOrRestart": {
+      "type": "string",
+      "enum": [
+        "stop",
+        "restart",
+        "unknown"
+      ],
+      "description": "Stop or restart."
+    },
+    "Started": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        }
+      },
+      "required": [
+        "id",
+        "scope"
+      ],
+      "description": "`followup.start`'s answer: the follow-up waiting, and what it watches as the\nmachine found it, which is what Console shows."
+    },
+    "Scope": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The top process's name, or the container's."
+        },
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "The top process, for an app or a process."
+        },
+        "started": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "processes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Processes in the job now, the top one included; 0 for a container."
+        }
+      },
+      "required": [
+        "name",
+        "processes"
+      ],
+      "description": "What a follow-up watches."
+    },
+    "StepRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "step"
+      ],
+      "description": "`followup.approve` and `followup.skip`: one step of one follow-up, by its\nplace in the plan's steps, from 0."
+    },
+    "FollowUpRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "description": "`followup.cancel`: one follow-up. Also the answer of approve, skip and\ncancel."
     },
     "StatsParams": {
       "type": "object",
@@ -3498,32 +4091,6 @@
       ],
       "description": "One network interface."
     },
-    "InterfaceKind": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "ethernet",
-            "wifi",
-            "loopback",
-            "bridge",
-            "bond",
-            "vlan",
-            "other"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "tunnel",
-          "description": "A VPN or tunnel: WireGuard, `tun`, `utun`, GRE and the like."
-        },
-        {
-          "type": "string",
-          "const": "virtual",
-          "description": "A container's or a virtual machine's link: `veth`, `docker0`, `virbr0`."
-        }
-      ]
-    },
     "InterfaceAddress": {
       "type": "object",
       "properties": {
@@ -4069,6 +4636,251 @@
       ],
       "description": "Bytes per second."
     },
+    "FollowUpsParams": {
+      "type": "object",
+      "description": "The `followups` topic's parameters: none."
+    },
+    "FollowUpsSample": {
+      "type": "object",
+      "properties": {
+        "ts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "followups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FollowUpState"
+          }
+        }
+      },
+      "required": [
+        "ts",
+        "followups"
+      ],
+      "description": "The `followups` topic: every follow-up the machine has, with where each one\nis, sent as a subscription opens and every 15 s while it's open."
+    },
+    "FollowUpState": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "since": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When it was set up."
+        },
+        "stage": {
+          "$ref": "#/$defs/Stage"
+        },
+        "minute": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Minute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The minute so far."
+        },
+        "quiet_minutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Whole minutes in a row under every line."
+        },
+        "keeping_awake": {
+          "type": "boolean",
+          "description": "Keeping the machine awake now."
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "since",
+        "stage",
+        "quiet_minutes"
+      ],
+      "description": "One follow-up as it stands."
+    },
+    "Stage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "waiting"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Watching the job."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "asking"
+            }
+          },
+          "required": [
+            "kind",
+            "step"
+          ],
+          "description": "Waiting for someone to approve or skip a step."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "until": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "counting_down"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "until"
+          ],
+          "description": "A step runs at `until` unless someone skips it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "running"
+            }
+          },
+          "required": [
+            "kind",
+            "step"
+          ],
+          "description": "A step is running."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "followups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "waiting_for"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "followups"
+          ],
+          "description": "A power step waits for these follow-ups' jobs to be done before it\ncounts down or asks, since the machine going would end them."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "tries": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "reaching"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "tries"
+          ],
+          "description": "This step's countdown ended while nobody could stop it from Console:\nit counts down again once Console can reach the machine, `tries` of\n[`REACH_TRIES`] so far."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "Where a follow-up is."
+    },
+    "Minute": {
+      "type": "object",
+      "properties": {
+        "cpu": {
+          "type": "number",
+          "format": "double",
+          "description": "From the CPU time the job's processes used over the minute, that of\nthe short ones it ran and waited for included (Linux and macOS keep\nit, Windows doesn't); from the process table's samples where the\nmachine can't read that time."
+        },
+        "disk": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Bytes read and written over the minute, a second; on Linux the short\nprocesses' included. Where the machine can read it."
+        },
+        "busy": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cpu",
+        "busy"
+      ],
+      "description": "A minute's readings of the job, and whether they made it busy."
+    },
     "EnrollRequest": {
       "type": "object",
       "properties": {
@@ -4437,6 +5249,428 @@
         "firing",
         "resolved"
       ]
+    },
+    "FollowUpRecord": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "event": {
+          "$ref": "#/$defs/Event2"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "event"
+      ],
+      "description": "A `followup` outbox record: one thing that happened to a follow-up."
+    },
+    "Event2": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/Scope"
+            },
+            "kind": {
+              "type": "string",
+              "const": "started"
+            }
+          },
+          "required": [
+            "kind",
+            "scope"
+          ],
+          "description": "Set up and watching."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "recount": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "changed"
+            }
+          },
+          "required": [
+            "kind",
+            "recount"
+          ],
+          "description": "Changed while it waited (`followup.change`); `recount` when new lines,\nminutes or finish started the quiet count over."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "why": {
+              "$ref": "#/$defs/DoneWhy"
+            },
+            "kind": {
+              "type": "string",
+              "const": "done"
+            }
+          },
+          "required": [
+            "kind",
+            "why"
+          ],
+          "description": "The job is done, or the deadline came and the steps run anyway."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "asking"
+            }
+          },
+          "required": [
+            "kind",
+            "step"
+          ],
+          "description": "A step waits for someone to approve or skip it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "until": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "counting_down"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "until"
+          ],
+          "description": "A step runs at `until` unless someone skips it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "why": {
+              "$ref": "#/$defs/HeldWhy"
+            },
+            "kind": {
+              "type": "string",
+              "const": "held"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "why"
+          ],
+          "description": "This step's countdown ended while nobody could stop it from Console,\nso the step didn't run: it counts down again once Console can reach\nthe machine."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "followups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "waiting_for"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "followups"
+          ],
+          "description": "A power step waits for these follow-ups' jobs to be done."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "outcome": {
+              "$ref": "#/$defs/Outcome"
+            },
+            "kind": {
+              "type": "string",
+              "const": "step"
+            }
+          },
+          "required": [
+            "kind",
+            "step",
+            "outcome"
+          ],
+          "description": "A step's outcome. A message's step is `ran` when Console should send it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "why": {
+              "$ref": "#/$defs/EndedWhy"
+            },
+            "kind": {
+              "type": "string",
+              "const": "ended"
+            }
+          },
+          "required": [
+            "kind",
+            "why"
+          ],
+          "description": "It's over: nothing more happens to it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "What happened."
+    },
+    "DoneWhy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "exited",
+            "quiet",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "deadline",
+          "description": "The deadline came, and the plan said to run the steps anyway."
+        }
+      ],
+      "description": "Why the job counts as done."
+    },
+    "HeldWhy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "slept",
+          "description": "The machine slept through it, or woke only after it."
+        },
+        {
+          "type": "string",
+          "const": "unreachable",
+          "description": "Console couldn't reach the machine as it ended, or the agent wasn't\nrunning."
+        }
+      ],
+      "description": "Why a step's countdown didn't end in the step running."
+    },
+    "Outcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "processes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0,
+              "description": "Processes it stopped, for a stop."
+            },
+            "kind": {
+              "type": "string",
+              "const": "ran"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "why": {
+              "$ref": "#/$defs/SkippedWhy"
+            },
+            "kind": {
+              "type": "string",
+              "const": "skipped"
+            }
+          },
+          "required": [
+            "kind",
+            "why"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "description": "The machine wouldn't: its policy no longer allows it, or the step's\ntarget is protected."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ],
+      "description": "How a step went."
+    },
+    "SkippedWhy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "skipped",
+          "description": "Someone skipped it."
+        },
+        {
+          "type": "string",
+          "const": "no_answer",
+          "description": "Nobody approved it in time."
+        },
+        {
+          "type": "string",
+          "const": "in_use",
+          "description": "Someone was using the machine."
+        },
+        {
+          "type": "string",
+          "const": "cant_tell",
+          "description": "The machine couldn't tell whether someone was using it."
+        },
+        {
+          "type": "string",
+          "const": "nothing_to_do",
+          "description": "There was nothing left to do: the job had already exited."
+        }
+      ],
+      "description": "Why a step didn't run."
+    },
+    "EndedWhy": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "cancelled",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "completed",
+          "description": "The job was done and every step had its turn."
+        },
+        {
+          "type": "string",
+          "const": "gave_up",
+          "description": "The deadline came, and the plan said to give up."
+        },
+        {
+          "type": "string",
+          "const": "restarted",
+          "description": "The machine restarted while it waited, so nothing ran."
+        },
+        {
+          "type": "string",
+          "const": "gone",
+          "description": "What it watched was gone before the follow-up started properly, as\nwhen a PID was reused."
+        },
+        {
+          "type": "string",
+          "const": "unreachable",
+          "description": "A countdown ended while nobody could stop it from Console, and Console\nstill couldn't reach the machine after [`REACH_TRIES`] tries, so nothing\nmore ran: Console says \"Machine not reachable\"."
+        }
+      ],
+      "description": "Why a follow-up ended."
     }
   }
 }

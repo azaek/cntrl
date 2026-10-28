@@ -26,7 +26,7 @@ procfs-core = { version = "0.18", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 # Power actions run a command or a D-Bus call from async code (angle 10).
 tokio = { version = "1", default-features = false, features = ["process", "rt"] }
-rustix = { version = "1.1", default-features = false, features = ["std", "process", "event", "fs"] }
+rustix = { version = "1.1", default-features = false, features = ["std", "process", "event", "fs", "param"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user"] }
 
 # Disks, network and temperatures on macOS (angle 09); diskutil's and
@@ -34,6 +34,9 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "u
 [target.'cfg(target_os = "macos")'.dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system", "user", "disk", "network", "component"] }
 plist = { version = "1", default-features = false }
+# A process's running totals for follow-ups (D121), from proc_pid_rusage.
+libc = "0.2"
+
 
 # systemd over D-Bus, for services; interfaces' addresses for the Network
 # tab (angle 13), which sysinfo reads with getifaddrs.

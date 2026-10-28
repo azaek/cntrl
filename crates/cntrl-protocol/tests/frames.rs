@@ -9,11 +9,14 @@ use std::path::PathBuf;
 use cntrl_protocol::containers::{
     ContainerHealth, ContainerJob, ContainerState, ContainersSample, EngineKind,
 };
+use cntrl_protocol::followup::{
+    AtDeadline, FollowUpRecord, FollowUpsSample, Stage, Started, StepAction, Watch,
+};
 use cntrl_protocol::frame::RecordKind;
 use cntrl_protocol::history::{History, HistoryKeep, HistoryMetric, HistoryParams, HistoryStore};
 use cntrl_protocol::network::{InterfaceKind, Listeners, NetworkSample, SocketProtocol};
 use cntrl_protocol::ops::{Call, OPS, TOPICS, Topic};
-use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo};
+use cntrl_protocol::power::{DiskUnlock, PowerAction, PowerInfo, Wake, WakeSent};
 use cntrl_protocol::process::{ProcessOwner, ProcessesParams, ProcessesSample};
 use cntrl_protocol::records::{AlertRecord, AuditCheckpoint, StatsRecord};
 use cntrl_protocol::service::{ServiceList, ServiceState};
@@ -59,6 +62,9 @@ fn golden_frames_round_trip() {
                             serde_json::from_value::<AuditCheckpoint>(data).map(drop)
                         }
                         RecordKind::Alert => serde_json::from_value::<AlertRecord>(data).map(drop),
+                        RecordKind::Followup => {
+                            serde_json::from_value::<FollowUpRecord>(data).map(drop)
+                        }
                         RecordKind::Unknown => panic!("{name}: a record of unknown type"),
                     };
                     decoded.unwrap_or_else(|e| panic!("{name}: record {}: {e}", record.seq));
@@ -234,6 +240,37 @@ fn power_info_decodes() {
     assert_eq!(info.unlock_after_restart, Some(DiskUnlock::FileVault));
     assert!(info.sessions[1].remote && info.inhibitors.is_empty());
     assert_eq!(PowerAction::Hibernate.op(), "power.hibernate");
+    // Where a magic packet reaches it, and the networks it can wake others on (D123).
+    let wake = info.wake_on_lan.expect("a wired port");
+    assert_eq!(wake.reach[0].address, "192.168.1.20");
+    assert_eq!(info.lan.len(), 2);
+}
+
+#[test]
+fn a_wake_names_the_machine_and_where_it_was_reached() {
+    let text = fs::read_to_string(frames_dir().join("req-power-wake.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-power-wake.json isn't a request");
+    };
+    let Call::PowerWake(wake) = Call::decode(&request.op, request.data).expect("decodes") else {
+        panic!("power.wake isn't PowerWake");
+    };
+    assert_eq!(wake.mac, "a8:a1:59:12:34:56");
+    assert_eq!(
+        (wake.reach[0].address.as_str(), wake.reach[0].prefix),
+        ("192.168.1.30", 24)
+    );
+    // Only where to send it: the kind of interface is the machine's to report, not the sender's to use.
+    assert_eq!(wake.reach[0].kind, None);
+    let sent: WakeSent = serde_json::from_value(data_of("res-power-wake.json")).expect("sent");
+    assert_eq!(sent.sent[0].interface, "vmbr0");
+    // A wake that doesn't say where the machine was isn't a wake: it would go out on every network.
+    assert!(serde_json::from_value::<Wake>(json!({"mac": "a8:a1:59:12:34:56"})).is_err());
+    // Each address says its interface's kind, so Console can tell a machine reached over Wi-Fi.
+    let info: PowerInfo = serde_json::from_value(data_of("res-power-info.json")).expect("info");
+    let port = info.wake_on_lan.expect("a port");
+    assert_eq!(port.reach[0].kind, Some(InterfaceKind::Ethernet));
+    assert_eq!(info.lan[1].kind, Some(InterfaceKind::Wifi));
 }
 
 /// The data of an event or a successful response in a golden frame.
@@ -333,4 +370,139 @@ fn container_frames_decode() {
     assert_eq!(target.id, "app-web-1");
     let newer: ContainerState = serde_json::from_value(json!("hibernating")).expect("parses");
     assert_eq!(newer, ContainerState::Unknown);
+}
+
+#[test]
+fn followup_frames_decode() {
+    let text = fs::read_to_string(frames_dir().join("req-followup-start.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-followup-start.json isn't a request");
+    };
+    let Call::FollowUpStart(plan) = Call::decode(&request.op, request.data).expect("decodes")
+    else {
+        panic!("followup.start isn't FollowUpStart");
+    };
+    assert_eq!(
+        plan.watch,
+        Watch::App {
+            pid: 4821,
+            started: 1_791_600_000
+        }
+    );
+    assert_eq!(
+        plan.deadline.map(|deadline| deadline.then),
+        Some(AtDeadline::RunSteps)
+    );
+    assert!(plan.steps[1].ask && plan.keep_awake);
+    assert_eq!(
+        plan.steps[3].what,
+        StepAction::Power {
+            action: PowerAction::Hibernate,
+            skip_if_in_use: true
+        }
+    );
+    let started: Started =
+        serde_json::from_value(data_of("res-followup-start.json")).expect("a start");
+    assert_eq!(started.scope.processes, 12);
+    let sample: FollowUpsSample =
+        serde_json::from_value(data_of("evt-followups.json")).expect("a sample");
+    assert_eq!(
+        sample.followups[0].stage,
+        Stage::CountingDown {
+            step: 3,
+            until: 1_791_621_060_000
+        }
+    );
+    assert_eq!(
+        sample.followups[1]
+            .minute
+            .as_ref()
+            .map(|minute| minute.busy),
+        Some(true)
+    );
+    // A step a newer Console invents reads as unknown, which the agent refuses.
+    let newer: StepAction =
+        serde_json::from_value(json!({"kind": "dim_the_lights"})).expect("parses");
+    assert_eq!(newer, StepAction::Unknown);
+    let record: FollowUpRecord = serde_json::from_value(json!({
+        "id": "fu_x", "at": 1, "event": {"kind": "ended", "why": "restarted"}
+    }))
+    .expect("a record");
+    assert!(matches!(
+        record.event,
+        cntrl_protocol::followup::Event::Ended { .. }
+    ));
+}
+
+#[test]
+fn a_change_holds_a_whole_plan_and_the_sleep_records_decode() {
+    let text = fs::read_to_string(frames_dir().join("req-followup-change.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-followup-change.json isn't a request");
+    };
+    let Call::FollowUpChange(plan) = Call::decode(&request.op, request.data).expect("decodes")
+    else {
+        panic!("followup.change isn't FollowUpChange");
+    };
+    assert_eq!(plan.id, "fu_01m5followup00000000000000");
+    assert!(plan.steps[1].ask && !plan.keep_awake);
+    let sample: FollowUpsSample =
+        serde_json::from_value(data_of("evt-followups-holding.json")).expect("a sample");
+    assert_eq!(
+        sample.followups[0].stage,
+        Stage::WaitingFor {
+            step: 1,
+            followups: vec!["fu_01m5followupcontainer000000".to_owned()]
+        }
+    );
+    assert_eq!(
+        sample.followups[1].stage,
+        Stage::Reaching { step: 0, tries: 2 }
+    );
+    let text = fs::read_to_string(frames_dir().join("rec-followup-held.json")).expect("read");
+    let Frame::Rec(rec) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("rec-followup-held.json isn't records");
+    };
+    let events: Vec<cntrl_protocol::followup::Event> = rec
+        .recs
+        .iter()
+        .map(|record| {
+            serde_json::from_value::<FollowUpRecord>(record.data.clone())
+                .expect("a record")
+                .event
+        })
+        .collect();
+    assert_eq!(
+        events.first(),
+        Some(&cntrl_protocol::followup::Event::Changed { recount: true })
+    );
+    assert!(events.contains(&cntrl_protocol::followup::Event::Held {
+        step: 0,
+        why: cntrl_protocol::followup::HeldWhy::Unreachable
+    }));
+    assert_eq!(
+        events.last(),
+        Some(&cntrl_protocol::followup::Event::Ended {
+            why: cntrl_protocol::followup::EndedWhy::Unreachable
+        })
+    );
+}
+
+#[test]
+fn followups_are_signed_as_they_start_and_never_to_stop() {
+    let signed = |name: &str| {
+        OPS.iter()
+            .find(|info| info.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .needs_signature()
+    };
+    assert!(signed("followup.start"));
+    assert!(signed("followup.change"));
+    assert!(signed("followup.approve"));
+    assert!(!signed("followup.skip"));
+    assert!(!signed("followup.cancel"));
+    // The rest still follow their capability.
+    assert!(signed("service.restart"));
+    assert!(!signed("system.info"));
+    assert!(TOPICS.iter().all(|info| !info.needs_signature()));
 }

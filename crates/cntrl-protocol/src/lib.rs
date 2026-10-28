@@ -10,6 +10,7 @@ pub mod checks;
 pub mod codes;
 pub mod containers;
 pub mod enroll;
+pub mod followup;
 pub mod frame;
 pub mod history;
 pub mod logs;
@@ -28,7 +29,7 @@ pub mod system;
 pub use capability::{CAPABILITIES, MONITOR_ONLY};
 pub use codes::{ErrorCode, close};
 pub use frame::Frame;
-pub use registry::{DecodeError, OpInfo, TopicInfo};
+pub use registry::{DecodeError, OpInfo, Signed, TopicInfo};
 #[cfg(feature = "schema")]
 pub use registry::{OpSchema, TopicSchema};
 
