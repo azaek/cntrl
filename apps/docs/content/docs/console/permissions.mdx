@@ -96,4 +96,4 @@ mode = "notify"
 
 The agent only trusts a file that belongs to root (Administrators or SYSTEM on Windows) and that nobody else can write. If the file is invalid, or someone else can write it, the agent allows Console nothing, not even reading, until it's fixed. `cntrl policy check` says whether the file is valid.
 
-Leave `[update]` as it is. It's for agent updates that Console starts, which aren't built yet.
+`[update]` with `mode = "off"` refuses [updates from Console](/docs/console/update-and-remove#from-console) even where `agent.update` is allowed. Otherwise leave it at `notify`.

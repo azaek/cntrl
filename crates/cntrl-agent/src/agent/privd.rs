@@ -825,8 +825,15 @@ async fn agent_update(
     const OP: &str = "agent.update";
     let from = env!("CARGO_PKG_VERSION");
     let request = json!({ "id": id, "op": OP, "from": from, "to": version, "actor": actor });
-    if !policy::load(&state.policy_path, state.owner).allows(OP) {
-        let reason = format!("the device policy doesn't allow {OP}");
+    let policy = policy::load(&state.policy_path, state.owner);
+    // `[update] mode = "off"` turns updates off, whatever the allow list says.
+    let off = matches!(&policy, policy::PolicyState::Valid { policy } if policy.update == policy::UpdateMode::Off);
+    if !policy.allows(OP) || off {
+        let reason = if off {
+            "the device policy turns agent updates off".to_owned()
+        } else {
+            format!("the device policy doesn't allow {OP}")
+        };
         audit(
             &state,
             "request.denied",
