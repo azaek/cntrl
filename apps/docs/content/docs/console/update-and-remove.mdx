@@ -20,6 +20,24 @@ The agent asks Console which release is current, then checks that release's sign
 
 You can also run a new command from **Add device** on the machine. On a machine that's already in your organization, it updates the agent when the release is newer, and otherwise makes sure it's running.
 
+### From Console
+
+From agent 0.1.22, Console can update the agent for you. Allow it once, on the machine:
+
+```bash
+sudo cntrl policy modify --allow agent.update
+```
+
+On Windows, run it without `sudo` in PowerShell opened as administrator.
+
+When a newer release is out, the device's Overview and its **Actions** menu have **Update**. Owners and admins can update, while the machine is online. Where the machine [requires signed commands](/docs/console/signed-commands), the update is signed too.
+
+The machine does the work, as `cntrl update` does: it fetches the release Console names, checks it with the release key built into the agent and the download's size and SHA-256, and refuses anything that isn't newer than itself. Then it installs it and restarts the agent, and Console follows it until it's back on the new version.
+
+If the new version doesn't connect within two minutes, the machine puts the old one back on its own, and Console says so. What happened is in the machine's audit log and in `update.log`: `/var/log/cntrl/update.log`, or `C:\ProgramData\cntrl\logs\update.log` on Windows.
+
+Console only ever names a release, never where to get it, so even someone in control of Console can't install anything on the machine but a genuine agent newer than its own.
+
 ## Move a device to another organization
 
 A machine moves from the machine itself, never from Console. Run the other organization's **Add device** command on it. The installer sees the machine is in another organization and asks on the terminal before moving it.
