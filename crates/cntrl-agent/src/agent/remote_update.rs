@@ -11,6 +11,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
@@ -34,6 +35,8 @@ const RUNNING_FOR: Duration = Duration::from_secs(20 * 60);
 const BACK_WITHIN: Duration = Duration::from_secs(120);
 /// The job's file in the log directory.
 const LOG: &str = "update.log";
+/// Where the job writes its lines, once it knows.
+static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
 
 #[cfg(unix)]
 const AGENT: &str = "cntrl-agent";
@@ -211,11 +214,13 @@ fn job(work: &Path, from: &str, to: &str) -> (PathBuf, Vec<String>) {
 }
 
 /// On Linux, a transient unit: outside both services' units, and outside
-/// privd's sandbox, which can't write where the agent is installed.
+/// privd's sandbox, which can't write where the agent is installed. The job
+/// writes its own lines to `update.log`; the installers' go to the journal
+/// (`journalctl -u cntrl-update`), since appending a unit's output to a file
+/// needs systemd 240.
 #[cfg(target_os = "linux")]
-fn launch(work: &Path, from: &str, to: &str, logs: &Path) -> Result<(), String> {
+fn launch(work: &Path, from: &str, to: &str, _logs: &Path) -> Result<(), String> {
     let (exe, args) = job(work, from, to);
-    let log = logs.join(LOG);
     let status = Command::new("systemd-run")
         .args([
             "--unit",
@@ -225,11 +230,6 @@ fn launch(work: &Path, from: &str, to: &str, logs: &Path) -> Result<(), String> 
             "--quiet",
         ])
         .arg("--description=cntrl agent update")
-        .arg(format!(
-            "--property=StandardOutput=append:{}",
-            log.display()
-        ))
-        .arg(format!("--property=StandardError=append:{}", log.display()))
         .arg(&exe)
         .args(&args)
         .status()
@@ -331,6 +331,7 @@ fn launch(_work: &Path, _from: &str, _to: &str, _logs: &Path) -> Result<(), Stri
 /// the new agent to come back connected, and puts the old one back when it
 /// doesn't. Its lines and the installers' go to `update.log`.
 pub fn apply(config: &Config, work: &Path, from: &str, to: &str) -> ExitCode {
+    let _ = LOG_FILE.set(config.paths.logs.join(LOG));
     line(&format!("updating the agent from {from} to {to}"));
     // privd's answer reaches Console before the installer stops the agent.
     std::thread::sleep(Duration::from_secs(2));
@@ -442,14 +443,24 @@ fn finish(work: &Path) {
     }
 }
 
-/// One line of the job's log, with when.
+/// One line of the job's log, with when: in `update.log`, or where it can't
+/// be opened, on standard output.
 fn line(text: &str) {
     let seconds = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
-    let mut out = std::io::stdout();
-    let _ = writeln!(out, "{} {text}", utc(seconds));
-    let _ = out.flush();
+    let text = format!("{} {text}\n", utc(seconds));
+    let file = LOG_FILE.get().and_then(|path| {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+    });
+    match file {
+        Some(mut file) => drop(file.write_all(text.as_bytes())),
+        None => drop(std::io::stdout().write_all(text.as_bytes())),
+    }
 }
 
 /// Seconds since 1970 as `2026-11-03T08:15:00Z`: Howard Hinnant's days-to-civil.

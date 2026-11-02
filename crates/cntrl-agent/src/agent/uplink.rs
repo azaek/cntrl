@@ -1706,10 +1706,13 @@ async fn agent_update(
     let call = Call::AgentUpdate {
         request_id: request.id.clone(),
         version: update.version,
-        dir,
+        dir: dir.clone(),
         actor: request.actor.clone(),
     };
-    ipc::call_within(privd, call, Duration::from_secs(60)).await
+    let answer = ipc::call_within(privd, call, Duration::from_secs(60)).await;
+    // privd has its own copy by the time it answers, or won't need one.
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    answer
 }
 
 /// Asks privd to take a power action, which it answers before taking.
