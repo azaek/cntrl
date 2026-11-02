@@ -102,6 +102,17 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor: Option<Actor>,
     },
+    /// Updates the agent to a release the agent fetched into `dir` (D145).
+    /// privd checks the policy itself, copies the release into its own
+    /// directory, checks it again there, audits, starts the update as a job
+    /// of its own and answers before anything restarts.
+    AgentUpdate {
+        request_id: String,
+        version: String,
+        dir: std::path::PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+    },
     /// Stops a process for a request from Console, if it's still the one that
     /// started at `started`. privd checks the policy itself and audits its
     /// decision before acting.
@@ -353,6 +364,12 @@ mod tests {
                 pid: 4211,
                 started: 1_791_000_000,
                 force: false,
+                actor: None,
+            },
+            Call::AgentUpdate {
+                request_id: "req_9".to_owned(),
+                version: "0.1.22".to_owned(),
+                dir: std::path::PathBuf::from("/var/lib/cntrl/update"),
                 actor: None,
             },
             Call::Power {

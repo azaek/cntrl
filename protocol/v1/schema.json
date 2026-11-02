@@ -2334,6 +2334,35 @@
       ],
       "description": "What `power.wake` returns: this machine's addresses the packet went out\nfrom. It's sent, not received: nothing answers a magic packet."
     },
+    "Update": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "The release, such as `0.1.22`: a version newer than the agent's own."
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "description": "`agent.update`: install this release of the agent."
+    },
+    "UpdateStarted": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "description": "What `agent.update` returns: that the update has started, from which\nversion to which. Done is the next hello carrying `to`."
+    },
     "Listeners": {
       "type": "object",
       "properties": {

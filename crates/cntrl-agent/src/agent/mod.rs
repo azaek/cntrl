@@ -34,6 +34,7 @@ mod presence;
 mod privd;
 mod processes;
 mod redact;
+mod remote_update;
 mod say;
 mod service;
 mod signers;
@@ -92,6 +93,7 @@ pub fn main() -> ExitCode {
             replace,
         } => client::run_enroll(&config, token_file.as_deref(), replace),
         Command::Update { check, force } => update::run(&config, check, force),
+        Command::UpdateApply { work, from, to } => remote_update::apply(&config, &work, &from, &to),
         Command::Pause { reason } => client::pause(&config, reason),
         Command::Resume => client::resume(&config),
         Command::Config(ConfigCommand::Check) => {

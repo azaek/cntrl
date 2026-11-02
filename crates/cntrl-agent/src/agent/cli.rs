@@ -106,6 +106,21 @@ pub enum Command {
         #[arg(long, hide = true)]
         wait: bool,
     },
+    /// The job privd starts when Console updates the agent (D145): installs
+    /// the release privd checked, waits for the new agent to come back
+    /// connected, and puts the old one back when it doesn't. Not for people.
+    #[command(hide = true)]
+    UpdateApply {
+        /// privd's directory for the update, with the release and the agent set aside.
+        #[arg(long)]
+        work: PathBuf,
+        /// The version installed before.
+        #[arg(long)]
+        from: String,
+        /// The release to install.
+        #[arg(long)]
+        to: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

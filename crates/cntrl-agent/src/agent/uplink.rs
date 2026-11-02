@@ -1203,9 +1203,13 @@ async fn handle(ws: &mut Ws, json: &str, stable: bool, session: &mut Session<'_>
             let privd = &session.config.privd_socket;
             let stores = (&session.config.history, &session.config.followups);
             let signing = (&*session.config.signing, session.device_id.as_str());
-            session
-                .requests
-                .start(request, &session.policy, privd, stores, signing)?
+            session.requests.start(
+                request,
+                &session.policy,
+                (privd, &session.config.state_dir),
+                stores,
+                signing,
+            )?
         }
         Frame::Cancel(cancel) => session.requests.cancel(&cancel.id)?,
         Frame::Ack(ack) => return session.acked(ws, ack.upto).await.err(),
@@ -1281,7 +1285,7 @@ impl Requests {
         &mut self,
         request: Request,
         policy: &Arc<PolicyState>,
-        privd: &Path,
+        (privd, state_dir): (&Path, &Path),
         (history, followups): (&Arc<History>, &Arc<FollowUps>),
         (signing, device_id): (&signers::Gate, &str),
     ) -> Option<Response> {
@@ -1328,6 +1332,7 @@ impl Requests {
         };
         let id = request.id.clone();
         let (answers, policy, privd) = (self.answers.clone(), Arc::clone(policy), privd.to_owned());
+        let state_dir = state_dir.to_owned();
         let history = Arc::clone(history);
         let followups = Arc::clone(followups);
         let task = tokio::spawn(async move {
@@ -1349,7 +1354,7 @@ impl Requests {
             }
             let signer = signer.map(|signer| signer.id);
             let stores = (&history, &followups);
-            let answer = answer(request, call, &policy, &privd, stores, signer).await;
+            let answer = answer(request, call, &policy, (&privd, &state_dir), stores, signer).await;
             // A closed channel means the session ended; nobody is waiting.
             let _ = answers.send(answer).await;
         });
@@ -1404,7 +1409,7 @@ async fn answer(
     request: Request,
     call: ops::Call,
     policy: &PolicyState,
-    privd: &Path,
+    places: (&Path, &Path),
     stores: (&Arc<History>, &Arc<FollowUps>),
     signer: Option<String>,
 ) -> Response {
@@ -1412,7 +1417,7 @@ async fn answer(
         Duration::from_millis(u64::from(request.deadline_ms)).clamp(DEADLINE_MIN, DEADLINE_MAX);
     match timeout(
         limit,
-        execute(&request, call, policy, privd, stores, signer, limit),
+        execute(&request, call, policy, places, stores, signer, limit),
     )
     .await
     {
@@ -1433,7 +1438,7 @@ async fn execute(
     request: &Request,
     call: ops::Call,
     policy: &PolicyState,
-    privd: &Path,
+    (privd, state_dir): (&Path, &Path),
     (history, followups): (&Arc<History>, &Arc<FollowUps>),
     signer: Option<String>,
     limit: Duration,
@@ -1600,6 +1605,9 @@ async fn execute(
             serde_json::to_value(wake(target).await?)
                 .map_err(|e| CallError::internal(e.to_string()))
         }
+        // The agent fetches and checks the release; privd checks it again,
+        // audits, and starts the update (D145).
+        ops::Call::AgentUpdate(update) => agent_update(request, update, privd, state_dir).await,
         // privd checks the policy again and audits its own decision.
         ops::Call::PowerReboot(_) => power(request, PowerAction::Reboot, privd, limit).await,
         ops::Call::PowerPoweroff(_) => power(request, PowerAction::Poweroff, privd, limit).await,
@@ -1671,6 +1679,37 @@ async fn act_on_service(
         actor: request.actor.clone(),
     };
     ipc::call_within(privd, call, limit).await
+}
+
+/// Fetches the release Console named into the agent's state directory and
+/// checks it, then asks privd to install it (D145).
+async fn agent_update(
+    request: &Request,
+    update: cntrl_protocol::update::Update,
+    privd: &Path,
+    state_dir: &Path,
+) -> Result<serde_json::Value, CallError> {
+    let from = env!("CARGO_PKG_VERSION");
+    if !super::remote_update::valid_version(&update.version)
+        || !super::update::newer(&update.version, from)
+    {
+        let reason = format!(
+            "{} isn't a release newer than this agent, {from}",
+            update.version
+        );
+        return Err(CallError::new(ErrorCode::BadRequest, reason));
+    }
+    let dir = state_dir.join("update");
+    super::remote_update::download(&update.version, &dir)
+        .await
+        .map_err(|e| CallError::new(ErrorCode::Internal, e))?;
+    let call = Call::AgentUpdate {
+        request_id: request.id.clone(),
+        version: update.version,
+        dir,
+        actor: request.actor.clone(),
+    };
+    ipc::call_within(privd, call, Duration::from_secs(60)).await
 }
 
 /// Asks privd to take a power action, which it answers before taking.

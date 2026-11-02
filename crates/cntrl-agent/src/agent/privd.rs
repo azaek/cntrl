@@ -23,6 +23,7 @@ use cntrl_protocol::logs::LogsParams;
 use cntrl_protocol::power::{PowerAction, PowerStarted};
 use cntrl_protocol::process::ProcessSignalResult;
 use cntrl_protocol::service::{JobResult, ServiceAction, ServiceJob, ServiceScope, ServiceStatus};
+use cntrl_protocol::update::UpdateStarted;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -63,6 +64,11 @@ struct State {
     /// The process table's reader, made on first use; on macOS only privd
     /// sees every process (D24).
     processes: Mutex<Option<cntrl_host::processes::Sampler>>,
+    /// Where an update from Console is checked and set up (D145), in
+    /// privd's own directory.
+    update_work: PathBuf,
+    /// Where the update's job writes its log.
+    logs: PathBuf,
 }
 
 /// privd; `stop` is the service's token, which the service manager may
@@ -116,6 +122,8 @@ async fn serve(config: &Config, stop: CancellationToken) -> Result<(), String> {
         allowed,
         agent,
         processes: Mutex::new(None),
+        update_work: super::remote_update::work_dir(state_dir),
+        logs: config.paths.logs.clone(),
     });
     let activity = Arc::new(Activity::new());
     info!("privd started");
@@ -262,6 +270,12 @@ async fn respond(state: &Arc<State>, call: Call) -> Result<Value, CallError> {
             action,
             actor,
         } => power(state, request_id, action, actor).await,
+        Call::AgentUpdate {
+            request_id,
+            version,
+            dir,
+            actor,
+        } => agent_update(state, request_id, version, dir, actor).await,
         Call::ProcessList => {
             if !policy::load(&state.policy_path, state.owner).allows("processes.read") {
                 let reason = "the device policy doesn't allow processes.read";
@@ -795,6 +809,66 @@ async fn power(
         }
     });
     serde_json::to_value(PowerStarted { action }).map_err(|e| CallError::internal(e.to_string()))
+}
+
+/// Updates the agent to a release the agent fetched (D145): checks the
+/// policy and that it's newer, then has the release checked again from
+/// privd's own copy and the update started as a job of its own, and answers
+/// before anything restarts.
+async fn agent_update(
+    state: Arc<State>,
+    id: String,
+    version: String,
+    dir: PathBuf,
+    actor: Option<Actor>,
+) -> Result<Value, CallError> {
+    const OP: &str = "agent.update";
+    let from = env!("CARGO_PKG_VERSION");
+    let request = json!({ "id": id, "op": OP, "from": from, "to": version, "actor": actor });
+    if !policy::load(&state.policy_path, state.owner).allows(OP) {
+        let reason = format!("the device policy doesn't allow {OP}");
+        audit(
+            &state,
+            "request.denied",
+            json!({ "request": request, "reason": reason }),
+        )
+        .await?;
+        return Err(CallError::new(ErrorCode::PolicyDenied, reason));
+    }
+    if !super::remote_update::valid_version(&version) || !super::update::newer(&version, from) {
+        let reason = format!("{version} isn't a release newer than this agent, {from}");
+        return Err(CallError::new(ErrorCode::BadRequest, reason));
+    }
+    audit(&state, "request.allowed", json!({ "request": request })).await?;
+    let (work, logs, to) = (
+        state.update_work.clone(),
+        state.logs.clone(),
+        version.clone(),
+    );
+    let started = blocking(move || {
+        super::remote_update::start(&work, &dir, from, &to, &logs).map(|()| Value::Null)
+    })
+    .await;
+    if let Err(e) = started {
+        audit(&state, "request.completed", json!({ "id": id, "error": e })).await?;
+        let code = if e.contains("already running") {
+            ErrorCode::Busy
+        } else {
+            ErrorCode::Internal
+        };
+        return Err(CallError::new(code, e));
+    }
+    audit(
+        &state,
+        "request.completed",
+        json!({ "id": id, "result": "started" }),
+    )
+    .await?;
+    serde_json::to_value(UpdateStarted {
+        from: from.to_owned(),
+        to: version,
+    })
+    .map_err(|e| CallError::internal(e.to_string()))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]

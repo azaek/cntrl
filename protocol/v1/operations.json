@@ -183,6 +183,18 @@
       }
     },
     {
+      "name": "agent.update",
+      "capability": "agent.update",
+      "since": 1,
+      "signed": true,
+      "params": {
+        "$ref": "#/$defs/Update"
+      },
+      "result": {
+        "$ref": "#/$defs/UpdateStarted"
+      }
+    },
+    {
       "name": "network.listeners",
       "capability": "network.read",
       "since": 1,
