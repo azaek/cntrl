@@ -1,0 +1,40 @@
+---
+title: Code signing policy
+description: Which cntrl files are signed, who builds and approves them, and what the agent sends over the network.
+icon: BadgeCheck
+---
+
+_Last updated: 9 November 2026._
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+<Callout title="Applied for">
+  cntrl has applied to SignPath Foundation's programme for open-source projects. Until the first signed release, the Windows agent is unsigned: [Add a device](/docs/console/add-a-device) says what that means on Windows.
+</Callout>
+
+## What is signed
+
+- `cntrl-agent.exe`, the cntrl agent for Windows on x64 and ARM64, in each agent release on [GitHub Releases](https://github.com/azaek/cntrl/releases).
+
+Only files built by the [release workflow](https://github.com/azaek/cntrl/blob/main/.github/workflows/release-agent.yml) from a tag in the repository are sent for signing. Nothing built on a developer's machine is signed. Every signed file is built from the source in [github.com/azaek/cntrl](https://github.com/azaek/cntrl), under the MIT licence, and the open-source crates listed in its `Cargo.lock`.
+
+The macOS and Linux builds, and Cntrl Bridge, aren't covered by this policy.
+
+Apart from Windows signing, every agent release carries a manifest of its files' sizes and SHA-256 hashes, signed with cntrl's release key. The install command and the agent's own updates check each download against it, on every platform.
+
+## Team roles
+
+| Role                     | Members                             |
+| ------------------------ | ----------------------------------- |
+| Committers and reviewers | [azaek](https://github.com/azaek) |
+| Approvers                | [azaek](https://github.com/azaek) |
+
+Changes from other contributors reach `main` only through a pull request a committer has reviewed. Each signing request is approved by hand by an approver. Everyone in these roles signs in to GitHub and SignPath with multi-factor authentication.
+
+## Privacy
+
+The agent connects to cntrl's gateway, `gw.cntrl.pw`: that's what it's for. It starts when you run the install command Console gives you, and what it sends is listed in the [privacy policy](/docs/legal/privacy). The only other connection it makes is to GitHub, to download a release when you update it. To stop it, remove the agent: [Update and remove](/docs/console/update-and-remove) shows how.
+
+## Reporting
+
+Report a signed file that looks wrong, or a breach of this policy, to [security@cntrl.pw](mailto:security@cntrl.pw).

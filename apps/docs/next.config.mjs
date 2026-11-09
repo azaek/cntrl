@@ -25,6 +25,11 @@ const config = {
         return [
             { source: "/privacy", destination: "/docs/legal/privacy", permanent: false },
             { source: "/terms", destination: "/docs/legal/terms", permanent: false },
+            {
+                source: "/code-signing",
+                destination: "/docs/legal/code-signing",
+                permanent: false,
+            },
             // The Console docs were the "Cntrl Hub" section before Console launched.
             {
                 source: "/docs/hub/:path*",

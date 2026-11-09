@@ -193,10 +193,26 @@ export default function HomePage() {
                         </div>
                     </div>
                     <div className="min-h-20 flex-1"></div>
-                    <div className="my-4 flex items-center gap-2 sm:self-center lg:self-auto">
-                        <p className="text-fd-muted-foreground/40 text-xs">
-                            Copyright © 2026 Cntrl
-                        </p>
+                    <div className="text-fd-muted-foreground/40 my-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:self-center lg:self-auto">
+                        <p>Copyright © 2026 Cntrl</p>
+                        <Link
+                            href="/docs/legal/privacy"
+                            className="hover:text-fd-muted-foreground"
+                        >
+                            Privacy
+                        </Link>
+                        <Link
+                            href="/docs/legal/terms"
+                            className="hover:text-fd-muted-foreground"
+                        >
+                            Terms
+                        </Link>
+                        <Link
+                            href="/docs/legal/code-signing"
+                            className="hover:text-fd-muted-foreground"
+                        >
+                            Code signing policy
+                        </Link>
                     </div>
                 </div>
             </div>
