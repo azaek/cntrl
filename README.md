@@ -116,10 +116,6 @@ GitHub Actions will automatically build and publish to the appropriate channel.
 - [TanStack](https://tanstack.com/) - Router, Query, Form
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
 
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows agent, `cntrl-agent.exe`, is to be signed from the release workflow once cntrl's application is accepted; until then it's unsigned. What's signed, who approves each release, and what the agent sends over the network: [Code signing policy](https://www.cntrl.pw/docs/legal/code-signing).
-
 ## License
 
 MIT

@@ -2,6 +2,6 @@
     "title": "Legal",
     "description": "Privacy and terms",
     "icon": "Scale",
-    "pages": ["privacy", "terms", "code-signing"],
+    "pages": ["privacy", "terms"],
     "root": true
 }

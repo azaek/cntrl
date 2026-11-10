@@ -207,12 +207,6 @@ export default function HomePage() {
                         >
                             Terms
                         </Link>
-                        <Link
-                            href="/docs/legal/code-signing"
-                            className="hover:text-fd-muted-foreground"
-                        >
-                            Code signing policy
-                        </Link>
                     </div>
                 </div>
             </div>
