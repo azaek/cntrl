@@ -16,12 +16,13 @@ Console sees the machine, but can't restart, stop or change anything on it.
 
 ## Every permission
 
-Console groups them by part of the machine. Each part is off, or at one of its levels, and a level includes the ones before it. Power's actions are separate switches, since allowing a restart isn't allowing a shutdown.
+Console groups them by part of the machine. Each part is off, or at one of its levels, and a level includes the ones before it. Power's actions, and updating the agent, are separate switches, since allowing a restart isn't allowing a shutdown.
 
 | Part       | Level or action | Permission          | Console can                                                    | Out of the box |
 | ---------- | --------------- | ------------------- | -------------------------------------------------------------- | -------------- |
 | System     | See             | `system.read`       | See the system, live stats and charts, interfaces and disks    | Yes            |
 | System     | Manage          | `history.manage`    | Choose how many days of history the machine keeps, and clear it | No             |
+| System     | Update agent    | `agent.update`      | Install a newer release of the agent, signed by cntrl           | No             |
 | Services   | See             | `services.read`     | List the services and their state                              | Yes            |
 | Services   | Manage          | `services.manage`   | Start, stop and restart services, and pick which start at boot | No             |
 | Containers | See             | `containers.read`   | List the containers, what each uses, and their logs            | Yes            |
@@ -39,7 +40,7 @@ Console groups them by part of the machine. Each part is off, or at one of its l
 | Power      | Wake others     | `power.wake`        | Send a wake-up packet to another machine on its network        | No             |
 | Checks     | Run             | `checks.run`        | Check websites and ports from this machine's network           | No             |
 
-`checks.run` is off out of the box because checking addresses from a machine can map the network it's on. See [Checks](/docs/console/checks#from-one-of-your-machines). `power.wake` is off too, since it acts on other machines; see [Wake a machine](/docs/console/wake).
+`checks.run` is off out of the box because checking addresses from a machine can map the network it's on. See [Checks](/docs/console/checks#from-one-of-your-machines). `power.wake` is off too, since it acts on other machines; see [Wake a machine](/docs/console/wake). So is `agent.update`, since it replaces the agent; see [Update the agent from Console](/docs/console/update-and-remove#from-console).
 
 ## Change what Console may do
 
@@ -95,4 +96,4 @@ mode = "notify"
 
 The agent only trusts a file that belongs to root (Administrators or SYSTEM on Windows) and that nobody else can write. If the file is invalid, or someone else can write it, the agent allows Console nothing, not even reading, until it's fixed. `cntrl policy check` says whether the file is valid.
 
-Leave `[update]` as it is. It's for agent updates that Console starts, which aren't built yet.
+`[update]` with `mode = "off"` refuses [updates from Console](/docs/console/update-and-remove#from-console) even where `agent.update` is allowed. Otherwise leave it at `notify`.

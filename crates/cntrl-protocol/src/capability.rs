@@ -29,6 +29,10 @@ pub const CAPABILITIES: &[&str] = &[
     // not in monitor-only, since it acts on other machines. Agents before
     // 0.1.21 don't know it either.
     "power.wake",
+    // Updates the agent to a newer release Console names, signed by the
+    // release key (D145); not in monitor-only, since it replaces the agent.
+    // Agents before 0.1.22 don't know it.
+    "agent.update",
 ];
 
 /// What a device allows when it has no policy file: monitoring only.

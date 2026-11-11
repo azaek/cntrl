@@ -118,6 +118,15 @@ define_ops! {
         capability: "power.wake",
         since: 1,
     },
+    /// Updates the agent to a newer release (D145). The agent fetches it,
+    /// checks it against the release key, answers that it has started, and
+    /// restarts on it; the old one comes back if the new one doesn't connect.
+    AgentUpdate = "agent.update" {
+        params: crate::update::Update,
+        result: crate::update::UpdateStarted,
+        capability: "agent.update",
+        since: 1,
+    },
     /// The ports the machine listens on, each with the process and service
     /// behind it where privd can find them (angle 13).
     NetworkListeners = "network.listeners" {

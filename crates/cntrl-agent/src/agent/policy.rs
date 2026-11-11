@@ -91,9 +91,12 @@ pub enum PolicyState {
 }
 
 impl PolicyState {
-    /// Whether the policy allows `capability`.
+    /// Whether the policy allows `capability`. `[update] mode = "off"`
+    /// refuses updates from Console whatever the allow list says (D145), so
+    /// the hello doesn't offer them either.
     pub fn allows(&self, capability: &str) -> bool {
-        matches!(self, Self::Valid { policy } if policy.allow.contains(capability))
+        matches!(self, Self::Valid { policy } if policy.allow.contains(capability)
+            && !(capability == "agent.update" && policy.update == UpdateMode::Off))
     }
 
     /// Whether service actions must leave `unit` alone. An invalid policy
@@ -624,6 +627,26 @@ mod tests {
             reason: "test".to_owned(),
         };
         assert!(state.protects("nginx"));
+    }
+
+    #[test]
+    fn update_mode_off_refuses_updates_from_console() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let allowed = "version = 1\nallow = [\"system.read\", \"agent.update\"]\n";
+        let path = write_policy(dir.path(), allowed, 0o644);
+        let state = load(&path, own_uid(&path));
+        assert!(state.allows("agent.update"));
+        assert_eq!(state.caps().ops.get("agent.update"), Some(&1));
+        // Off, whatever the allow list says (D145), and the hello doesn't offer it.
+        let path = write_policy(
+            dir.path(),
+            &format!("{allowed}[update]\nmode = \"off\"\n"),
+            0o644,
+        );
+        let state = load(&path, own_uid(&path));
+        assert!(!state.allows("agent.update"));
+        assert!(state.allows("system.read"));
+        assert!(!state.caps().ops.contains_key("agent.update"));
     }
 
     #[test]

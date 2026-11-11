@@ -29,30 +29,30 @@ use super::say::{say, say_err};
 const RELEASE_KEY: &str = include_str!("../../../../packaging/release-key.pub.pem");
 /// The installer as this agent was built, for an archive without one.
 #[cfg(unix)]
-const INSTALLER: &str = include_str!("../../../../packaging/install.sh");
+pub(super) const INSTALLER: &str = include_str!("../../../../packaging/install.sh");
 /// Where releases are published.
-const RELEASES: &str = "https://github.com/azaek/cntrl/releases/download";
+pub(super) const RELEASES: &str = "https://github.com/azaek/cntrl/releases/download";
 /// The largest archive the update downloads; releases are about 5 MB.
-const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
 /// How long connecting may take, which reqwest's connector splits across a
 /// host's addresses. GitHub's download host has four, and a network that
 /// drops one (as the owner's did on 2026-10-05) otherwise holds each request
 /// for the system's own connect timeout, 75 s on macOS, before the next.
-const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+pub(super) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What a release's signed manifest says.
 #[derive(Debug, Deserialize)]
-struct Manifest {
-    version: String,
-    artifacts: BTreeMap<String, Artifact>,
+pub(super) struct Manifest {
+    pub(super) version: String,
+    pub(super) artifacts: BTreeMap<String, Artifact>,
 }
 
 /// One target's archive.
-#[derive(Debug, Deserialize)]
-struct Artifact {
-    url: String,
-    size: u64,
-    sha256: String,
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct Artifact {
+    pub(super) url: String,
+    pub(super) size: u64,
+    pub(super) sha256: String,
 }
 
 /// Runs `cntrl update`: with `check`, only says whether a newer release is
@@ -181,7 +181,7 @@ fn installer_version(script: &str) -> Option<String> {
 }
 
 /// Checks the manifest's signature with the release key.
-fn verify(manifest: &[u8], signature: &[u8]) -> Result<(), String> {
+pub(super) fn verify(manifest: &[u8], signature: &[u8]) -> Result<(), String> {
     let signature = STANDARD
         .decode(String::from_utf8_lossy(signature).trim())
         .map_err(|_| "the release's signature isn't base64".to_owned())?;
@@ -212,7 +212,7 @@ fn release_key() -> Result<[u8; 32], String> {
 }
 
 /// Whether the download is what the manifest describes.
-fn matches(archive: &[u8], artifact: &Artifact) -> Result<(), String> {
+pub(super) fn matches(archive: &[u8], artifact: &Artifact) -> Result<(), String> {
     if archive.len() as u64 != artifact.size {
         return Err(format!(
             "the download is {} bytes; the release says {}",
@@ -230,9 +230,9 @@ fn matches(archive: &[u8], artifact: &Artifact) -> Result<(), String> {
 
 /// The release's archive, as saved.
 #[cfg(unix)]
-const ARCHIVE: &str = "agent.tar.gz";
+pub(super) const ARCHIVE: &str = "agent.tar.gz";
 #[cfg(windows)]
-const ARCHIVE: &str = "agent.zip";
+pub(super) const ARCHIVE: &str = "agent.zip";
 
 /// Where the update works: on Unix a new directory in the temporary one,
 /// which only root reaches; on Windows one in `%ProgramData%\cntrl`, since an
@@ -288,7 +288,7 @@ fn unpack(work: &Path, archive: &Path) -> Result<std::path::PathBuf, String> {
 /// Runs the installer: the archive's own, from 0.1.8, which knows that
 /// release's steps; else the one built into this agent.
 #[cfg(unix)]
-fn install(work: &Path, archive: &Path, reinstall: bool) -> Result<ExitStatus, String> {
+pub(super) fn install(work: &Path, archive: &Path, reinstall: bool) -> Result<ExitStatus, String> {
     let unpacked = unpack(work, archive)?;
     let own = unpacked.join("packaging").join("install.sh");
     let installer = if own.is_file() {
@@ -311,7 +311,7 @@ fn install(work: &Path, archive: &Path, reinstall: bool) -> Result<ExitStatus, S
 /// Runs the release's own program to install itself, which stops the
 /// services, replaces the agent and starts them again.
 #[cfg(windows)]
-fn install(work: &Path, archive: &Path, _reinstall: bool) -> Result<ExitStatus, String> {
+pub(super) fn install(work: &Path, archive: &Path, _reinstall: bool) -> Result<ExitStatus, String> {
     let unpacked = unpack(work, archive)?;
     Command::new(unpacked.join("cntrl-agent.exe"))
         .arg("install")
@@ -321,7 +321,7 @@ fn install(work: &Path, archive: &Path, _reinstall: bool) -> Result<ExitStatus, 
 
 /// Downloads `url`, refusing more than `limit` bytes, and shows `progress`
 /// when there is one.
-async fn fetch(
+pub(super) async fn fetch(
     client: &reqwest::Client,
     url: &str,
     limit: u64,
@@ -354,7 +354,7 @@ async fn fetch(
 
 /// A download's progress on a terminal, one line redrawn the way the
 /// installer draws its own: a bar, the share done, and how much of how much.
-struct Progress {
+pub(super) struct Progress {
     total: u64,
     glyphs: (char, char),
     drawn: Option<Instant>,
@@ -434,7 +434,7 @@ fn progress_line(have: u64, total: u64, (full, empty): (char, char)) -> String {
 
 /// The release build for this machine: static musl on Linux, whatever this
 /// binary was built against, as the installer picks.
-fn release_target() -> Result<String, String> {
+pub(super) fn release_target() -> Result<String, String> {
     let arch = match std::env::consts::ARCH {
         arch @ ("x86_64" | "aarch64") => arch,
         other => return Err(format!("there are no releases for {other}")),
@@ -449,7 +449,7 @@ fn release_target() -> Result<String, String> {
 
 /// Whether version `a` is newer than `b`: `1.2.10` over `1.2.9`, and a
 /// release over its own prereleases.
-fn newer(a: &str, b: &str) -> bool {
+pub(super) fn newer(a: &str, b: &str) -> bool {
     fn parts(version: &str) -> (Vec<u64>, Option<&str>) {
         let (core, pre) = match version.split_once('-') {
             Some((core, pre)) => (core, Some(pre)),

@@ -25,6 +25,7 @@ pub mod signers;
 pub mod stats;
 pub mod storage;
 pub mod system;
+pub mod update;
 
 pub use capability::{CAPABILITIES, MONITOR_ONLY};
 pub use codes::{ErrorCode, close};

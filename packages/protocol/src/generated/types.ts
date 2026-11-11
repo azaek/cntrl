@@ -1702,6 +1702,21 @@ export interface Unsubscribe {
     id: string;
 }
 
+/** `agent.update`: install this release of the agent. */
+export interface Update {
+    /** The release, such as `0.1.22`: a version newer than the agent's own. */
+    version: string;
+}
+
+/**
+ * What `agent.update` returns: that the update has started, from which
+ * version to which. Done is the next hello carrying `to`.
+ */
+export interface UpdateStarted {
+    from: string;
+    to: string;
+}
+
 /** A mounted filesystem. */
 export interface Volume {
     /** Where it's mounted, such as `/` or `/mnt/media`. */

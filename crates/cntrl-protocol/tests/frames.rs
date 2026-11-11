@@ -23,6 +23,7 @@ use cntrl_protocol::service::{ServiceList, ServiceState};
 use cntrl_protocol::stats::{SensorKind, StatsSample};
 use cntrl_protocol::storage::{DiskKind, DisksHealth, HealthStatus, StorageSample};
 use cntrl_protocol::system::SystemInfo;
+use cntrl_protocol::update::UpdateStarted;
 use cntrl_protocol::{ErrorCode, Frame};
 use serde_json::{Value, json};
 
@@ -271,6 +272,27 @@ fn a_wake_names_the_machine_and_where_it_was_reached() {
     let port = info.wake_on_lan.expect("a port");
     assert_eq!(port.reach[0].kind, Some(InterfaceKind::Ethernet));
     assert_eq!(info.lan[1].kind, Some(InterfaceKind::Wifi));
+}
+
+#[test]
+fn an_update_names_only_the_release() {
+    let text = fs::read_to_string(frames_dir().join("req-agent-update.json")).expect("read");
+    let Frame::Req(request) = serde_json::from_str::<Frame>(&text).expect("a frame") else {
+        panic!("req-agent-update.json isn't a request");
+    };
+    let Call::AgentUpdate(update) = Call::decode(&request.op, request.data).expect("decodes")
+    else {
+        panic!("agent.update isn't AgentUpdate");
+    };
+    // A version, never a URL or a hash: the agent fetches and checks the release itself (D145).
+    assert_eq!(update.version, "0.1.22");
+    let started: UpdateStarted =
+        serde_json::from_value(data_of("res-agent-update.json")).expect("started");
+    assert_eq!(
+        (started.from.as_str(), started.to.as_str()),
+        ("0.1.21", "0.1.22")
+    );
+    assert!(cntrl_protocol::signers::SIGNED_CAPABILITIES.contains(&"agent.update"));
 }
 
 /// The data of an event or a successful response in a golden frame.
